@@ -1,0 +1,52 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{76A146AC-9428-48E9-A5C9-05C2FD04BF66}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TiYf.Engine.Tools.Tests", "tests\TiYf.Engine.Tools.Tests\TiYf.Engine.Tools.Tests.csproj", "{A4E6BFA5-9E3C-45C4-9D2A-0D48CD6C3F9F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TiYf.Engine.Core", "src\TiYf.Engine.Core\TiYf.Engine.Core.csproj", "{437252A9-125C-401F-BCE4-D5F040D902D2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TiYf.Engine.Sim", "src\TiYf.Engine.Sim\TiYf.Engine.Sim.csproj", "{0DC29F4C-2495-43D2-8C5E-665EADA3AF59}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TiYf.Engine.Sidecar", "src\TiYf.Engine.Sidecar\TiYf.Engine.Sidecar.csproj", "{0BAE7AEC-CD84-4A74-B6AF-653A37ABC640}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{A9CA0FB3-D54D-4DE1-967D-0F62CE8D60E6}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TiYf.Engine.Tests", "tests\TiYf.Engine.Tests\TiYf.Engine.Tests.csproj", "{1E9C14DF-1D4C-4486-A1BE-0C1120D03EFC}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{437252A9-125C-401F-BCE4-D5F040D902D2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{437252A9-125C-401F-BCE4-D5F040D902D2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{437252A9-125C-401F-BCE4-D5F040D902D2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{437252A9-125C-401F-BCE4-D5F040D902D2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0DC29F4C-2495-43D2-8C5E-665EADA3AF59}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0DC29F4C-2495-43D2-8C5E-665EADA3AF59}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0DC29F4C-2495-43D2-8C5E-665EADA3AF59}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0DC29F4C-2495-43D2-8C5E-665EADA3AF59}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0BAE7AEC-CD84-4A74-B6AF-653A37ABC640}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0BAE7AEC-CD84-4A74-B6AF-653A37ABC640}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0BAE7AEC-CD84-4A74-B6AF-653A37ABC640}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0BAE7AEC-CD84-4A74-B6AF-653A37ABC640}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1E9C14DF-1D4C-4486-A1BE-0C1120D03EFC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1E9C14DF-1D4C-4486-A1BE-0C1120D03EFC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1E9C14DF-1D4C-4486-A1BE-0C1120D03EFC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1E9C14DF-1D4C-4486-A1BE-0C1120D03EFC}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{437252A9-125C-401F-BCE4-D5F040D902D2} = {76A146AC-9428-48E9-A5C9-05C2FD04BF66}
+		{0DC29F4C-2495-43D2-8C5E-665EADA3AF59} = {76A146AC-9428-48E9-A5C9-05C2FD04BF66}
+		{0BAE7AEC-CD84-4A74-B6AF-653A37ABC640} = {76A146AC-9428-48E9-A5C9-05C2FD04BF66}
+		{1E9C14DF-1D4C-4486-A1BE-0C1120D03EFC} = {A9CA0FB3-D54D-4DE1-967D-0F62CE8D60E6}
+	EndGlobalSection
+EndGlobal

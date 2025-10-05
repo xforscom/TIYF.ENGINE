@@ -1,0 +1,7 @@
+{
+  "SchemaVersion":1,
+  "RunId":"RUN-DEMO",
+  "InstrumentFile":"sample-instruments.csv",
+  "InputTicksFile":"sample-ticks.csv",
+  "JournalRoot":"journals"
+}
