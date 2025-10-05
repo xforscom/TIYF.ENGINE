@@ -93,7 +93,8 @@ public static class VerifyEngine
                     }
                     else if (evtType == "RISK_PROBE_V1")
                     {
-                        string? inst = TryGet(root, "InstrumentId.Value");
+                                // Accept either nested object (InstrumentId.Value) or flat string InstrumentId
+                                string? inst = TryGet(root, "InstrumentId.Value") ?? TryGet(root, "InstrumentId");
                         string? leverage = TryGet(root, "ProjectedLeverage");
                         string? margin = TryGet(root, "ProjectedMarginUsagePct");
                         string? basket = TryGet(root, "BasketRiskPct");

@@ -121,21 +121,24 @@ public sealed class EngineLoop
 						var marginPct = _riskFormulas.ProjectMarginUsagePct(usedMarginAfter, equity);
 						_openPositions.Add(new PositionInitialRisk(bar.InstrumentId, positionInitialRiskMoney, new Currency("USD")));
 						var basketPct = _basketAggregator.ComputeBasketRiskPct(_openPositions, BasketMode.Base, new Currency("USD"), equity);
-						var probe = new {
-							decision_id = Guid.NewGuid().ToString("N"),
-							instrumentId = bar.InstrumentId.Value,
-							notional_value = notional,
-							equity,
-							used_margin_after_order = usedMarginAfter,
-							projected_leverage = leverage,
-							projected_margin_usage_pct = marginPct,
-							position_initial_risk_money = positionInitialRiskMoney,
-							basket_risk_pct = basketPct,
-							basket_mode = BasketMode.Base.ToString(),
-							schema_version = _schemaVersion,
-							config_hash = _configHash ?? string.Empty
+						// Canonical RISK_PROBE_V1 payload (PascalCase required fields) + extras retained
+						var riskProbe = new {
+							// Required canonical fields for verifier
+							InstrumentId = bar.InstrumentId.Value,
+							ProjectedLeverage = leverage,
+							ProjectedMarginUsagePct = marginPct,
+							BasketRiskPct = basketPct,
+							// Extra diagnostic fields (snake_case preserved as legacy / auxiliary fields)
+							DecisionId = Guid.NewGuid().ToString("N"),
+							NotionalValue = notional,
+							Equity = equity,
+							UsedMarginAfterOrder = usedMarginAfter,
+							PositionInitialRiskMoney = positionInitialRiskMoney,
+							BasketMode = BasketMode.Base.ToString(),
+							SchemaVersion = _schemaVersion,
+							ConfigHash = _configHash ?? string.Empty
 						};
-						var probeJson = JsonSerializer.SerializeToElement(probe);
+						var probeJson = JsonSerializer.SerializeToElement(riskProbe);
 						await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "RISK_PROBE_V1", probeJson), ct);
 					}
 					_onBarEmitted?.Invoke();
