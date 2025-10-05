@@ -10,7 +10,7 @@ public sealed class FileJournalWriter : IJournalWriter
 	private bool _disposed;
 	public string Path { get; }
 
-	public FileJournalWriter(string directory, string runId, string schemaVersion, string configHash)
+	public FileJournalWriter(string directory, string runId, string schemaVersion, string configHash, string? dataVersion = null)
 	{
 		Directory.CreateDirectory(directory);
 		Path = System.IO.Path.Combine(directory, runId, "events.csv");
@@ -20,7 +20,9 @@ public sealed class FileJournalWriter : IJournalWriter
 		_writer = new StreamWriter(new FileStream(Path, FileMode.Append, FileAccess.Write, FileShare.Read), Encoding.UTF8);
 		if (!exists)
 		{
-			_writer.WriteLine($"schema_version={schemaVersion},config_hash={configHash}");
+			var meta = $"schema_version={schemaVersion},config_hash={configHash}";
+			if (!string.IsNullOrWhiteSpace(dataVersion)) meta += $",data_version={dataVersion}";
+			_writer.WriteLine(meta);
 			_writer.WriteLine("sequence,utc_ts,event_type,payload_json");
 			_writer.Flush();
 		}

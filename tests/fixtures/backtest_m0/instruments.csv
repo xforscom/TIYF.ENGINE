@@ -1,0 +1,4 @@
+Symbol,BaseCurrency,QuoteCurrency,PipSize,TickSize,ContractSize,LotStep,PriceDecimals,VolumeDecimals,TradingHours
+EURUSD,EUR,USD,0.0001,0.00005,100000,1000,5,0,24x5
+USDJPY,USD,JPY,0.01,0.005,100000,1000,3,0,24x5
+XAUUSD,XAU,USD,0.10,0.05,100,1,2,0,24x5

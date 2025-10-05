@@ -23,10 +23,16 @@ public static class VerifyEngine
         string? header = reader.ReadLine();
         if (meta == null || header == null) throw new VerifyFatalException("Missing meta/header lines");
         var metaParts = meta.Split(',', StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries);
-        string? schemaVersion = null; string? configHash = null;
+        string? schemaVersion = null; string? configHash = null; string? dataVersion = null;
         foreach (var p in metaParts)
         {
-            var kv = p.Split('='); if (kv.Length==2){ if(kv[0]=="schema_version") schemaVersion=kv[1]; else if(kv[0]=="config_hash") configHash=kv[1]; }
+            var kv = p.Split('=');
+            if (kv.Length==2)
+            {
+                if (kv[0]=="schema_version") schemaVersion=kv[1];
+                else if (kv[0]=="config_hash") configHash=kv[1];
+                else if (kv[0]=="data_version") dataVersion = kv[1]; // tolerant: optional
+            }
         }
         var errors = new List<(string Key,string Reason)>();
         void AddErr(string key,string reason){ if(errors.Count < options.MaxErrors) errors.Add((key,reason)); }

@@ -90,8 +90,29 @@ foreach (var iid in instrumentIds)
 var snapshotPath = Path.Combine(cfg.JournalRoot, cfg.RunId, "bar-keys.snapshot.json");
 var barKeyTracker = BarKeyTrackerPersistence.Load(snapshotPath);
 
-// Journal writer
-await using var journal = new FileJournalWriter(cfg.JournalRoot, cfg.RunId, cfg.SchemaVersion, cfgHash);
+// Compute optional data_version for backtest-m0 fixture (detect by config name or presence of ticks files path pattern)
+string? dataVersion = null;
+try
+{
+    if (raw.RootElement.TryGetProperty("name", out var nameEl) && nameEl.ValueKind == JsonValueKind.String && nameEl.GetString() == "backtest-m0")
+    {
+        var rootProp = raw.RootElement.GetProperty("data").GetProperty("ticks");
+        var paths = new List<string>();
+        if (raw.RootElement.GetProperty("data").TryGetProperty("instrumentsFile", out var instEl) && instEl.ValueKind==JsonValueKind.String)
+            paths.Add(instEl.GetString()!);
+        foreach (var p in rootProp.EnumerateObject()) if (p.Value.ValueKind==JsonValueKind.String) paths.Add(p.Value.GetString()!);
+        // Also include config file itself if we can resolve path (cfg.ConfigPath if available else skip)
+        if (!string.IsNullOrWhiteSpace(configPath)) paths.Add(configPath);
+        // Normalize to repo-relative existing paths only
+        var existing = paths.Where(File.Exists).ToArray();
+        if (existing.Length>0)
+            dataVersion = TiYf.Engine.Core.DataVersion.Compute(existing);
+    }
+}
+catch { /* Non-fatal; omit data_version if any parsing fails */ }
+
+// Journal writer with optional data_version
+await using var journal = new FileJournalWriter(cfg.JournalRoot, cfg.RunId, cfg.SchemaVersion, cfgHash, dataVersion);
 
 // Extract risk config + equity from raw JSON (tolerant: defaults if missing)
 decimal equity = 100_000m; // fallback
