@@ -20,3 +20,7 @@ jobs:
         run: dotnet build --no-restore -warnaserror
       - name: Test
         run: dotnet test --no-build --verbosity normal
+      - name: Generate Journal (Sim)
+        run: dotnet run --project src/TiYf.Engine.Sim -- --config sample-config.json --out journals/CI
+      - name: Verify Journal
+        run: dotnet run --project src/TiYf.Engine.Tools -- verify --file journals/CI/events.csv

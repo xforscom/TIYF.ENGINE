@@ -3,6 +3,7 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Globalization;
+using TiYf.Engine.Tools;
 
 public class VerifyEngineTests
 {
@@ -41,7 +42,7 @@ public class VerifyEngineTests
             Volume = 1000m
         };
         var path = MakeBarJournal(bar);
-    var result = global::VerifyEngine.Run(path, new global::VerifyOptions(50,false,false));
+    var result = VerifyEngine.Run(path, new VerifyOptions(50,false,false));
         Assert.Equal(0, result.ExitCode);
     }
 
@@ -50,7 +51,7 @@ public class VerifyEngineTests
     {
         var path = Path.Combine(Path.GetTempPath(), "verify-"+System.Guid.NewGuid().ToString("N")+"-bad.csv");
         File.WriteAllText(path, "schema_version=1.1.0\nsequence,utc_ts,event_type,payload_json\n1,2025-10-05T10:00:00Z,BAR_V1,{}\n");
-    var result = global::VerifyEngine.Run(path, new global::VerifyOptions(50,false,false));
+    var result = VerifyEngine.Run(path, new VerifyOptions(50,false,false));
         Assert.Equal(1, result.ExitCode);
     }
 
@@ -59,7 +60,7 @@ public class VerifyEngineTests
     {
         var path = Path.Combine(Path.GetTempPath(), "verify-"+System.Guid.NewGuid().ToString("N")+"-badts.csv");
         File.WriteAllText(path, "schema_version=1.1.0,config_hash=HASH\nsequence,utc_ts,event_type,payload_json\n1,2025-10-05T10:00:00+02:00,BAR_V1,{}\n");
-        var result = VerifyEngine.Run(path, new VerifyOptions(50,false,false));
+    var result = VerifyEngine.Run(path, new VerifyOptions(50,false,false));
         Assert.Equal(1, result.ExitCode);
     }
 
@@ -84,7 +85,7 @@ public class VerifyEngineTests
         sb.AppendLine($"1,2025-10-05T10:00:00Z,BAR_V1,\"{barPayload}\"");
         sb.AppendLine($"2,2025-10-05T10:00:00Z,BAR_V1,\"{barPayload}\"");
         File.WriteAllText(path, sb.ToString());
-    var result = global::VerifyEngine.Run(path, new global::VerifyOptions(50,false,true));
+    var result = VerifyEngine.Run(path, new VerifyOptions(50,false,true));
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("duplicate composite key", result.HumanSummary);
     }
@@ -104,7 +105,7 @@ public class VerifyEngineTests
         sb.AppendLine("sequence,utc_ts,event_type,payload_json");
         sb.AppendLine($"1,2025-10-05T10:00:00Z,RISK_PROBE_V1,\"{riskPayload}\"");
         File.WriteAllText(path, sb.ToString());
-    var result = global::VerifyEngine.Run(path, new global::VerifyOptions(50,false,false));
+    var result = VerifyEngine.Run(path, new VerifyOptions(50,false,false));
         Assert.Equal(0, result.ExitCode);
     }
 }

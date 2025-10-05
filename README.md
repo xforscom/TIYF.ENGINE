@@ -39,5 +39,33 @@ Modular monolith trading engine MVP (M0). Focus: deterministic replay, bar build
 - Header includes: `schema_version,config_hash,sequence,utc_ts,event_type,payload_json`
 - Atomic write via temp file + move or fsync flush (platform dependent)
 
+## Verify CLI
+
+Integrity checker for journal files.
+
+Usage (PowerShell):
+
+```powershell
+dotnet run --project src/TiYf.Engine.Tools -- verify --file journals/RUN/events.csv
+```
+
+Options:
+
+- `--json` emit structured JSON result
+- `--max-errors N` cap reported validation issues (default 50)
+- `--report-duplicates` include duplicate composite key findings
+
+Exit codes:
+
+- `0` OK
+- `1` Validation issues found
+- `2` Fatal error (I/O, malformed meta/header, etc.)
+
+Example diff usage (for regression comparison):
+
+```powershell
+dotnet run --project src/TiYf.Engine.Tools -- diff --a journals/BASE/events.csv --b journals/NEW/events.csv --report-duplicates
+```
+
 ## License
 Proprietary – All rights reserved (placeholder). Not for external distribution.
