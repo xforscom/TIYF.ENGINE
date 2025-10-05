@@ -21,6 +21,10 @@ jobs:
       - name: Test
         run: dotnet test --no-build --verbosity normal
       - name: Generate Journal (Sim)
-        run: dotnet run --project src/TiYf.Engine.Sim -- --config sample-config.json --out journals/CI
-      - name: Verify Journal
-        run: dotnet run --project src/TiYf.Engine.Tools -- verify --file journals/CI/events.csv
+        run: dotnet run --project src/TiYf.Engine.Sim -- --config sample-config.json --out journals/CI_A
+      - name: Generate Journal (Sim 2)
+        run: dotnet run --project src/TiYf.Engine.Sim -- --config sample-config.json --out journals/CI_B
+      - name: Verify Journal (Run A)
+        run: dotnet run --project src/TiYf.Engine.Tools -- verify --file journals/CI_A/events.csv
+      - name: Diff Journals (A vs B)
+        run: dotnet run --project src/TiYf.Engine.Tools -- diff --left journals/CI_A/events.csv --right journals/CI_B/events.csv

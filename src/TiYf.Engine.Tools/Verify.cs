@@ -109,7 +109,22 @@ public static class VerifyEngine
                     }
                     else
                     {
-                        AddErr($"line:{lineNum}", $"unsupported event_type {evtType}"); }
+                        // Whitelist alert / scaling informational events (light validation only)
+                        if (evtType is "ALERT_BLOCK_LEVERAGE" or "ALERT_BLOCK_MARGIN" or "ALERT_BLOCK_RISK_CAP" or "ALERT_BLOCK_BASKET" or "INFO_SCALE_TO_FIT")
+                        {
+                            // Ensure basic expected fields exist (DecisionId & InstrumentId) but do not enforce numeric semantics yet
+                            string? inst = TryGet(root, "InstrumentId") ?? TryGet(root, "InstrumentId.Value");
+                            string? decision = TryGet(root, "DecisionId");
+                            if (string.IsNullOrWhiteSpace(inst) || string.IsNullOrWhiteSpace(decision))
+                            {
+                                AddErr($"{evtType}:{tsRaw}", "missing InstrumentId or DecisionId");
+                            }
+                        }
+                        else
+                        {
+                            AddErr($"line:{lineNum}", $"unsupported event_type {evtType}");
+                        }
+                    }
                 }
 
                 int exitCode = errors.Count == 0 ? 0 : 1;

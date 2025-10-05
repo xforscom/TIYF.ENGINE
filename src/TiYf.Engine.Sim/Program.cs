@@ -93,11 +93,52 @@ var barKeyTracker = BarKeyTrackerPersistence.Load(snapshotPath);
 // Journal writer
 await using var journal = new FileJournalWriter(cfg.JournalRoot, cfg.RunId, cfg.SchemaVersion, cfgHash);
 
+// Extract risk config + equity from raw JSON (tolerant: defaults if missing)
+decimal equity = 100_000m; // fallback
+RiskConfig riskConfig = new();
+try
+{
+    if (raw.RootElement.TryGetProperty("equity", out var eqEl) && eqEl.ValueKind == JsonValueKind.Number) equity = eqEl.GetDecimal();
+    if (raw.RootElement.TryGetProperty("risk", out var riskEl) && riskEl.ValueKind == JsonValueKind.Object)
+    {
+        decimal TryNum(string name, decimal fallback) => riskEl.TryGetProperty(name, out var v) && v.ValueKind==JsonValueKind.Number ? v.GetDecimal() : fallback;
+        bool TryBool(string name, bool fallback) => riskEl.TryGetProperty(name, out var v) && v.ValueKind==JsonValueKind.True || v.ValueKind==JsonValueKind.False ? v.GetBoolean() : fallback;
+        string TryStr(string name, string fallback) => riskEl.TryGetProperty(name, out var v) && v.ValueKind==JsonValueKind.String ? v.GetString() ?? fallback : fallback;
+        var buckets = new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
+        if (riskEl.TryGetProperty("instrument_buckets", out var bEl) && bEl.ValueKind==JsonValueKind.Object)
+        {
+            foreach (var p in bEl.EnumerateObject()) if (p.Value.ValueKind==JsonValueKind.String) buckets[p.Name] = p.Value.GetString() ?? string.Empty;
+        }
+        riskConfig = new RiskConfig
+        {
+            RealLeverageCap = TryNum("real_leverage_cap", 20m),
+            MarginUsageCapPct = TryNum("margin_usage_cap_pct", 80m),
+            PerPositionRiskCapPct = TryNum("per_position_risk_cap_pct", 1m),
+            BasketMode = TryStr("basket_mode", "Base"),
+            InstrumentBuckets = buckets,
+            EnableScaleToFit = TryBool("enable_scale_to_fit", false),
+            EnforcementEnabled = TryBool("enforcement_enabled", true),
+            LotStep = TryNum("lot_step", 0.01m)
+        };
+    }
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine($"Warning: failed to parse risk config, using defaults. {ex.Message}");
+}
+
+var riskFormulas = new RiskFormulas();
+var basketAgg = new BasketRiskAggregator();
+var enforcer = new RiskEnforcer(riskFormulas, basketAgg, cfg.SchemaVersion, cfgHash);
+
 var loop = new EngineLoop(clock, builders, barKeyTracker, journal, tickSource, cfg.BarOutputEventType, () =>
 {
     // Persist after each emitted bar (simple, can batch later)
     BarKeyTrackerPersistence.Save(snapshotPath, (InMemoryBarKeyTracker)barKeyTracker, cfg.SchemaVersion, EngineInstanceId);
-}, new RiskFormulas(), new BasketRiskAggregator(), cfgHash, cfg.SchemaVersion);
+}, riskFormulas, basketAgg, cfgHash, cfg.SchemaVersion, enforcer, riskConfig, equity)
+{
+    // future injection points if needed
+};
 await loop.RunAsync();
 
 Console.WriteLine("Engine run complete.");

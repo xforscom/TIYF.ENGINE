@@ -70,13 +70,16 @@ public sealed class EngineLoop
 	private readonly Action? _onBarEmitted;
 	private readonly IRiskFormulas? _riskFormulas;
 	private readonly IBasketRiskAggregator? _basketAggregator;
+	private readonly IRiskEnforcer? _riskEnforcer; // new enforcement dependency
 	private readonly List<PositionInitialRisk> _openPositions = new();
 	private readonly string? _configHash; // pass-through for risk probe journaling
 	private readonly string _schemaVersion;
+	private readonly RiskConfig? _riskConfig;
+	private readonly decimal? _equityOverride;
 
-	public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action? onBarEmitted = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version)
+	public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action? onBarEmitted = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null)
 	{
-		_clock = clock; _builders = builders; _barKeyTracker = tracker; _journal = journal; _ticks = ticks; _barEventType = barEventType; _seq = 0UL; _onBarEmitted = onBarEmitted; _riskFormulas = riskFormulas; _basketAggregator = basketAggregator; _configHash = configHash; _schemaVersion = schemaVersion;
+		_clock = clock; _builders = builders; _barKeyTracker = tracker; _journal = journal; _ticks = ticks; _barEventType = barEventType; _seq = 0UL; _onBarEmitted = onBarEmitted; _riskFormulas = riskFormulas; _basketAggregator = basketAggregator; _configHash = configHash; _schemaVersion = schemaVersion; _riskEnforcer = riskEnforcer; _riskConfig = riskConfig; _equityOverride = equityOverride;
 	}
 
 	public async Task RunAsync(CancellationToken ct = default)
@@ -112,9 +115,9 @@ public sealed class EngineLoop
 					// Emit risk probe (synthetic) if services configured
 					if (_riskFormulas is not null && _basketAggregator is not null)
 					{
-						// Synthetic assumptions (placeholder heuristics)
-						decimal equity = 100_000m;
-						decimal notional = Math.Abs(bar.Close) * 1_000m / 100m; // simplistic scaling
+						// Base synthetic values with configurable equity override
+						decimal equity = _equityOverride ?? 100_000m;
+						decimal notional = Math.Abs(bar.Close) * 1_000m / 100m; // simplistic mapping
 						decimal usedMarginAfter = notional / 20m; // assume 5% margin
 						decimal positionInitialRiskMoney = Math.Max(50m, bar.Volume * 10m);
 						var leverage = _riskFormulas.ProjectLeverage(notional, equity);
@@ -122,6 +125,7 @@ public sealed class EngineLoop
 						_openPositions.Add(new PositionInitialRisk(bar.InstrumentId, positionInitialRiskMoney, new Currency("USD")));
 						var basketPct = _basketAggregator.ComputeBasketRiskPct(_openPositions, BasketMode.Base, new Currency("USD"), equity);
 						// Canonical RISK_PROBE_V1 payload (PascalCase required fields) + extras retained
+						var decisionId = Guid.NewGuid().ToString("N");
 						var riskProbe = new {
 							// Required canonical fields for verifier
 							InstrumentId = bar.InstrumentId.Value,
@@ -129,7 +133,7 @@ public sealed class EngineLoop
 							ProjectedMarginUsagePct = marginPct,
 							BasketRiskPct = basketPct,
 							// Extra diagnostic fields (snake_case preserved as legacy / auxiliary fields)
-							DecisionId = Guid.NewGuid().ToString("N"),
+							DecisionId = decisionId,
 							NotionalValue = notional,
 							Equity = equity,
 							UsedMarginAfterOrder = usedMarginAfter,
@@ -140,6 +144,41 @@ public sealed class EngineLoop
 						};
 						var probeJson = JsonSerializer.SerializeToElement(riskProbe);
 						await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "RISK_PROBE_V1", probeJson), ct);
+
+						// Enforcement (if enforcer configured)
+						if (_riskEnforcer is not null)
+						{
+							var proposal = new Proposal(
+								InstrumentId: bar.InstrumentId.Value,
+								RequestedVolume: 1_000m, // placeholder mapping from price to volume
+								NotionalValue: notional,
+								UsedMarginAfterOrder: usedMarginAfter,
+								PositionInitialRiskMoney: positionInitialRiskMoney,
+								DecisionId: decisionId);
+							// Snapshot includes current open positions (include this bar's position risk)
+							var snapshotPositions = _openPositions.Select(o => (o.InstrumentId.Value, o.InitialRiskMoneyAccountCcy)).ToList();
+							var snapshot = new BasketSnapshot(snapshotPositions);
+							var riskCfg = _riskConfig ?? new RiskConfig();
+							var ctx = new RiskContext(equity, snapshot, riskCfg, new InMemoryInstrumentCatalog(new[]{ new Instrument(new InstrumentId(bar.InstrumentId.Value), "SYM", 2)}), new PassthroughFx());
+							var enforcement = _riskEnforcer.Enforce(proposal, ctx);
+							foreach (var alert in enforcement.Alerts)
+							{
+								var alertPayload = JsonSerializer.SerializeToElement(new {
+									alert.EventType,
+									alert.DecisionId,
+									alert.InstrumentId,
+									alert.Reason,
+									alert.Observed,
+									alert.Cap,
+									alert.Equity,
+									alert.NotionalValue,
+									alert.UsedMarginAfterOrder,
+									alert.SchemaVersion,
+									alert.ConfigHash
+								});
+								await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, alert.EventType, alertPayload), ct);
+							}
+						}
 					}
 					_onBarEmitted?.Invoke();
 				}

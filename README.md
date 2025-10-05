@@ -67,5 +67,41 @@ Example diff usage (for regression comparison):
 dotnet run --project src/TiYf.Engine.Tools -- diff --a journals/BASE/events.csv --b journals/NEW/events.csv --report-duplicates
 ```
 
+## Risk Enforcement Events
+
+When risk enforcement is enabled, additional alert/scaling events are journaled. These are whitelisted by the Verify CLI (only basic structural checks applied beyond UTC timestamp + valid JSON).
+
+Event types & payload semantics (all numeric values culture-invariant decimals; timestamps ISO-8601 UTC):
+
+| Event Type | Meaning | Observed Field | Cap Field |
+|------------|---------|----------------|-----------|
+| `ALERT_BLOCK_LEVERAGE` | Proposed trade blocked: projected leverage exceeded cap | `Observed` = projected leverage | `Cap` = leverage cap |
+| `ALERT_BLOCK_MARGIN` | Proposed trade blocked: projected margin usage % exceeded cap | `Observed` = projected margin usage % | `Cap` = margin usage cap % |
+| `ALERT_BLOCK_RISK_CAP` | Proposed trade blocked: per-position risk % exceeded cap | `Observed` = per-position risk % | `Cap` = per-position risk cap % |
+| `ALERT_BLOCK_BASKET` | Proposed trade blocked: basket risk % exceeded cap | `Observed` = basket risk % | `Cap` = basket risk cap % (currently same as per-position cap) |
+| `INFO_SCALE_TO_FIT` | Order scaled down to fit all caps (Allowed=true) | (Original leverage in `Observed`) | `Cap` = leverage cap |
+
+Alert payload base fields:
+
+```text
+DecisionId, InstrumentId, Reason, Observed, Cap, Equity, NotionalValue, UsedMarginAfterOrder, SchemaVersion, ConfigHash
+```
+
+Scale event (INFO_SCALE_TO_FIT) additionally implies computed scale ratios (present in message `Reason`) and post-round projected metrics internally tracked; future versions may surface `ScaledVolumeBeforeRound`, `ScaledVolumeRounded`, `PostRoundProjectedLeverage`, `PostRoundProjectedMarginUsagePct` explicitly in the payload.
+
+### Verify CLI Allow-List
+
+The verifier enforces strict structural checks for `BAR_V1` and `RISK_PROBE_V1`. It allows (does not error on) these risk events: `ALERT_BLOCK_LEVERAGE`, `ALERT_BLOCK_MARGIN`, `ALERT_BLOCK_RISK_CAP`, `ALERT_BLOCK_BASKET`, `INFO_SCALE_TO_FIT`.
+
+### Diff Keys Guidance
+
+Suggested composite keys:
+
+- Bars: `instrumentId,intervalSeconds,openTimeUtc,eventType`
+- Risk probes / alerts / scale events: `instrumentId,eventType,utc_ts`
+
+This balances uniqueness with readability while tolerating absence of bar interval fields in non-bar events.
+
 ## License
+
 Proprietary – All rights reserved (placeholder). Not for external distribution.
