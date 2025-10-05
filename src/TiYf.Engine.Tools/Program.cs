@@ -18,6 +18,7 @@ try
     {
         "diff" => RunDiff(argv.Skip(1).ToList()),
         "verify" => RunVerify(argv.Skip(1).ToList()),
+        "dataversion" => RunDataVersion(argv.Skip(1).ToList()),
         _ => Unknown()
     };
 }
@@ -35,7 +36,80 @@ catch (Exception ex)
 static int Unknown(){ Console.Error.WriteLine("Unknown command"); PrintHelp(); return 2; }
 static void PrintHelp() => Console.WriteLine(@"Usage:
   diff   --a <fileA> --b <fileB> [--keys k1,k2,...] [--report-duplicates]
-  verify --file <journal.csv> [--json] [--max-errors N] [--report-duplicates]");
+  verify --file <journal.csv> [--json] [--max-errors N] [--report-duplicates]
+  dataversion --config <config.json> [--instruments path] [--ticks SYMBOL=path ...] [--out data_version.txt] [--echo-rows]");
+
+static int RunDataVersion(List<string> args)
+{
+    string? config=null; string? instrumentsOverride=null; var tickOverrides = new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase); string? outFile=null; bool echoRows=false;
+    for (int i=0;i<args.Count;i++)
+    {
+        switch(args[i])
+        {
+            case "--config": config = (++i<args.Count)? args[i]:null; break;
+            case "--instruments": instrumentsOverride = (++i<args.Count)? args[i]:null; break;
+            case "--ticks":
+                if (++i<args.Count)
+                {
+                    var spec = args[i];
+                    var kv = spec.Split('='); if (kv.Length==2) tickOverrides[kv[0]] = kv[1];
+                }
+                break;
+            case "--out": outFile = (++i<args.Count)? args[i]:null; break;
+            case "--echo-rows": echoRows = true; break;
+            default: Console.Error.WriteLine($"Unknown option {args[i]}"); return 2;
+        }
+    }
+    if (config == null || !File.Exists(config)) { Console.Error.WriteLine("--config required and must exist"); return 2; }
+    using var cfgDoc = JsonDocument.Parse(File.ReadAllText(config));
+    var root = cfgDoc.RootElement;
+    string? instruments = instrumentsOverride;
+    if (instruments == null)
+    {
+        instruments = root.TryGetProperty("data", out var dataEl) && dataEl.TryGetProperty("instrumentsFile", out var instEl) && instEl.ValueKind==JsonValueKind.String ? instEl.GetString() : null;
+    }
+    if (instruments == null || !File.Exists(instruments)) { Console.Error.WriteLine("Cannot resolve instruments file"); return 2; }
+    var tickMap = new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
+    if (root.TryGetProperty("data", out var dataEl2) && dataEl2.TryGetProperty("ticks", out var ticksEl) && ticksEl.ValueKind==JsonValueKind.Object)
+    {
+        foreach (var p in ticksEl.EnumerateObject()) if (p.Value.ValueKind==JsonValueKind.String) tickMap[p.Name] = p.Value.GetString()!;
+    }
+    // Apply overrides
+    foreach (var kv in tickOverrides) tickMap[kv.Key] = kv.Value;
+    // Required symbols for ordering: EURUSD, USDJPY, XAUUSD (if present in config)
+    string[] ordering = new[]{"EURUSD","USDJPY","XAUUSD"};
+    var orderedTickPaths = new List<string>();
+    foreach (var sym in ordering) if (tickMap.TryGetValue(sym, out var pth)) orderedTickPaths.Add(pth);
+    // Build full ordered list
+    var paths = new List<string>();
+    paths.Add(instruments);
+    paths.AddRange(orderedTickPaths);
+    paths.Add(config);
+    // Validate existence
+    foreach (var p in paths) if (!File.Exists(p)) { Console.Error.WriteLine($"Missing file: {p}"); return 2; }
+    // Compute using shared routine
+    var hash = TiYf.Engine.Core.DataVersion.Compute(paths);
+    Console.WriteLine($"DATA_VERSION={hash}");
+    if (echoRows)
+    {
+        // Row counts exclude header
+        Console.WriteLine($"ROWS {System.IO.Path.GetFileName(instruments)}={CountDataLines(instruments)}");
+        foreach (var tp in orderedTickPaths)
+            Console.WriteLine($"ROWS {System.IO.Path.GetFileName(tp)}={CountDataLines(tp)}");
+    }
+    if (!string.IsNullOrWhiteSpace(outFile))
+    {
+        var dir = System.IO.Path.GetDirectoryName(outFile)!;
+        Directory.CreateDirectory(dir);
+        var tmp = outFile + ".tmp";
+        File.WriteAllText(tmp, hash, new UTF8Encoding(false)); // no newline
+        if (File.Exists(outFile)) File.Delete(outFile);
+        File.Move(tmp, outFile);
+    }
+    return 0;
+}
+
+static int CountDataLines(string path) => Math.Max(0, File.ReadLines(path).Count()-1);
 
 static int RunDiff(List<string> args)
 {

@@ -27,4 +27,25 @@ jobs:
       - name: Verify Journal (Run A)
         run: dotnet run --project src/TiYf.Engine.Tools -- verify --file journals/CI_A/events.csv
       - name: Diff Journals (A vs B)
-        run: dotnet run --project src/TiYf.Engine.Tools -- diff --left journals/CI_A/events.csv --right journals/CI_B/events.csv
+        id: diffstep
+        run: |
+          set -e
+          dotnet run --project src/TiYf.Engine.Tools -- diff --left journals/CI_A/events.csv --right journals/CI_B/events.csv || echo "__DIFF_FAILED__" > diff_failed.flag
+          if test -f diff_failed.flag; then
+            echo "diff_failed=true" >> $GITHUB_OUTPUT
+          else
+            echo "diff_failed=false" >> $GITHUB_OUTPUT
+          fi
+      - name: Upload Journals (Artifacts)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-journals
+          path: |
+            journals/CI_A/events.csv
+            journals/CI_B/events.csv
+      - name: Emit Delta Summary on Failure
+        if: steps.diffstep.outputs.diff_failed == 'true'
+        run: |
+          echo "Diff reported differences (see previous step output)." 
+          echo "Delta summary limited by tool output above." 
+          exit 1

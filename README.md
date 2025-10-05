@@ -102,6 +102,34 @@ Suggested composite keys:
 
 This balances uniqueness with readability while tolerating absence of bar interval fields in non-bar events.
 
+## Smoke Script (Developer Convenience)
+
+The PowerShell script at `scripts/smoke.ps1` provides a fast local determinism & integrity check before pushing:
+
+Steps executed:
+
+1. Build (no restore) and test.
+2. Run simulator twice with the same config producing `journals/SMOKE_A/events.csv` and `journals/SMOKE_B/events.csv`.
+3. Verify journal A with the Verify CLI (exit code must be 0).
+4. Diff journal A vs B (must report zero differences and exit 0).
+
+PASS Criteria (all must hold):
+
+- Tests pass.
+- Verify on A returns exit code 0.
+- Diff A vs B returns exit code 0 (bit‑exact deterministic replay for event stream).
+
+Usage:
+
+```powershell
+pwsh ./scripts/smoke.ps1            # or powershell on Windows
+pwsh ./scripts/smoke.ps1 -Config sample-config.json
+```
+
+On success it prints: `PASS (tests+verify+diff deterministic)`.
+
+If any stage fails, the script exits non-zero with a descriptive bracketed tag (e.g. `[SMOKE] Diff FAILED`).
+
 ## License
 
 Proprietary – All rights reserved (placeholder). Not for external distribution.

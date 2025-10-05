@@ -14,11 +14,11 @@
   },
   "barBuilder": { "timeframe": "M1", "sessionCalendar": "24x5", "dropOutOfOrder": true },
   "risk": {
-    "realLeverageCap": 20.0,
-    "marginUsageCapPct": 1000.0,
-    "perPositionRiskCapPct": 10.0,
+    "realLeverageCap": 999.0,
+    "marginUsageCapPct": 100000.0,
+    "perPositionRiskCapPct": 1000.0,
     "basketMode": "instrument_bucket",
-    "basketRiskCapPct": 30.0
+    "basketRiskCapPct": 5000.0
   },
   "strategy": {
     "type": "DeterministicScriptStrategy",
@@ -29,7 +29,7 @@
     }
   },
   "adapters": { "execution": "SimulatedExecutionAdapter", "dataFeed": "HistoricalCsvFeedAdapter" },
-  "featureFlags": { "sentiment": "disabled", "learning": "disabled" },
+  "featureFlags": { "sentiment": "disabled", "learning": "disabled", "riskProbe": "disabled" },
   "rngSeed": 1337,
   "output": { "journalDir": "journals/M0", "atomicWrites": true, "canonicalizeCsv": true }
 }

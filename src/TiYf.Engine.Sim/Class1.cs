@@ -76,17 +76,81 @@ public sealed class EngineLoop
 	private readonly string _schemaVersion;
 	private readonly RiskConfig? _riskConfig;
 	private readonly decimal? _equityOverride;
+    private readonly DeterministicScriptStrategy? _deterministicStrategy; // optional strategy for M0
+	private readonly IExecutionAdapter? _execution;
+	private readonly PositionTracker? _positions;
+	private readonly TradesJournalWriter? _tradesWriter;
+	private readonly string? _dataVersion;
+	private readonly Dictionary<string,long> _openUnits = new(); // decisionId -> units
+	private DateTime? _lastStrategyMinute; // to avoid emitting strategy actions multiple times per minute when multiple instrument ticks share the same minute
+    private readonly bool _riskProbeEnabled = true; // feature flag
 
-	public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action? onBarEmitted = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null)
+	private string? ExtractDataVersion() => _dataVersion;
+
+	public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action? onBarEmitted = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true)
 	{
-		_clock = clock; _builders = builders; _barKeyTracker = tracker; _journal = journal; _ticks = ticks; _barEventType = barEventType; _seq = 0UL; _onBarEmitted = onBarEmitted; _riskFormulas = riskFormulas; _basketAggregator = basketAggregator; _configHash = configHash; _schemaVersion = schemaVersion; _riskEnforcer = riskEnforcer; _riskConfig = riskConfig; _equityOverride = equityOverride;
+		_clock = clock; _builders = builders; _barKeyTracker = tracker; _journal = journal; _ticks = ticks; _barEventType = barEventType; _seq = 0UL; _onBarEmitted = onBarEmitted; _riskFormulas = riskFormulas; _basketAggregator = basketAggregator; _configHash = configHash; _schemaVersion = schemaVersion; _riskEnforcer = riskEnforcer; _riskConfig = riskConfig; _equityOverride = equityOverride; _deterministicStrategy = deterministicStrategy; _execution = execution; _positions = positions; _tradesWriter = tradesWriter; _dataVersion = dataVersion; _riskProbeEnabled = riskProbeEnabled;
+		_sizeUnitsFx = sizeUnitsFx; _sizeUnitsXau = sizeUnitsXau;
 	}
+	private readonly long _sizeUnitsFx; private readonly long _sizeUnitsXau;
 
 	public async Task RunAsync(CancellationToken ct = default)
 	{
-		foreach (var tick in _ticks)
-		{
-			_clock.Tick();
+			foreach (var tick in _ticks)
+			{
+				// Advance the deterministic clock only when we encounter a new unique timestamp in the tick stream.
+				// This prevents multi-instrument minutes from over-advancing the clock.
+				if (_clock.UtcNow != tick.UtcTimestamp)
+					_clock.Tick();
+
+				// Strategy scheduling -> real order execution path (run once per unique minute)
+				if (_deterministicStrategy is not null && _execution is not null && _positions is not null)
+				{
+					var tickMinute = new DateTime(tick.UtcTimestamp.Year, tick.UtcTimestamp.Month, tick.UtcTimestamp.Day, tick.UtcTimestamp.Hour, tick.UtcTimestamp.Minute, 0, DateTimeKind.Utc);
+					if (_lastStrategyMinute != tickMinute)
+					{
+						_lastStrategyMinute = tickMinute;
+						foreach (var act in _deterministicStrategy.Pending(tickMinute))
+						{
+							if (act.Side == Side.Close)
+							{
+								// Close = opposite market order
+								var closeSide = act.Symbol switch { _ => TradeSide.Buy }; // will be set below
+								// Determine original side from decision id pattern (01 => first leg BUY, 02 => second leg SELL)
+								bool firstLeg = act.DecisionId.EndsWith("-01", StringComparison.Ordinal);
+								var entrySide = firstLeg ? TradeSide.Buy : TradeSide.Sell;
+								closeSide = entrySide == TradeSide.Buy ? TradeSide.Sell : TradeSide.Buy;
+								// Units: match open units stored
+								var units = _openUnits.TryGetValue(act.DecisionId, out var ou) ? ou : 0L;
+								var req = new OrderRequest(act.DecisionId, act.Symbol, closeSide, units, tickMinute);
+								var result = await _execution.ExecuteMarketAsync(req, ct);
+								if (result.Accepted && result.Fill is { } fill)
+								{
+									_positions.OnFill(fill, _schemaVersion, _configHash ?? string.Empty, ExtractDataVersion());
+									// if trade closed produce into trades writer
+									if (_tradesWriter is not null)
+									{
+										foreach (var completed in _positions.Completed.Where(c=>c.DecisionId==act.DecisionId))
+											_tradesWriter.Append(completed);
+									}
+								}
+							}
+							else
+							{
+								// Open leg: determine side (BUY for -01 first emission, SELL for -02 first emission)
+								bool firstLeg = act.DecisionId.EndsWith("-01", StringComparison.Ordinal);
+								var side = firstLeg ? TradeSide.Buy : TradeSide.Sell;
+								// Units selection heuristic: XAUUSD uses 1, others 1000 (will later read from config params)
+								var units = act.Symbol.Equals("XAUUSD", StringComparison.OrdinalIgnoreCase) ? _sizeUnitsXau : _sizeUnitsFx;
+								_openUnits[act.DecisionId] = units;
+								var req = new OrderRequest(act.DecisionId, act.Symbol, side, units, tickMinute);
+								var result = await _execution.ExecuteMarketAsync(req, ct);
+								if (result.Accepted && result.Fill is { } fill)
+									_positions.OnFill(fill, _schemaVersion, _configHash ?? string.Empty, ExtractDataVersion());
+							}
+						}
+					}
+				}
 			foreach (var kvp in _builders.Where(b => b.Key.Item1.Equals(tick.InstrumentId)))
 			{
 				var builder = kvp.Value;
@@ -113,7 +177,7 @@ public sealed class EngineLoop
 					var json = JsonSerializer.SerializeToElement(enriched);
 					await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, _barEventType, json), ct);
 					// Emit risk probe (synthetic) if services configured
-					if (_riskFormulas is not null && _basketAggregator is not null)
+					if (_riskFormulas is not null && _basketAggregator is not null && _riskProbeEnabled)
 					{
 						// Base synthetic values with configurable equity override
 						decimal equity = _equityOverride ?? 100_000m;
