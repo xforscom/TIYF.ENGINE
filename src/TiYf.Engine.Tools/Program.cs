@@ -153,7 +153,7 @@ public static class VerifyEngine
             var payloadText = UnwrapCsvQuoted(payloadRaw);
             JsonDocument? doc = null;
             try { doc = JsonDocument.Parse(payloadText); }
-            catch { AddErr($"line:{lineNum}","payload_json not valid JSON"); hasValidationIssue=true; continue; }
+            catch { AddErr($"line:{lineNum}","payload_json not valid JSON"); continue; }
             var root = doc.RootElement;
             if (evtType == "BAR_V1")
             {
@@ -260,7 +260,11 @@ public static class VerifyEngine
     private static string UnwrapCsvQuoted(string raw)
     {
         if (raw.Length >=2 && raw[0]=='"' && raw[^1]=='"')
-            return raw.Substring(1, raw.Length-2).Replace(""""","\"");
+        {
+            var inner = raw.Substring(1, raw.Length-2);
+            // CSV escaping doubles quotes inside a quoted field
+            return inner.Replace("\"\"", "\"");
+        }
         return raw;
     }
     private static string[] SplitCsv(string line)
