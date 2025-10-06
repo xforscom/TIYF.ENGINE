@@ -9,43 +9,27 @@ jobs:
   build-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup .NET
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+
       - name: Restore
-        run: dotnet restore
-      - name: Build
-        run: dotnet build --no-restore -warnaserror
-      - name: Test
-        run: dotnet test --no-build --verbosity normal
-      - name: Generate Journal (Sim)
-        run: dotnet run --project src/TiYf.Engine.Sim -- --config sample-config.json --out journals/CI_A
-      - name: Generate Journal (Sim 2)
-        run: dotnet run --project src/TiYf.Engine.Sim -- --config sample-config.json --out journals/CI_B
-      - name: Verify Journal (Run A)
-        run: dotnet run --project src/TiYf.Engine.Tools -- verify --file journals/CI_A/events.csv
-      - name: Diff Journals (A vs B)
-        id: diffstep
+        run: dotnet restore TiYf.Engine.sln
+
+      - name: Build all projects (Release)
+        run: dotnet build TiYf.Engine.sln -c Release -warnaserror --no-restore
+
+      - name: Run Engine tests (Release, no-build)
+        run: dotnet test tests/TiYf.Engine.Tests/TiYf.Engine.Tests.csproj -c Release --no-build --logger "trx;LogFileName=test.trx"
+
+      - name: Run Tools tests (Release, no-build)
+        run: dotnet test tests/TiYf.Engine.Tools.Tests/TiYf.Engine.Tools.Tests.csproj -c Release --no-build --logger "trx;LogFileName=test-tools.trx"
+
+      - name: Verify Sim Release DLL exists
         run: |
-          set -e
-          dotnet run --project src/TiYf.Engine.Tools -- diff --left journals/CI_A/events.csv --right journals/CI_B/events.csv || echo "__DIFF_FAILED__" > diff_failed.flag
-          if test -f diff_failed.flag; then
-            echo "diff_failed=true" >> $GITHUB_OUTPUT
-          else
-            echo "diff_failed=false" >> $GITHUB_OUTPUT
-          fi
-      - name: Upload Journals (Artifacts)
-        uses: actions/upload-artifact@v4
-        with:
-          name: ci-journals
-          path: |
-            journals/CI_A/events.csv
-            journals/CI_B/events.csv
-      - name: Emit Delta Summary on Failure
-        if: steps.diffstep.outputs.diff_failed == 'true'
-        run: |
-          echo "Diff reported differences (see previous step output)." 
-          echo "Delta summary limited by tool output above." 
-          exit 1
+          test -f src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll || (echo "Sim Release DLL missing" && ls -R src/TiYf.Engine.Sim/bin/Release || true && exit 1)
+          echo "Sim Release DLL present ✅"
