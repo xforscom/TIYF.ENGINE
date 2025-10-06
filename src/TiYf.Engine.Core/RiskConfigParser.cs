@@ -16,7 +16,8 @@ public static class RiskConfigParser
         }
         string Str(string snake, string fallback)
         {
-            if (TryString(riskEl, snake, out var v)) return v; return fallback;
+            if (TryString(riskEl, snake, out var v) && v is not null) return v;
+            return fallback;
         }
         var buckets = new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
         if (TryObject(riskEl, "instrument_buckets", out var bEl))

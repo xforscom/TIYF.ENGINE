@@ -18,8 +18,9 @@ public class M0DeterminismTests
         // This test intentionally runs the engine multiple times and reuses the fixed journal output path
         // cleaned by the program before each run. We copy the artifacts after a run, then run again, and
         // compare canonical hashes to guarantee bit-exact determinism.
-        var config = Path.Combine("tests","fixtures","backtest_m0","config.backtest-m0.json");
-        Assert.True(File.Exists(config));
+    var solutionRoot = FindSolutionRoot();
+    var config = Path.Combine(solutionRoot, "tests","fixtures","backtest_m0","config.backtest-m0.json");
+    Assert.True(File.Exists(config), $"Config not found at {config}");
         var tmpRoot = Path.Combine(Path.GetTempPath(), "m0-determinism-tests");
         if (Directory.Exists(tmpRoot)) Directory.Delete(tmpRoot, true);
         Directory.CreateDirectory(tmpRoot);
@@ -28,23 +29,39 @@ public class M0DeterminismTests
         {
             var runDir = Path.Combine(tmpRoot, tag);
             Directory.CreateDirectory(runDir);
-            var psi = new ProcessStartInfo("dotnet", $"run --project src/TiYf.Engine.Sim -- --config {config}")
+            var simDll = Path.Combine(solutionRoot, "src","TiYf.Engine.Sim","bin","Release","net8.0","TiYf.Engine.Sim.dll");
+            if (!File.Exists(simDll)) throw new FileNotFoundException($"Sim DLL not built at {simDll}. Build Release first.");
+            var psi = new ProcessStartInfo("dotnet", $"exec \"{simDll}\" --config \"{config}\" --verbosity diag")
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
-                UseShellExecute = false
+                UseShellExecute = false,
+                WorkingDirectory = solutionRoot
             };
             var proc = Process.Start(psi)!;
-            proc.WaitForExit();
-            Assert.Equal(0, proc.ExitCode);
+            var stdout = new StringBuilder();
+            var stderr = new StringBuilder();
+            proc.OutputDataReceived += (_, e) => { if (e.Data!=null) stdout.AppendLine(e.Data); };
+            proc.ErrorDataReceived += (_, e) => { if (e.Data!=null) stderr.AppendLine(e.Data); };
+            proc.BeginOutputReadLine();
+            proc.BeginErrorReadLine();
+            if (!proc.WaitForExit(60000))
+            {
+                try { proc.Kill(); } catch { }
+                throw new Xunit.Sdk.XunitException($"Sim run {tag} timed out after 60s. STDOUT: {stdout}\nSTDERR: {stderr}");
+            }
+            if (proc.ExitCode != 0)
+            {
+                throw new Xunit.Sdk.XunitException($"Sim run {tag} failed ExitCode={proc.ExitCode}\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}");
+            }
             return runDir;
         }
 
-        // Run twice
-        Run("A");
-        Run("B");
+    // Run twice (A,B) then a third time for B verification copy
+    Run("A");
+    Run("B");
 
-        var journalBase = Path.Combine("journals","M0","M0-RUN"); // engine writes here deterministically each run (cleaned before run)
+    var journalBase = Path.Combine(solutionRoot, "journals","M0","M0-RUN"); // engine writes here deterministically each run (cleaned before run)
         Assert.True(Directory.Exists(journalBase));
         var eventsPath = Path.Combine(journalBase, "events.csv");
         var tradesPath = Path.Combine(journalBase, "trades.csv");
@@ -57,8 +74,8 @@ public class M0DeterminismTests
         File.Copy(eventsPath, copyEventsA, true);
         File.Copy(tradesPath, copyTradesA, true);
 
-        // Re-run to produce B fresh
-        Run("C");
+    // Re-run to produce B' fresh (C tag) for comparison with original A copies
+    Run("C");
         var copyEventsB = Path.Combine(tmpRoot, "eventsB.csv");
         var copyTradesB = Path.Combine(tmpRoot, "tradesB.csv");
         File.Copy(eventsPath, copyEventsB, true);
@@ -99,5 +116,15 @@ public class M0DeterminismTests
         Assert.Matches(@"^\d+\.\d{5}$", parts[4]);
         Assert.Matches(@"^\d+\.\d{5}$", parts[5]);
         Assert.Matches(@"^-?\d+\.\d{2}$", parts[7]);
+    }
+    private static string FindSolutionRoot()
+    {
+        var dir = Directory.GetCurrentDirectory();
+        while (dir != null && !File.Exists(Path.Combine(dir, "TiYf.Engine.sln")))
+        {
+            var parent = Directory.GetParent(dir);
+            dir = parent?.FullName;
+        }
+        return dir ?? Directory.GetCurrentDirectory();
     }
 }

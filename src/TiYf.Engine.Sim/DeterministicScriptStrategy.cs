@@ -17,7 +17,6 @@ public sealed class DeterministicScriptStrategy
     private readonly DateTime _startUtc; // derived from first clock timestamp
     private readonly TimeSpan _openHold = TimeSpan.FromMinutes(30);
     private readonly Dictionary<string, List<ScheduledAction>> _actionsBySymbol = new();
-    private bool _initialized;
 
     public DeterministicScriptStrategy(IClock clock, IEnumerable<Instrument> instruments, DateTime startUtc)
     {
