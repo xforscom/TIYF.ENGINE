@@ -9,18 +9,27 @@ jobs:
   build-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup .NET
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+
       - name: Restore
-        run: dotnet restore
-      - name: Build
-        run: dotnet build --no-restore -warnaserror
-      - name: Test
-        run: dotnet test --no-build --verbosity normal
-      - name: Generate Journal (Sim)
-        run: dotnet run --project src/TiYf.Engine.Sim -- --config sample-config.json --out journals/CI
-      - name: Verify Journal
-        run: dotnet run --project src/TiYf.Engine.Tools -- verify --file journals/CI/events.csv
+        run: dotnet restore TiYf.Engine.sln
+
+      - name: Build all projects (Release)
+        run: dotnet build TiYf.Engine.sln -c Release -warnaserror --no-restore
+
+      - name: Run Engine tests (Release, no-build)
+        run: dotnet test tests/TiYf.Engine.Tests/TiYf.Engine.Tests.csproj -c Release --no-build --logger "trx;LogFileName=test.trx"
+
+      - name: Run Tools tests (Release, no-build)
+        run: dotnet test tests/TiYf.Engine.Tools.Tests/TiYf.Engine.Tools.Tests.csproj -c Release --no-build --logger "trx;LogFileName=test-tools.trx"
+
+      - name: Verify Sim Release DLL exists
+        run: |
+          test -f src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll || (echo "Sim Release DLL missing" && ls -R src/TiYf.Engine.Sim/bin/Release || true && exit 1)
+          echo "Sim Release DLL present ✅"

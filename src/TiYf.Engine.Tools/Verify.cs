@@ -23,10 +23,16 @@ public static class VerifyEngine
         string? header = reader.ReadLine();
         if (meta == null || header == null) throw new VerifyFatalException("Missing meta/header lines");
         var metaParts = meta.Split(',', StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries);
-        string? schemaVersion = null; string? configHash = null;
+        string? schemaVersion = null; string? configHash = null; string? dataVersion = null;
         foreach (var p in metaParts)
         {
-            var kv = p.Split('='); if (kv.Length==2){ if(kv[0]=="schema_version") schemaVersion=kv[1]; else if(kv[0]=="config_hash") configHash=kv[1]; }
+            var kv = p.Split('=');
+            if (kv.Length==2)
+            {
+                if (kv[0]=="schema_version") schemaVersion=kv[1];
+                else if (kv[0]=="config_hash") configHash=kv[1];
+                else if (kv[0]=="data_version") dataVersion = kv[1]; // tolerant: optional
+            }
         }
         var errors = new List<(string Key,string Reason)>();
         void AddErr(string key,string reason){ if(errors.Count < options.MaxErrors) errors.Add((key,reason)); }
@@ -93,7 +99,8 @@ public static class VerifyEngine
                     }
                     else if (evtType == "RISK_PROBE_V1")
                     {
-                        string? inst = TryGet(root, "InstrumentId.Value");
+                                // Accept either nested object (InstrumentId.Value) or flat string InstrumentId
+                                string? inst = TryGet(root, "InstrumentId.Value") ?? TryGet(root, "InstrumentId");
                         string? leverage = TryGet(root, "ProjectedLeverage");
                         string? margin = TryGet(root, "ProjectedMarginUsagePct");
                         string? basket = TryGet(root, "BasketRiskPct");
@@ -108,7 +115,22 @@ public static class VerifyEngine
                     }
                     else
                     {
-                        AddErr($"line:{lineNum}", $"unsupported event_type {evtType}"); }
+                        // Whitelist alert / scaling informational events (light validation only)
+                        if (evtType is "ALERT_BLOCK_LEVERAGE" or "ALERT_BLOCK_MARGIN" or "ALERT_BLOCK_RISK_CAP" or "ALERT_BLOCK_BASKET" or "INFO_SCALE_TO_FIT")
+                        {
+                            // Ensure basic expected fields exist (DecisionId & InstrumentId) but do not enforce numeric semantics yet
+                            string? inst = TryGet(root, "InstrumentId") ?? TryGet(root, "InstrumentId.Value");
+                            string? decision = TryGet(root, "DecisionId");
+                            if (string.IsNullOrWhiteSpace(inst) || string.IsNullOrWhiteSpace(decision))
+                            {
+                                AddErr($"{evtType}:{tsRaw}", "missing InstrumentId or DecisionId");
+                            }
+                        }
+                        else
+                        {
+                            AddErr($"line:{lineNum}", $"unsupported event_type {evtType}");
+                        }
+                    }
                 }
 
                 int exitCode = errors.Count == 0 ? 0 : 1;

@@ -1,0 +1,20 @@
+{
+  "SchemaVersion": "1.1.0",
+  "RunId": "RUN-DEMO",
+  "InstrumentFile": "sample-instruments.csv",
+  "InputTicksFile": "sample-ticks.csv",
+  "JournalRoot": "journals",
+  "Instruments": ["INST1"],
+  "Intervals": ["M1"],
+  "equity": 10000.0,
+  "risk": {
+    "real_leverage_cap": 5.0,
+    "margin_usage_cap_pct": 50.0,
+    "per_position_risk_cap_pct": 1.0,
+    "basket_mode": "Base",
+    "instrument_buckets": { "XAUUSD": "metals", "GER40": "indices" },
+    "enable_scale_to_fit": true,
+    "enforcement_enabled": true,
+    "lot_step": 0.01
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "SchemaVersion":1,
+  "SchemaVersion":"1.1.0",
   "RunId":"RUN-DEMO",
   "InstrumentFile":"sample-instruments.csv",
   "InputTicksFile":"sample-ticks.csv",
