@@ -116,7 +116,10 @@ public static class VerifyEngine
                     else
                     {
                         // Whitelist alert / scaling informational events (light validation only)
-                        if (evtType is "ALERT_BLOCK_LEVERAGE" or "ALERT_BLOCK_MARGIN" or "ALERT_BLOCK_RISK_CAP" or "ALERT_BLOCK_BASKET" or "INFO_SCALE_TO_FIT")
+                        if (evtType is "ALERT_BLOCK_LEVERAGE" or "ALERT_BLOCK_MARGIN" or "ALERT_BLOCK_RISK_CAP" or "ALERT_BLOCK_BASKET" or "INFO_SCALE_TO_FIT" 
+                            // M3 forthcoming events (additive; structural validation deferred until implemented)
+                            or "ALERT_BLOCK_INSTRUMENT_NOTIONAL" or "ALERT_BLOCK_NET_EXPOSURE" or "ALERT_BLOCK_DRAWDOWN" 
+                            or "DATA_QA_ABORT_V1" or "INFO_SENTIMENT_APPLIED_V1")
                         {
                             // Ensure basic expected fields exist (DecisionId & InstrumentId) but do not enforce numeric semantics yet
                             string? inst = TryGet(root, "InstrumentId") ?? TryGet(root, "InstrumentId.Value");

@@ -18,6 +18,7 @@ try
     {
         "diff" => RunDiff(argv.Skip(1).ToList()),
         "verify" => RunVerify(argv.Skip(1).ToList()),
+        "promote" => RunPromote(argv.Skip(1).ToList()),
         "dataversion" => RunDataVersion(argv.Skip(1).ToList()),
         _ => Unknown()
     };
@@ -36,7 +37,8 @@ catch (Exception ex)
 static int Unknown(){ Console.Error.WriteLine("Unknown command"); PrintHelp(); return 2; }
 static void PrintHelp() => Console.WriteLine(@"Usage:
   diff   --a <fileA> --b <fileB> [--keys k1,k2,...] [--report-duplicates]
-  verify --file <journal.csv> [--json] [--max-errors N] [--report-duplicates]
+    verify --file <journal.csv> [--json] [--max-errors N] [--report-duplicates]
+    promote --baseline <config.json> --candidate <config.json> [--workdir <dir>] [--quiet] [--print-metrics] [--culture name]
   dataversion --config <config.json> [--instruments path] [--ticks SYMBOL=path ...] [--out data_version.txt] [--echo-rows]");
 
 static int RunDataVersion(List<string> args)
@@ -151,6 +153,329 @@ static int RunVerify(List<string> args)
     var result = VerifyEngine.Run(file!, new VerifyOptions(maxErrors,json,reportDup));
     if (result.JsonOutput != null) Console.WriteLine(result.JsonOutput); else Console.WriteLine(result.HumanSummary);
     return result.ExitCode;
+}
+
+// ------------------------------------------------------------
+// Promotion orchestration (lightweight) - runs baseline & candidate via Sim
+// Exit codes: 0 accept, 2 reject (match other tool non-success), 1 unused
+// Gating rules (hard):
+//   - Candidate deterministic across two runs (events & trades hashes identical)
+//   - PnL >= baseline PnL (tolerance 0.00)
+//   - Max Drawdown <= baseline MaxDD (tolerance 0.00)
+//   - Zero ALERT_BLOCK_ lines in candidate events
+// Emits single JSON line: PROMOTION_RESULT { accepted: bool, reason: string, metrics: {...} }
+// Culture invariance: forces invariant for parsing; optional --culture allows test harness to set thread culture
+// ------------------------------------------------------------
+static int RunPromote(List<string> args)
+{
+    string? baseline=null, candidate=null, workdir=null, culture=null; bool quiet=false; bool printMetrics=false; bool diagnose=false; // diagnose preserved for future extension
+    for (int i=0;i<args.Count;i++)
+    {
+        switch(args[i])
+        {
+            case "--baseline": baseline=(++i<args.Count)? args[i]:null; break;
+            case "--candidate": candidate=(++i<args.Count)? args[i]:null; break;
+            case "--workdir": workdir=(++i<args.Count)? args[i]:null; break;
+            case "--quiet": quiet=true; break;
+            case "--print-metrics": printMetrics=true; break;
+            case "--diagnose-determinism": diagnose=true; break;
+            case "--culture": culture=(++i<args.Count)? args[i]:null; break;
+            default: Console.Error.WriteLine($"Unknown option {args[i]}"); return 2;
+        }
+    }
+    if (baseline==null || candidate==null) { Console.Error.WriteLine("--baseline and --candidate required"); return 2; }
+    if (!File.Exists(baseline) || !File.Exists(candidate)) { Console.Error.WriteLine("Baseline or candidate config missing"); return 2; }
+    if (!string.IsNullOrWhiteSpace(culture))
+    {
+        try
+        {
+            var ci = System.Globalization.CultureInfo.GetCultureInfo(culture);
+            System.Globalization.CultureInfo.CurrentCulture = ci;
+            System.Globalization.CultureInfo.CurrentUICulture = ci;
+        }
+        catch { /* ignore invalid culture */ }
+    }
+    workdir ??= Directory.GetCurrentDirectory();
+    string simDll = Path.Combine(workdir, "src", "TiYf.Engine.Sim", "bin", "Release", "net8.0", "TiYf.Engine.Sim.dll");
+    if (!File.Exists(simDll)) { Console.Error.WriteLine("Sim binary not built (expected Release build). Run dotnet build -c Release."); return 2; }
+
+    var tmpRoot = Path.Combine(Path.GetTempPath(), "promote_"+Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tmpRoot);
+    bool keepArtifacts = false; // set to true if determinism failure so we skip deletion
+    try
+    {
+        // Run baseline once
+    var baseRun = RunSingle(simDll, baseline!, tmpRoot, workdir!, "base");
+        if (baseRun.ExitCode != 0) return Reject("Baseline run failed", baseRun, null, null);
+        // Candidate run A & B for determinism
+    var candRunA = RunSingle(simDll, candidate!, tmpRoot, workdir!, "candA");
+        if (candRunA.ExitCode != 0) return Reject("Candidate run A failed", baseRun, candRunA, null);
+    var candRunB = RunSingle(simDll, candidate!, tmpRoot, workdir!, "candB");
+        if (candRunB.ExitCode != 0) return Reject("Candidate run B failed", baseRun, candRunA, candRunB);
+
+        // Determinism: hash events & trades
+    // Determinism should not be affected by differing run identifiers present in the journal meta line.
+    // The first line of events/trades files contains meta including run id; skip it when hashing.
+    var eventsHashA = Sha256FileSkipMeta(candRunA.EventsPath);
+    var eventsHashB = Sha256FileSkipMeta(candRunB.EventsPath);
+    var tradesHashA = Sha256FileSkipMeta(candRunA.TradesPath);
+    var tradesHashB = Sha256FileSkipMeta(candRunB.TradesPath);
+        if (!string.Equals(eventsHashA, eventsHashB, StringComparison.Ordinal) || !string.Equals(tradesHashA, tradesHashB, StringComparison.Ordinal))
+        {
+            var diagHeader = $"DETERMINISM_DIAG eventsHashA={eventsHashA} eventsHashB={eventsHashB} tradesHashA={tradesHashA} tradesHashB={tradesHashB}";
+            Console.Error.WriteLine(diagHeader);
+            Console.WriteLine(diagHeader);
+            Console.Error.WriteLine($"ARTIFACTS_ROOT={tmpRoot}");
+            Console.WriteLine($"ARTIFACTS_ROOT={tmpRoot}");
+            Console.Error.WriteLine($"CAND_A_EVENTS={candRunA.EventsPath}");
+            Console.Error.WriteLine($"CAND_B_EVENTS={candRunB.EventsPath}");
+            Console.Error.WriteLine($"CAND_A_TRADES={candRunA.TradesPath}");
+            Console.Error.WriteLine($"CAND_B_TRADES={candRunB.TradesPath}");
+            Console.WriteLine($"CAND_A_EVENTS={candRunA.EventsPath}");
+            Console.WriteLine($"CAND_B_EVENTS={candRunB.EventsPath}");
+            Console.WriteLine($"CAND_A_TRADES={candRunA.TradesPath}");
+            Console.WriteLine($"CAND_B_TRADES={candRunB.TradesPath}");
+            try
+            {
+                var aLines = File.ReadAllLines(candRunA.EventsPath);
+                var bLines = File.ReadAllLines(candRunB.EventsPath);
+                int max = Math.Max(aLines.Length, bLines.Length);
+                for (int i=0;i<max;i++)
+                {
+                    var aL = i < aLines.Length ? aLines[i] : "<EOF>A";
+                    var bL = i < bLines.Length ? bLines[i] : "<EOF>B";
+                    if (!string.Equals(aL, bL, StringComparison.Ordinal))
+                    {
+                        int ctxStart = Math.Max(0, i-5);
+                        var mismatchHeader = $"FIRST_EVENT_MISMATCH line={i+1}";
+                        Console.Error.WriteLine(mismatchHeader);
+                        Console.WriteLine(mismatchHeader);
+                        for (int c=ctxStart; c<i; c++)
+                        {
+                            var ctxLine = $"CTX:{c+1}:{aLines[c]}";
+                            Console.Error.WriteLine(ctxLine);
+                            Console.WriteLine(ctxLine);
+                        }
+                        var aOut = $"A:{aL}"; var bOut = $"B:{bL}";
+                        Console.Error.WriteLine(aOut); Console.WriteLine(aOut);
+                        Console.Error.WriteLine(bOut); Console.WriteLine(bOut);
+                        break;
+                    }
+                }
+                var aT = SafeRead(candRunA.TradesPath);
+                var bT = SafeRead(candRunB.TradesPath);
+                if (aT.Count == bT.Count)
+                {
+                    for (int i=0;i<aT.Count;i++)
+                    {
+                        if (!string.Equals(aT[i], bT[i], StringComparison.Ordinal))
+                        {
+                            int ctxStart = Math.Max(0, i-5);
+                            var tradeMismatch = $"FIRST_TRADE_MISMATCH line={i+1}";
+                            Console.Error.WriteLine(tradeMismatch);
+                            Console.WriteLine(tradeMismatch);
+                            for (int c=ctxStart; c<i; c++) Console.Error.WriteLine($"TRADE_CTX:{c+1}:{aT[c]}");
+                            Console.Error.WriteLine($"A_TRADE:{aT[i]}");
+                            Console.Error.WriteLine($"B_TRADE:{bT[i]}");
+                            break;
+                        }
+                    }
+                }
+            }
+            catch (Exception dx)
+            {
+                Console.Error.WriteLine($"DIAG_ERROR {dx.Message}");
+            }
+            Console.Out.Flush();
+            Console.Error.Flush();
+            keepArtifacts = true; // signal finally block to retain directory
+            return Reject("Determinism parity failed", baseRun, candRunA, candRunB);
+        }
+
+        // Data QA statuses
+        var baseQa = ExtractDataQaStatus(baseRun.EventsPath);
+        var candQa = ExtractDataQaStatus(candRunA.EventsPath);
+        var candQaB = ExtractDataQaStatus(candRunB.EventsPath);
+        // Metrics
+    var baseMetrics = ComputeMetrics(baseRun.TradesPath);
+    var candMetrics = ComputeMetrics(candRunA.TradesPath);
+        // Alerts
+        int alertBlocks = CountAlertBlocks(candRunA.EventsPath);
+        bool accepted = true; string reason="accept";
+    if (candQa.aborted || (candQa.passed.HasValue && !candQa.passed.Value))
+    { accepted=false; reason="data_qa_failed"; }
+    else if (candMetrics.rows != baseMetrics.rows)
+    { accepted=false; reason=$"RowCount mismatch base={baseMetrics.rows} cand={candMetrics.rows}"; }
+    else if (candMetrics.pnl < baseMetrics.pnl - 0.0000m)
+        { accepted=false; reason="PnL worsened"; }
+        else if (candMetrics.maxDd > baseMetrics.maxDd + 0.0000m)
+        { accepted=false; reason="MaxDD worsened"; }
+        else if (alertBlocks > 0)
+        { accepted=false; reason="Alerts present"; }
+
+        var resultObj = new
+        {
+            type = "PROMOTION_RESULT_V1",
+            accepted,
+            reason,
+            baseline = new { pnl = Round2(baseMetrics.pnl), maxDd = Round2(baseMetrics.maxDd), rows = baseMetrics.rows },
+            candidate = new { pnl = Round2(candMetrics.pnl), maxDd = Round2(candMetrics.maxDd), rows = candMetrics.rows, alerts = alertBlocks },
+            hashes = new { events = eventsHashA, trades = tradesHashA, config_base = baseRun.ConfigHash, config_cand = candRunA.ConfigHash },
+            dataQa = new {
+                baseline = new { aborted = baseQa.aborted, passed = baseQa.passed },
+                candidate = new { aborted = candQa.aborted, passed = candQa.passed },
+                candidateB = new { aborted = candQaB.aborted, passed = candQaB.passed }
+            }
+        };
+        var json = JsonSerializer.Serialize(resultObj, new JsonSerializerOptions{ PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        if (!quiet) Console.WriteLine(json);
+        if (printMetrics)
+        {
+            Console.WriteLine($"BASE_PNL={baseMetrics.pnl.ToString(System.Globalization.CultureInfo.InvariantCulture)} BASE_MAXDD={baseMetrics.maxDd.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+            Console.WriteLine($"CAND_PNL={candMetrics.pnl.ToString(System.Globalization.CultureInfo.InvariantCulture)} CAND_MAXDD={candMetrics.maxDd.ToString(System.Globalization.CultureInfo.InvariantCulture)} ALERT_BLOCKS={alertBlocks}");
+        }
+        return accepted ? 0 : 2;
+    }
+    finally
+    {
+        try { if (Directory.Exists(tmpRoot) && !keepArtifacts) Directory.Delete(tmpRoot, true); } catch { }
+    }
+
+    static decimal Round2(decimal v) => Math.Round(v, 2, MidpointRounding.AwayFromZero);
+
+    // Local helpers (duplicate minimal logic from tests to avoid new dependency cycle)
+    static (int ExitCode,string EventsPath,string TradesPath,string ConfigHash) RunSingle(string simDll, string cfg, string scratchRoot, string repoRoot, string tag)
+    {
+        string runId = "PROMO-"+tag+"-"+Guid.NewGuid().ToString("N").Substring(0,8);
+        string tempCfg = Path.Combine(scratchRoot, tag+"_"+Guid.NewGuid().ToString("N")+".json");
+        File.Copy(cfg, tempCfg, true);
+        var psi = new System.Diagnostics.ProcessStartInfo("dotnet", $"exec \"{simDll}\" --config \"{tempCfg}\" --quiet --run-id {runId}")
+        {
+            RedirectStandardOutput=true,
+            RedirectStandardError=true,
+            UseShellExecute=false,
+            CreateNoWindow=true,
+            WorkingDirectory = repoRoot
+        };
+        var proc = System.Diagnostics.Process.Start(psi)!;
+        proc.WaitForExit(120000);
+        if (!proc.HasExited) { try { proc.Kill(entireProcessTree:true); } catch{} return (2, string.Empty, string.Empty, string.Empty); }
+        // Journal dir pattern: journals/M0/M0-RUN-{runId} under provided repoRoot
+        string runDir = Path.Combine(repoRoot, "journals", "M0", $"M0-RUN-{runId}");
+        string eventsPath = Path.Combine(runDir, "events.csv");
+        string tradesPath = Path.Combine(runDir, "trades.csv");
+        string configHash = ExtractConfigHash(eventsPath);
+        return (proc.ExitCode, eventsPath, tradesPath, configHash);
+    }
+
+    static List<string> SafeRead(string path)
+    {
+        try { return File.ReadAllLines(path).ToList(); } catch { return new List<string>(); }
+    }
+
+    static string ExtractConfigHash(string eventsPath)
+    {
+        try
+        {
+            var first = File.ReadLines(eventsPath).Skip(1).FirstOrDefault();
+            if (first == null) return string.Empty;
+            var parts = first.Split(',',4);
+            if (parts.Length<4) return string.Empty;
+            var payload = parts[3];
+            payload = payload.Trim('"').Replace("\"\"", "\"");
+            using var doc = JsonDocument.Parse(payload);
+            if (doc.RootElement.TryGetProperty("config_hash", out var ch) && ch.ValueKind==JsonValueKind.String) return ch.GetString()!;
+        }
+        catch { }
+        return string.Empty;
+    }
+
+    static (decimal pnl, decimal maxDd, int rows) ComputeMetrics(string tradesCsv)
+    {
+        try
+        {
+            var lines = File.ReadAllLines(tradesCsv).Where(l=>!string.IsNullOrWhiteSpace(l)).ToList();
+            if (lines.Count <= 1) return (0m, 0m, 0);
+            var header = lines[0].Split(',');
+            int pnlIdx = Array.FindIndex(header, h=>h.Equals("pnl_ccy", StringComparison.OrdinalIgnoreCase));
+            if (pnlIdx < 0) return (0m,0m,0);
+            decimal sum=0m; var cum = new List<decimal>();
+            foreach (var row in lines.Skip(1))
+            {
+                var parts = row.Split(',');
+                if (parts.Length <= pnlIdx) continue;
+                if (decimal.TryParse(parts[pnlIdx], System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var v))
+                { sum += v; cum.Add(sum); }
+            }
+            decimal peak=decimal.MinValue; decimal maxDd=0m; foreach (var c in cum){ if (c>peak) peak=c; var dd=peak-c; if (dd>maxDd) maxDd=dd; }
+            return (sum, maxDd, cum.Count);
+        }
+        catch { return (0m,0m,0); }
+    }
+
+    static int CountAlertBlocks(string eventsCsv)
+    {
+        try { return File.ReadLines(eventsCsv).Count(l=>l.Contains("ALERT_BLOCK_", StringComparison.Ordinal)); } catch { return 0; }
+    }
+
+    static string Sha256FileSkipMeta(string path)
+    {
+        try
+        {
+            // Read all lines; skip the very first line (meta) to avoid run-id induced divergence
+            var lines = File.ReadAllLines(path);
+            if (lines.Length <= 1)
+            {
+                return Sha256Raw(string.Join('\n', lines));
+            }
+            var sb = new StringBuilder();
+            for (int i = 1; i < lines.Length; i++)
+            {
+                if (i > 1) sb.Append('\n');
+                sb.Append(lines[i]);
+            }
+            return Sha256Raw(sb.ToString());
+        }
+        catch { return string.Empty; }
+    }
+
+    static string Sha256Raw(string content)
+    {
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(content));
+        return string.Concat(hash.Select(b=>b.ToString("X2")));
+    }
+
+    static int Reject(string reason, (int ExitCode,string EventsPath,string TradesPath,string ConfigHash) baseRun, (int ExitCode,string EventsPath,string TradesPath,string ConfigHash)? candA, (int ExitCode,string EventsPath,string TradesPath,string ConfigHash)? candB)
+    {
+        var obj = new { type="PROMOTION_RESULT_V1", accepted=false, reason };
+        Console.WriteLine(JsonSerializer.Serialize(obj));
+        return 2;
+    }
+
+    static (bool aborted, bool? passed) ExtractDataQaStatus(string eventsCsv)
+    {
+        try
+        {
+            bool aborted=false; bool? passed=null;
+            foreach (var line in File.ReadLines(eventsCsv))
+            {
+                if (line.Contains(",DATA_QA_ABORT_V1,")) aborted=true;
+                else if (line.Contains(",DATA_QA_SUMMARY_V1,"))
+                {
+                    // Parse payload JSON field
+                    var parts = line.Split(',',4); if (parts.Length<4) continue;
+                    var payload = parts[3].Trim().Trim('"').Replace("\"\"", "\"");
+                    using var doc = JsonDocument.Parse(payload);
+                    if (doc.RootElement.TryGetProperty("passed", out var p) && p.ValueKind==JsonValueKind.True) passed=true;
+                    else if (doc.RootElement.TryGetProperty("passed", out var p2) && p2.ValueKind==JsonValueKind.False) passed=false;
+                    if (doc.RootElement.TryGetProperty("aborted", out var ab) && (ab.ValueKind==JsonValueKind.True || ab.ValueKind==JsonValueKind.False)) aborted = ab.ValueKind==JsonValueKind.True;
+                }
+            }
+            return (aborted, passed);
+        }
+        catch { return (false, null); }
+    }
 }
 
 internal record DiffRow(string CompositeKey, string PayloadHash);
