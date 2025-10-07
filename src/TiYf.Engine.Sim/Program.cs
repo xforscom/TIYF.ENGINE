@@ -525,21 +525,23 @@ SentimentGuardConfig? BuildSentimentConfig(JsonDocument rawDoc)
 {
     try
     {
-        if (rawDoc.RootElement.TryGetProperty("featureFlags", out var ffNode) && ffNode.ValueKind==JsonValueKind.Object && ffNode.TryGetProperty("sentiment", out var sentNode))
+        string mode = "shadow"; // default shadow per spec
+        if (rawDoc.RootElement.TryGetProperty("featureFlags", out var ffNode) && ffNode.ValueKind==JsonValueKind.Object)
         {
-            var mode = sentNode.ValueKind==JsonValueKind.String ? sentNode.GetString() ?? "disabled" : "disabled";
-            if (mode.Equals("shadow", StringComparison.OrdinalIgnoreCase))
+            if (ffNode.TryGetProperty("sentiment", out var sentNode) && sentNode.ValueKind==JsonValueKind.String)
             {
-                // Optional nested sentiment config: sentimentConfig: { window: 20, volGuardSigma: 0.05 }
-                int window = 20; decimal sigma = 0.10m;
-                if (rawDoc.RootElement.TryGetProperty("sentimentConfig", out var sc) && sc.ValueKind==JsonValueKind.Object)
-                {
-                    if (sc.TryGetProperty("window", out var w) && w.ValueKind==JsonValueKind.Number) window = w.GetInt32();
-                    if (sc.TryGetProperty("volGuardSigma", out var s) && s.ValueKind==JsonValueKind.Number) sigma = s.GetDecimal();
-                }
-                return new SentimentGuardConfig(true, window, sigma, mode);
+                mode = sentNode.GetString() ?? "shadow"; // off|shadow|active
             }
         }
+        if (mode.Equals("off", StringComparison.OrdinalIgnoreCase)) return null; // disabled
+        // Optional nested sentiment config: sentimentConfig: { window: 20, volGuardSigma: 0.05 }
+        int window = 20; decimal sigma = 0.10m;
+        if (rawDoc.RootElement.TryGetProperty("sentimentConfig", out var sc) && sc.ValueKind==JsonValueKind.Object)
+        {
+            if (sc.TryGetProperty("window", out var w) && w.ValueKind==JsonValueKind.Number) window = w.GetInt32();
+            if (sc.TryGetProperty("volGuardSigma", out var s) && s.ValueKind==JsonValueKind.Number) sigma = s.GetDecimal();
+        }
+        return new SentimentGuardConfig(true, window, sigma, mode);
     }
     catch { }
     return null;

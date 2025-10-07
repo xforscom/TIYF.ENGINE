@@ -108,54 +108,6 @@ public sealed class EngineLoop
 				if (_clock.UtcNow != tick.UtcTimestamp)
 					_clock.Tick();
 
-				// Strategy scheduling -> real order execution path (run once per unique minute)
-				if (_deterministicStrategy is not null && _execution is not null && _positions is not null)
-				{
-					var tickMinute = new DateTime(tick.UtcTimestamp.Year, tick.UtcTimestamp.Month, tick.UtcTimestamp.Day, tick.UtcTimestamp.Hour, tick.UtcTimestamp.Minute, 0, DateTimeKind.Utc);
-					if (_lastStrategyMinute != tickMinute)
-					{
-						_lastStrategyMinute = tickMinute;
-						foreach (var act in _deterministicStrategy.Pending(tickMinute))
-						{
-							if (act.Side == Side.Close)
-							{
-								// Close = opposite market order
-								var closeSide = act.Symbol switch { _ => TradeSide.Buy }; // will be set below
-								// Determine original side from decision id pattern (01 => first leg BUY, 02 => second leg SELL)
-								bool firstLeg = act.DecisionId.EndsWith("-01", StringComparison.Ordinal);
-								var entrySide = firstLeg ? TradeSide.Buy : TradeSide.Sell;
-								closeSide = entrySide == TradeSide.Buy ? TradeSide.Sell : TradeSide.Buy;
-								// Units: match open units stored
-								var units = _openUnits.TryGetValue(act.DecisionId, out var ou) ? ou : 0L;
-								var req = new OrderRequest(act.DecisionId, act.Symbol, closeSide, units, tickMinute);
-								var result = await _execution.ExecuteMarketAsync(req, ct);
-								if (result.Accepted && result.Fill is { } fill)
-								{
-									_positions.OnFill(fill, _schemaVersion, _configHash ?? string.Empty, ExtractDataVersion());
-									// if trade closed produce into trades writer
-									if (_tradesWriter is not null)
-									{
-										foreach (var completed in _positions.Completed.Where(c=>c.DecisionId==act.DecisionId))
-											_tradesWriter.Append(completed);
-									}
-								}
-							}
-							else
-							{
-								// Open leg: determine side (BUY for -01 first emission, SELL for -02 first emission)
-								bool firstLeg = act.DecisionId.EndsWith("-01", StringComparison.Ordinal);
-								var side = firstLeg ? TradeSide.Buy : TradeSide.Sell;
-								// Units selection heuristic: XAUUSD uses 1, others 1000 (will later read from config params)
-								var units = act.Symbol.Equals("XAUUSD", StringComparison.OrdinalIgnoreCase) ? _sizeUnitsXau : _sizeUnitsFx;
-								_openUnits[act.DecisionId] = units;
-								var req = new OrderRequest(act.DecisionId, act.Symbol, side, units, tickMinute);
-								var result = await _execution.ExecuteMarketAsync(req, ct);
-								if (result.Accepted && result.Fill is { } fill)
-									_positions.OnFill(fill, _schemaVersion, _configHash ?? string.Empty, ExtractDataVersion());
-							}
-						}
-					}
-				}
 				// Deterministic ordering: order builders by instrument id then interval duration
 				foreach (var kvp in _builders
 					.Where(b => b.Key.Item1.Equals(tick.InstrumentId))
@@ -186,8 +138,9 @@ public sealed class EngineLoop
 					var json = JsonSerializer.SerializeToElement(enriched);
 					await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, _barEventType, json), ct);
 
-					// Sentiment volatility guard (shadow only) after bar emission
-					if (_sentimentConfig is { Enabled: true } sg)
+						// Sentiment volatility guard (shadow or active) after bar emission, before strategy trade execution
+						bool barClamp = false; decimal? lastOriginalUnits = null; long? lastAdjustedUnits = null; string? lastAppliedSymbol = null; DateTime? lastAppliedTs = null;
+						if (_sentimentConfig is { Enabled: true } sg)
 					{
 						var symbol = bar.InstrumentId.Value;
 						if (!_sentimentWindows.TryGetValue(symbol, out var q)) { q = new Queue<decimal>(sg.Window); _sentimentWindows[symbol] = q; }
@@ -198,8 +151,68 @@ public sealed class EngineLoop
 						{
 							var clampPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { symbol = sample.Symbol, reason = "volatility_guard", ts = sample.Ts });
 							await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "INFO_SENTIMENT_CLAMP_V1", clampPayload), ct);
+								barClamp = true; lastAppliedSymbol = sample.Symbol; lastAppliedTs = sample.Ts;
 						}
 					}
+
+						// Strategy scheduling (after sentiment so unit scaling can apply)
+						if (_deterministicStrategy is not null && _execution is not null && _positions is not null)
+						{
+							var tickMinute = new DateTime(tick.UtcTimestamp.Year, tick.UtcTimestamp.Month, tick.UtcTimestamp.Day, tick.UtcTimestamp.Hour, tick.UtcTimestamp.Minute, 0, DateTimeKind.Utc);
+							if (_lastStrategyMinute != tickMinute)
+							{
+								_lastStrategyMinute = tickMinute;
+								foreach (var act in _deterministicStrategy.Pending(tickMinute))
+								{
+									if (act.Side == Side.Close)
+									{
+										// Close path identical irrespective of sentiment scaling (scaling only applies to opens)
+										var closeSide = act.Symbol switch { _ => TradeSide.Buy }; // will be set below
+										bool firstLeg = act.DecisionId.EndsWith("-01", StringComparison.Ordinal);
+										var entrySide = firstLeg ? TradeSide.Buy : TradeSide.Sell;
+										closeSide = entrySide == TradeSide.Buy ? TradeSide.Sell : TradeSide.Buy;
+										var units = _openUnits.TryGetValue(act.DecisionId, out var ou) ? ou : 0L;
+										var req = new OrderRequest(act.DecisionId, act.Symbol, closeSide, units, tickMinute);
+										var result = await _execution.ExecuteMarketAsync(req, ct);
+										if (result.Accepted && result.Fill is { } fill)
+										{
+											_positions.OnFill(fill, _schemaVersion, _configHash ?? string.Empty, ExtractDataVersion());
+											if (_tradesWriter is not null)
+											{
+												foreach (var completed in _positions.Completed.Where(c=>c.DecisionId==act.DecisionId))
+													_tradesWriter.Append(completed);
+											}
+										}
+									}
+									else
+									{
+										bool firstLeg = act.DecisionId.EndsWith("-01", StringComparison.Ordinal);
+										var side = firstLeg ? TradeSide.Buy : TradeSide.Sell;
+										var baseUnits = act.Symbol.Equals("XAUUSD", StringComparison.OrdinalIgnoreCase) ? _sizeUnitsXau : _sizeUnitsFx;
+										long finalUnits = baseUnits;
+										if (barClamp && _sentimentConfig is { Mode: var m } && m.Equals("active", StringComparison.OrdinalIgnoreCase))
+										{
+											// Deterministic scaling rule
+											var scaled = (long)Math.Floor(baseUnits * 0.5m);
+											if (baseUnits > 0 && scaled < 1) scaled = 1;
+											finalUnits = scaled;
+											lastOriginalUnits = baseUnits; lastAdjustedUnits = finalUnits;
+										}
+										_openUnits[act.DecisionId] = finalUnits;
+										var req = new OrderRequest(act.DecisionId, act.Symbol, side, finalUnits, tickMinute);
+										var result = await _execution.ExecuteMarketAsync(req, ct);
+										if (result.Accepted && result.Fill is { } fill)
+											_positions.OnFill(fill, _schemaVersion, _configHash ?? string.Empty, ExtractDataVersion());
+									}
+								}
+							}
+							// Emit APPLIED event if scaling occurred
+							if (lastOriginalUnits.HasValue && lastAdjustedUnits.HasValue && lastAppliedSymbol is not null && lastAppliedTs.HasValue && _sentimentConfig is { Mode: var modeApplied } && modeApplied.Equals("active", StringComparison.OrdinalIgnoreCase))
+							{
+								var appliedPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { symbol = lastAppliedSymbol, ts = lastAppliedTs.Value, original_units = lastOriginalUnits.Value, adjusted_units = lastAdjustedUnits.Value, reason = "volatility_guard" });
+								await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "INFO_SENTIMENT_APPLIED_V1", appliedPayload), ct);
+							}
+						}
 					// Emit risk probe (synthetic) if services configured
 					if (_riskFormulas is not null && _basketAggregator is not null && _riskProbeEnabled)
 					{
