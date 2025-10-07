@@ -24,14 +24,14 @@ public class PromotionCliDataQaTests
     private static CliResult RunPromote(string baselineCfg, string candidateCfg, string? culture=null)
     {
         string root = RepoRoot();
-        string toolsDll = Path.Combine(root, "src","TiYf.Engine.Tools","bin","Release","net8.0","TiYf.Engine.Tools.dll");
+        // Always prefer Debug build (contains latest diagnostics reliably in current project layout)
+        string toolsDll = Path.Combine(root, "src","TiYf.Engine.Tools","bin","Debug","net8.0","TiYf.Engine.Tools.dll");
         if (!File.Exists(toolsDll))
         {
-            // Attempt build once
-            var build = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("dotnet","build -c Release --nologo") { WorkingDirectory = root });
+            var build = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("dotnet","build -c Debug --nologo") { WorkingDirectory = root });
             build!.WaitForExit();
         }
-        Assert.True(File.Exists(toolsDll), "Tools DLL missing after build");
+        Assert.True(File.Exists(toolsDll), $"Tools DLL missing after debug build: {toolsDll}");
         var sb = new StringBuilder();
         sb.Append("exec \"").Append(toolsDll).Append("\" promote --baseline \"").Append(baselineCfg).Append("\" --candidate \"").Append(candidateCfg).Append("\" --workdir \"").Append(root).Append("\" --print-metrics");
         if (!string.IsNullOrWhiteSpace(culture)) sb.Append(" --culture ").Append(culture);
@@ -43,12 +43,11 @@ public class PromotionCliDataQaTests
             UseShellExecute = false,
             CreateNoWindow = true
         };
-        var proc = System.Diagnostics.Process.Start(psi)!;
-        var stdout = new StringBuilder(); var stderr = new StringBuilder();
-        proc.OutputDataReceived += (_,e)=> { if (e.Data!=null) stdout.AppendLine(e.Data); }; proc.BeginOutputReadLine();
-        proc.ErrorDataReceived += (_,e)=> { if (e.Data!=null) stderr.AppendLine(e.Data); }; proc.BeginErrorReadLine();
-        if (!proc.WaitForExit(180_000)) { try { proc.Kill(entireProcessTree:true); } catch {}; Assert.Fail($"Promotion timeout CMD=dotnet {sb}\nSTDOUT\n{stdout}\nSTDERR\n{stderr}"); }
-        return new CliResult(proc.ExitCode, stdout.ToString(), stderr.ToString());
+    var proc = System.Diagnostics.Process.Start(psi)!;
+    var stdout = proc.StandardOutput.ReadToEnd();
+    var stderr = proc.StandardError.ReadToEnd();
+    if (!proc.WaitForExit(180_000)) { try { proc.Kill(entireProcessTree:true); } catch {}; Assert.Fail($"Promotion timeout CMD=dotnet {sb}\nSTDOUT\n{stdout}\nSTDERR\n{stderr}"); }
+    return new CliResult(proc.ExitCode, stdout, stderr);
     }
 
     private static JsonDocument ParseResult(string stdout, out JsonElement root)
@@ -65,7 +64,8 @@ public class PromotionCliDataQaTests
     {
         var json = File.ReadAllText(sourceCfgPath);
         var node = System.Text.Json.Nodes.JsonNode.Parse(json)!.AsObject();
-        node["featureFlags"] = new System.Text.Json.Nodes.JsonObject { ["dataQa"] = "active" };
+    // Preserve riskProbe disabled (original fixture disables it) to avoid alert emissions affecting acceptance
+    node["featureFlags"] = new System.Text.Json.Nodes.JsonObject { ["dataQa"] = "active", ["riskProbe"] = "disabled" };
         node["dataQA"] = new System.Text.Json.Nodes.JsonObject {
             ["enabled"] = true,
             ["maxMissingBarsPerInstrument"] = 999,
@@ -84,7 +84,7 @@ public class PromotionCliDataQaTests
         var origFixtureRoot = Path.GetDirectoryName(sourceCfgPath)!; // tests/fixtures/backtest_m0
         // Copy tick files and induce missing minute for failure
         var tmp = Path.Combine(Path.GetTempPath(), "promo_active_fail_"+Guid.NewGuid().ToString("N")); Directory.CreateDirectory(tmp);
-        foreach (var f in Directory.GetFiles(origFixtureRoot, "ticks_*.csv"))
+    foreach (var f in Directory.GetFiles(origFixtureRoot, "ticks_*.csv").OrderBy(p=>p, StringComparer.Ordinal))
         {
             var lines = File.ReadAllLines(f).Where(l=>!l.Contains("2025-01-02T00:30:"));
             File.WriteAllLines(Path.Combine(tmp, Path.GetFileName(f)), lines);
@@ -92,7 +92,7 @@ public class PromotionCliDataQaTests
         File.Copy(Path.Combine(origFixtureRoot, "instruments.csv"), Path.Combine(tmp, "instruments.csv"));
         var json = File.ReadAllText(sourceCfgPath);
         var node = System.Text.Json.Nodes.JsonNode.Parse(json)!.AsObject();
-        node["featureFlags"] = new System.Text.Json.Nodes.JsonObject { ["dataQa"] = "active" };
+    node["featureFlags"] = new System.Text.Json.Nodes.JsonObject { ["dataQa"] = "active", ["riskProbe"] = "disabled" };
         node["dataQA"] = new System.Text.Json.Nodes.JsonObject {
             ["enabled"] = true,
             ["maxMissingBarsPerInstrument"] = 0, // strict
