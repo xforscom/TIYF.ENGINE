@@ -8,6 +8,7 @@ public sealed class FileJournalWriter : IJournalWriter
 {
 	private readonly StreamWriter _writer;
 	private bool _disposed;
+	private ulong _nextSeq = 1UL;
 	public string Path { get; }
 
 	public FileJournalWriter(string directory, string runId, string schemaVersion, string configHash, string? dataVersion = null)
@@ -31,10 +32,31 @@ public sealed class FileJournalWriter : IJournalWriter
 	public async Task AppendAsync(JournalEvent evt, CancellationToken ct = default)
 	{
 		if (_disposed) throw new ObjectDisposedException(nameof(FileJournalWriter));
-		await _writer.WriteLineAsync(evt.ToCsvLine());
+		// If caller passed Sequence=0 treat as assign-next
+		var seq = evt.Sequence == 0 ? _nextSeq : evt.Sequence;
+		if (seq != _nextSeq) throw new InvalidOperationException("Non-monotonic sequence usage");
+		_nextSeq++;
+		var line = new JournalEvent(seq, evt.UtcTimestamp, evt.EventType, evt.Payload).ToCsvLine();
+		await _writer.WriteLineAsync(line);
 		await _writer.FlushAsync();
-		// NOTE: fsync optional; can add conditional platform-specific flush here later.
 	}
+
+	public async Task AppendRangeAsync(IEnumerable<JournalEvent> events, CancellationToken ct = default)
+	{
+		if (_disposed) throw new ObjectDisposedException(nameof(FileJournalWriter));
+		var sb = new StringBuilder();
+		foreach (var evt in events)
+		{
+			var seq = evt.Sequence == 0 ? _nextSeq : evt.Sequence;
+			if (seq != _nextSeq) throw new InvalidOperationException("Non-monotonic sequence in batch");
+			_nextSeq++;
+			sb.AppendLine(new JournalEvent(seq, evt.UtcTimestamp, evt.EventType, evt.Payload).ToCsvLine());
+		}
+		await _writer.WriteAsync(sb.ToString());
+		await _writer.FlushAsync();
+	}
+
+	public ulong NextSequence => _nextSeq;
 
 	public async ValueTask DisposeAsync()
 	{

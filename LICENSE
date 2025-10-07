@@ -1,9 +1,16 @@
-Proprietary License (Placeholder)
+Proprietary License
 
-Copyright (c) 2025 TiYf.
+Copyright (c) 2025 TiYf. All rights reserved.
 
-All rights reserved. Unauthorized copying, redistribution, modification, publicly displaying, sublicensing, or commercial use of this software, via any medium, is strictly prohibited.
+1. Grant of Use. Authorized contributors and employees ("Authorized Users") are granted a non-transferable, non-exclusive right to use, modify, and merge the Software internally for evaluation, development, and operation of TiYf systems only.
+2. Restrictions. Except as expressly permitted above, no reproduction, distribution, sublicensing, external hosting, disclosure, sale, or publication of the Software or derivative works is allowed without prior written consent.
+3. Derivatives. Internal derivative works remain subject to these terms and must not remove or obscure this notice.
+4. Confidentiality. The Software and its source constitute Confidential Information. Authorized Users must apply reasonable safeguards and may not disclose source or proprietary algorithms to third parties.
+5. Trademarks. This license does not grant rights to use any TiYf marks, names, or logos.
+6. Termination. Rights automatically terminate upon breach. Upon termination, all copies (including derivatives) must be securely destroyed.
+7. No Warranty. THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+8. Liability. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR ITS USE.
+9. Export. Users must comply with applicable export control laws.
+10. Governing Law. To be specified in master service / employment agreement; absent such, defaults to the jurisdiction of primary corporate incorporation.
 
-Permission is NOT granted to any person obtaining a copy of this software to deal in the Software without explicit prior written permission from the Owner.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY.
+For external licensing inquiries contact: legal@tiyf.internal

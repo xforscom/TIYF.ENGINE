@@ -204,6 +204,27 @@ static int RunPromote(List<string> args)
     bool keepArtifacts = false; // set to true if determinism failure so we skip deletion
     try
     {
+        // Resolve sentiment modes up-front (default shadow). Off synonyms: off|disabled|none.
+        static string ResolveSentimentMode(string cfgPath)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(cfgPath));
+                string mode = "shadow";
+                if (doc.RootElement.TryGetProperty("featureFlags", out var ff) && ff.ValueKind==JsonValueKind.Object && ff.TryGetProperty("sentiment", out var s) && s.ValueKind==JsonValueKind.String)
+                {
+                    var raw = s.GetString() ?? "shadow";
+                    if (raw.Equals("off",StringComparison.OrdinalIgnoreCase) || raw.Equals("disabled",StringComparison.OrdinalIgnoreCase) || raw.Equals("none",StringComparison.OrdinalIgnoreCase)) mode = "off";
+                    else if (raw.Equals("active", StringComparison.OrdinalIgnoreCase)) mode = "active";
+                    else mode = "shadow"; // treat shadow/unknown as shadow
+                }
+                return mode;
+            }
+            catch { return "shadow"; }
+        }
+        var baselineMode = ResolveSentimentMode(baseline!);
+        var candidateMode = ResolveSentimentMode(candidate!);
+
         // Run baseline once
     var baseRun = RunSingle(simDll, baseline!, tmpRoot, workdir!, "base");
         if (baseRun.ExitCode != 0) return Reject("Baseline run failed", baseRun, null, null);
@@ -313,11 +334,68 @@ static int RunPromote(List<string> args)
         else if (alertBlocks > 0)
         { accepted=false; reason="Alerts present"; }
 
+        // Sentiment parity & gating after financial & QA gates
+        bool sentimentParity = true; string sentimentReason = "ok"; string diffHint = string.Empty;
+        try
+        {
+            static List<string> LoadSentimentLines(string path)
+            {
+                var all = File.ReadAllLines(path);
+                var list = new List<string>();
+                for (int i=2;i<all.Length;i++) // skip meta + header
+                {
+                    var line = all[i];
+                    if (line.Contains("INFO_SENTIMENT_", StringComparison.Ordinal)) list.Add(line);
+                }
+                return list;
+            }
+            var baseSent = LoadSentimentLines(baseRun.EventsPath);
+            var candSent = LoadSentimentLines(candRunA.EventsPath);
+            int baseApplied = baseSent.Count(l=>l.Contains("INFO_SENTIMENT_APPLIED_V1", StringComparison.Ordinal));
+            int candApplied = candSent.Count(l=>l.Contains("INFO_SENTIMENT_APPLIED_V1", StringComparison.Ordinal));
+            if (baselineMode=="shadow" && candidateMode=="active" && candApplied==0)
+            {
+                // shadow→active benign (no clamp effect) allowed
+            }
+            else
+            {
+                if (baselineMode!=candidateMode)
+                {
+                    sentimentParity=false; sentimentReason="sentiment_mismatch";
+                }
+                else
+                {
+                    int min = Math.Min(baseSent.Count, candSent.Count);
+                    for (int i=0;i<min;i++)
+                    {
+                        if (!string.Equals(baseSent[i], candSent[i], StringComparison.Ordinal))
+                        {
+                            sentimentParity=false; sentimentReason="sentiment_mismatch"; diffHint = BuildDiffHint(baseSent[i], candSent[i]); break;
+                        }
+                    }
+                    if (sentimentParity && baseSent.Count!=candSent.Count)
+                    { sentimentParity=false; sentimentReason="sentiment_mismatch"; diffHint = "sentiment_event_count"; }
+                    if (sentimentParity && baselineMode=="active" && baseApplied!=candApplied)
+                    { sentimentParity=false; sentimentReason="sentiment_mismatch"; diffHint = $"applied_count base={baseApplied} cand={candApplied}"; }
+                }
+            }
+            if (baselineMode=="active" && (!sentimentParity || candidateMode!="active"))
+            {
+                accepted=false; reason="sentiment_mismatch"; sentimentParity=false; sentimentReason="sentiment_mismatch";
+                if (string.IsNullOrEmpty(diffHint) && baseSent.Count>0 && candSent.Count>0) diffHint = BuildDiffHint(baseSent[0], candSent[0]);
+            }
+        }
+        catch (Exception sx)
+        {
+            if (baselineMode=="active") { accepted=false; reason="sentiment_mismatch"; sentimentParity=false; sentimentReason="sentiment_mismatch"; diffHint = "exception "+sx.GetType().Name; }
+        }
+
         var resultObj = new
         {
             type = "PROMOTION_RESULT_V1",
             accepted,
             reason,
+            sentiment = new { baseline_mode = baselineMode, candidate_mode = candidateMode, parity = sentimentParity, reason = sentimentReason, diff_hint = diffHint },
             baseline = new { pnl = Round2(baseMetrics.pnl), maxDd = Round2(baseMetrics.maxDd), rows = baseMetrics.rows },
             candidate = new { pnl = Round2(candMetrics.pnl), maxDd = Round2(candMetrics.maxDd), rows = candMetrics.rows, alerts = alertBlocks },
             hashes = new { events = eventsHashA, trades = tradesHashA, config_base = baseRun.ConfigHash, config_cand = candRunA.ConfigHash },
@@ -336,14 +414,17 @@ static int RunPromote(List<string> args)
         }
         return accepted ? 0 : 2;
     }
-    finally
-    {
-        try { if (Directory.Exists(tmpRoot) && !keepArtifacts) Directory.Delete(tmpRoot, true); } catch { }
-    }
+    finally { try { if (Directory.Exists(tmpRoot) && !keepArtifacts) Directory.Delete(tmpRoot, true); } catch { } }
 
     static decimal Round2(decimal v) => Math.Round(v, 2, MidpointRounding.AwayFromZero);
 
     // Local helpers (duplicate minimal logic from tests to avoid new dependency cycle)
+    static string BuildDiffHint(string a, string b)
+    {
+        if (a.Length>120) a = a.Substring(0,120);
+        if (b.Length>120) b = b.Substring(0,120);
+        return $"A:{a}|B:{b}";
+    }
     static (int ExitCode,string EventsPath,string TradesPath,string ConfigHash) RunSingle(string simDll, string cfg, string scratchRoot, string repoRoot, string tag)
     {
         string runId = "PROMO-"+tag+"-"+Guid.NewGuid().ToString("N").Substring(0,8);
