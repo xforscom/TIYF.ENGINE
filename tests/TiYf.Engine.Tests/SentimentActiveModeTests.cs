@@ -70,11 +70,20 @@ public class SentimentActiveModeTests
 
     private static string HashSkipMeta(string path)
     {
-        var lines = File.ReadAllLines(path);
-        if (lines.Length<=1) return string.Empty;
-        using var sha = SHA256.Create();
+        // Skip meta line and normalize out config_hash column so differing feature flags don't cause trade hash divergence
+        var lines = File.ReadAllLines(path).Where(l=>!string.IsNullOrWhiteSpace(l)).ToList();
+        if (lines.Count < 2) return string.Empty; // meta + maybe header
+        var header = lines[1].Split(','); // assuming line0 meta, line1 header for trades.csv
+        int cfgIdx = Array.FindIndex(header, h=>h.Equals("config_hash", StringComparison.OrdinalIgnoreCase));
         var sb = new StringBuilder();
-        for (int i=1;i<lines.Length;i++) sb.AppendLine(lines[i]);
+        // Rebuild header sans config_hash
+        sb.AppendLine(string.Join(',', header.Where((h,i)=>i!=cfgIdx)));
+        foreach (var row in lines.Skip(2))
+        {
+            var parts = row.Split(',');
+            sb.AppendLine(string.Join(',', parts.Where((c,i)=>i!=cfgIdx)));
+        }
+        using var sha = SHA256.Create();
         return string.Concat(sha.ComputeHash(Encoding.UTF8.GetBytes(sb.ToString())).Select(b=>b.ToString("X2")));
     }
 
@@ -95,19 +104,7 @@ public class SentimentActiveModeTests
         // Ensure APPLIED present in active and absent in off
         Assert.Contains(File.ReadLines(eventsActive), l=>l.Contains("INFO_SENTIMENT_APPLIED_V1"));
         Assert.DoesNotContain(File.ReadLines(eventsOff), l=>l.Contains("INFO_SENTIMENT_APPLIED_V1"));
-        // Trade unit difference: gather first open trade units
-        long UnitsFromTrades(string trades)
-        {
-            var lines = File.ReadAllLines(trades).Skip(1); // skip header
-            foreach (var line in lines)
-            {
-                var parts = line.Split(',');
-                var unitIdx = Array.FindIndex(parts, p=>p.Equals("units", StringComparison.OrdinalIgnoreCase));
-                // fallback: header parse
-            }
-            return 0; // placeholder (units not yet available in current schema test harness)
-        }
-        // Just assert differing hashes for trades when scaling happens (unless schema lacks units column) -> fallback assertion: events differ due to applied event
+        // Expect events hash difference due to APPLIED event presence; trades may or may not differ depending on unit column exposure
         Assert.NotEqual(HashSkipMeta(eventsOff), HashSkipMeta(eventsActive));
     }
 
@@ -150,7 +147,8 @@ public class SentimentActiveModeTests
         var shaLines = File.ReadAllLines(eventsShadow);
         int min = Math.Min(actLines.Length, shaLines.Length);
         int firstDiff = -1;
-        for (int i=0;i<min;i++) if (!string.Equals(actLines[i], shaLines[i], StringComparison.Ordinal)) { firstDiff=i; break; }
+        // Skip meta + header (first two lines) when diffing
+        for (int i=2;i<min;i++) if (!string.Equals(actLines[i], shaLines[i], StringComparison.Ordinal)) { firstDiff=i; break; }
         Assert.True(firstDiff>=0, "No divergence found (unexpected if clamp triggers)");
         // Ensure divergence line contains either APPLIED event or a trade influence marker
         bool acceptable = actLines[firstDiff].Contains("INFO_SENTIMENT_APPLIED_V1") || actLines[firstDiff].Contains("INFO_SENTIMENT_CLAMP_V1");
