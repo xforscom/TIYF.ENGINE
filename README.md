@@ -130,6 +130,49 @@ On success it prints: `PASS (tests+verify+diff deterministic)`.
 
 If any stage fails, the script exits non-zero with a descriptive bracketed tag (e.g. `[SMOKE] Diff FAILED`).
 
+## Promotion (M1)
+
+Deterministic promotion gating between a baseline config and a candidate.
+
+Runs baseline once and candidate twice (A/B) enforcing:
+
+- A/B determinism (events.csv + trades.csv SHA-256 parity)
+- Safety: zero ALERT_BLOCK_* events (if required)
+- Performance gates: pnl_cand >= pnl_base - epsilon; maxDD_cand <= maxDD_base + epsilon
+- Trade row count invariant for fixture (6 rows)
+
+### Command
+
+```powershell
+dotnet run --project src/TiYf.Engine.Tools -- promote run \
+  --config tests/fixtures/backtest_m0/promotion.json \
+  --output artifacts/m1_promo
+```
+
+Add `--culture de-DE` to assert culture invariance.
+
+### Exit Codes
+
+0 = accepted | 2 = rejected | 1 = error (unexpected)
+
+### Artifacts (atomic, culture-invariant)
+
+- `promotion.events.csv` (schema_version=1.1.0,promotion_journal=1)
+  - PROMOTION_BEGIN_V1
+  - PROMOTION_GATES_V1
+  - PROMOTION_ACCEPTED_V1 or PROMOTION_REJECTED_V1
+  - ROLLBACK_* (only if rejected)
+- `promotion_decision.json` (accepted, reason, baseline & candidate hashes)
+
+Fixture: `tests/fixtures/backtest_m0/promotion.json`
+
+### Determinism Guarantees
+
+- Timestamp derived from first baseline trade (no wall clock)
+- Atomic temp -> move writes
+- Invariant numeric formatting (InvariantCulture)
+- SHA-256 parity checks ensure candidate A/B identity
+
 ## License
 
 Proprietary – All rights reserved (placeholder). Not for external distribution.
