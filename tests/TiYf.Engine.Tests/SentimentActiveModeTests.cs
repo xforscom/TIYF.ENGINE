@@ -121,8 +121,23 @@ public class SentimentActiveModeTests
         var (eventsOff, tradesOff) = Run(baseDoc, w => {
             w.WritePropertyName("featureFlags"); w.WriteStartObject(); w.WriteString("sentiment","off"); w.WriteString("riskProbe","disabled"); w.WriteEndObject();
         }, "offParity");
-        // Trades hash equality
-        Assert.Equal(HashSkipMeta(tradesOff), HashSkipMeta(tradesShadow));
+        // Trades parity: normalize by removing config_hash column and whitespace differences
+        string NormalizeTrades(string path)
+        {
+            var lines = File.ReadAllLines(path).Where(l=>!string.IsNullOrWhiteSpace(l)).ToList();
+            if (lines.Count < 2) return string.Empty;
+            var header = lines[1].Split(',');
+            int cfgIdx = Array.FindIndex(header, h=>h.Equals("config_hash", StringComparison.OrdinalIgnoreCase));
+            var sb = new StringBuilder();
+            sb.AppendLine(string.Join(',', header.Where((h,i)=>i!=cfgIdx)));
+            foreach (var row in lines.Skip(2))
+            {
+                var parts = row.Split(',');
+                sb.AppendLine(string.Join(',', parts.Where((c,i)=>i!=cfgIdx)));
+            }
+            return sb.ToString();
+        }
+        Assert.Equal(NormalizeTrades(tradesOff), NormalizeTrades(tradesShadow));
         // Shadow has Z events, off does not
         Assert.Contains(File.ReadLines(eventsShadow), l=>l.Contains("INFO_SENTIMENT_Z_V1"));
         Assert.DoesNotContain(File.ReadLines(eventsOff), l=>l.Contains("INFO_SENTIMENT_Z_V1"));
