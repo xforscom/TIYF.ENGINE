@@ -533,7 +533,7 @@ SentimentGuardConfig? BuildSentimentConfig(JsonDocument rawDoc)
                 mode = sentNode.GetString() ?? "shadow"; // off|shadow|active
             }
         }
-        if (mode.Equals("off", StringComparison.OrdinalIgnoreCase)) return null; // disabled
+    if (mode.Equals("off", StringComparison.OrdinalIgnoreCase) || mode.Equals("disabled", StringComparison.OrdinalIgnoreCase) || mode.Equals("none", StringComparison.OrdinalIgnoreCase)) return null; // treat synonyms as off
         // Optional nested sentiment config: sentimentConfig: { window: 20, volGuardSigma: 0.05 }
         int window = 20; decimal sigma = 0.10m;
         if (rawDoc.RootElement.TryGetProperty("sentimentConfig", out var sc) && sc.ValueKind==JsonValueKind.Object)

@@ -140,7 +140,7 @@ public sealed class EngineLoop
 
 						// Sentiment volatility guard (shadow or active) after bar emission, before strategy trade execution
 						bool barClamp = false; decimal? lastOriginalUnits = null; long? lastAdjustedUnits = null; string? lastAppliedSymbol = null; DateTime? lastAppliedTs = null;
-						if (_sentimentConfig is { Enabled: true } sg)
+						if (_sentimentConfig is { Enabled: true, Mode: var modeVal } sg && (modeVal.Equals("shadow", StringComparison.OrdinalIgnoreCase) || modeVal.Equals("active", StringComparison.OrdinalIgnoreCase)))
 					{
 						var symbol = bar.InstrumentId.Value;
 						if (!_sentimentWindows.TryGetValue(symbol, out var q)) { q = new Queue<decimal>(sg.Window); _sentimentWindows[symbol] = q; }
