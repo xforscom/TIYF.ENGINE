@@ -125,12 +125,12 @@ public class SentimentActiveModeTests
         string NormalizeTrades(string path)
         {
             var lines = File.ReadAllLines(path).Where(l=>!string.IsNullOrWhiteSpace(l)).ToList();
-            if (lines.Count < 2) return string.Empty;
-            var header = lines[1].Split(',');
+            if (lines.Count < 1) return string.Empty;
+            var header = lines[0].Split(',');
             int cfgIdx = Array.FindIndex(header, h=>h.Equals("config_hash", StringComparison.OrdinalIgnoreCase));
             var sb = new StringBuilder();
             sb.AppendLine(string.Join(',', header.Where((h,i)=>i!=cfgIdx)));
-            foreach (var row in lines.Skip(2))
+            foreach (var row in lines.Skip(1))
             {
                 var parts = row.Split(',');
                 sb.AppendLine(string.Join(',', parts.Where((c,i)=>i!=cfgIdx)));
