@@ -1,0 +1,82 @@
+name: m3-sentiment-matrix
+
+on:
+  push:
+    branches: [ feat/m3-active ]
+  pull_request:
+    branches: [ feat/m3-active ]
+
+jobs:
+  sentiment:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [off, shadow, active]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore
+      - name: Build Release
+        run: dotnet build -c Release --no-restore
+      - name: Prepare Config & Run (${{ matrix.mode }})
+        env:
+          MODE: ${{ matrix.mode }}
+        run: |
+          set -euo pipefail
+          CFG=tests/fixtures/backtest_m0/config.backtest-m0.candidate.json
+          TEMP_CFG=$(mktemp /tmp/sentiment-XXXX.json)
+          if ! command -v jq >/dev/null; then sudo apt-get update && sudo apt-get install -y jq; fi
+          if [ "$MODE" = "active" ]; then
+            jq '.featureFlags.sentiment="active" | .featureFlags.riskProbe="disabled" | .sentimentConfig={"window":5,"volGuardSigma":1e-7}' "$CFG" > "$TEMP_CFG"
+          elif [ "$MODE" = "shadow" ]; then
+            jq '.featureFlags.sentiment="shadow" | .featureFlags.riskProbe="disabled" | .sentimentConfig={"window":5,"volGuardSigma":1e-7}' "$CFG" > "$TEMP_CFG"
+          else
+            jq '.featureFlags.sentiment="off" | .featureFlags.riskProbe="disabled"' "$CFG" > "$TEMP_CFG"
+          fi
+          dotnet exec src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll --config "$TEMP_CFG" --run-id CI-$MODE --quiet
+          mkdir -p artifacts/$MODE
+          cp -r journals/M0/*CI-$MODE* artifacts/$MODE/ || true
+      - name: Upload journals (${{ matrix.mode }})
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: journals-${{ matrix.mode }}
+          path: artifacts/${{ matrix.mode }}
+
+  invariants:
+    runs-on: ubuntu-latest
+    needs: sentiment
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build Release
+        run: dotnet build -c Release --no-restore
+      - name: Validate Cross-Mode Invariants
+        run: |
+          set -euo pipefail
+          ROOT=journals/M0
+          OFF_EVENTS=$(ls $ROOT/*CI-off*/events.csv)
+          SHADOW_EVENTS=$(ls $ROOT/*CI-shadow*/events.csv)
+          ACTIVE_EVENTS=$(ls $ROOT/*CI-active*/events.csv)
+          OFF_TRADES=$(ls $ROOT/*CI-off*/trades.csv)
+          SHADOW_TRADES=$(ls $ROOT/*CI-shadow*/trades.csv)
+          ACTIVE_TRADES=$(ls $ROOT/*CI-active*/trades.csv)
+          hash_skip_meta(){ tail -n +2 "$1" | sha256sum | cut -d' ' -f1; }
+          if [ "$(hash_skip_meta "$OFF_TRADES")" != "$(hash_skip_meta "$SHADOW_TRADES")" ]; then echo 'ERROR: off vs shadow trades mismatch'; exit 1; fi
+          if grep -q INFO_SENTIMENT_Z_V1 "$OFF_EVENTS"; then echo 'ERROR: off mode has Z events'; exit 1; fi
+          if ! grep -q INFO_SENTIMENT_Z_V1 "$SHADOW_EVENTS"; then echo 'ERROR: shadow missing Z events'; exit 1; fi
+          if grep -q INFO_SENTIMENT_APPLIED_V1 "$ACTIVE_EVENTS"; then
+            if diff <(tail -n +3 "$ACTIVE_EVENTS") <(tail -n +3 "$SHADOW_EVENTS") >/dev/null; then echo 'ERROR: expected divergence after clamp'; exit 1; fi
+          fi
+      - name: Upload All Journals (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: journals-all
+          path: journals/M0
