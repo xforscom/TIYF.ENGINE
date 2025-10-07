@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using TiYf.Engine.Core;
+using TiYf.Engine.Sidecar;
 
 namespace TiYf.Engine.Sim;
 
@@ -82,14 +83,18 @@ public sealed class EngineLoop
 	private readonly TradesJournalWriter? _tradesWriter;
 	private readonly string? _dataVersion;
 	private readonly Dictionary<string,long> _openUnits = new(); // decisionId -> units
+	private readonly SentimentGuardConfig? _sentimentConfig;
+	private readonly Dictionary<string,int> _decisionCounters = new(StringComparer.Ordinal);
+	private readonly Dictionary<string,int> _riskProbeCounters = new(StringComparer.Ordinal); // per-instrument deterministic counter for risk probe DecisionId
+	private readonly Dictionary<string,Queue<decimal>> _sentimentWindows = new(StringComparer.Ordinal);
 	private DateTime? _lastStrategyMinute; // to avoid emitting strategy actions multiple times per minute when multiple instrument ticks share the same minute
     private readonly bool _riskProbeEnabled = true; // feature flag
 
 	private string? ExtractDataVersion() => _dataVersion;
 
-	public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action? onBarEmitted = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true)
+	public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action? onBarEmitted = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true, SentimentGuardConfig? sentimentConfig = null)
 	{
-		_clock = clock; _builders = builders; _barKeyTracker = tracker; _journal = journal; _ticks = ticks; _barEventType = barEventType; _seq = 0UL; _onBarEmitted = onBarEmitted; _riskFormulas = riskFormulas; _basketAggregator = basketAggregator; _configHash = configHash; _schemaVersion = schemaVersion; _riskEnforcer = riskEnforcer; _riskConfig = riskConfig; _equityOverride = equityOverride; _deterministicStrategy = deterministicStrategy; _execution = execution; _positions = positions; _tradesWriter = tradesWriter; _dataVersion = dataVersion; _riskProbeEnabled = riskProbeEnabled;
+		_clock = clock; _builders = builders; _barKeyTracker = tracker; _journal = journal; _ticks = ticks; _barEventType = barEventType; _seq = (journal is FileJournalWriter fj ? fj.NextSequence : 1UL) - 1UL; _onBarEmitted = onBarEmitted; _riskFormulas = riskFormulas; _basketAggregator = basketAggregator; _configHash = configHash; _schemaVersion = schemaVersion; _riskEnforcer = riskEnforcer; _riskConfig = riskConfig; _equityOverride = equityOverride; _deterministicStrategy = deterministicStrategy; _execution = execution; _positions = positions; _tradesWriter = tradesWriter; _dataVersion = dataVersion; _riskProbeEnabled = riskProbeEnabled; _sentimentConfig = sentimentConfig;
 		_sizeUnitsFx = sizeUnitsFx; _sizeUnitsXau = sizeUnitsXau;
 	}
 	private readonly long _sizeUnitsFx; private readonly long _sizeUnitsXau;
@@ -151,7 +156,11 @@ public sealed class EngineLoop
 						}
 					}
 				}
-			foreach (var kvp in _builders.Where(b => b.Key.Item1.Equals(tick.InstrumentId)))
+				// Deterministic ordering: order builders by instrument id then interval duration
+				foreach (var kvp in _builders
+					.Where(b => b.Key.Item1.Equals(tick.InstrumentId))
+					.OrderBy(b => b.Key.Item1.Value, StringComparer.Ordinal)
+					.ThenBy(b => b.Key.Item2.Duration.TotalSeconds))
 			{
 				var builder = kvp.Value;
 				var maybe = builder.OnTick(tick);
@@ -161,7 +170,7 @@ public sealed class EngineLoop
 					var key = new BarKey(bar.InstrumentId, interval, bar.StartUtc);
 					if (_barKeyTracker.Seen(key)) continue; // idempotency guard
 					_barKeyTracker.Add(key);
-					// Canonical BAR_V1 emission (schema_version 1.1.0) - legacy BAR rows removed
+					// Canonical BAR_V1 emission (schema_version 1.2.0) - legacy BAR rows removed
 					var enriched = new
 					{
 						bar.InstrumentId,
@@ -176,6 +185,21 @@ public sealed class EngineLoop
 					};
 					var json = JsonSerializer.SerializeToElement(enriched);
 					await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, _barEventType, json), ct);
+
+					// Sentiment volatility guard (shadow only) after bar emission
+					if (_sentimentConfig is { Enabled: true } sg)
+					{
+						var symbol = bar.InstrumentId.Value;
+						if (!_sentimentWindows.TryGetValue(symbol, out var q)) { q = new Queue<decimal>(sg.Window); _sentimentWindows[symbol] = q; }
+						var sample = SentimentVolatilityGuard.Compute(sg, symbol, bar.EndUtc, bar.Close, q, out _);
+						var zPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { symbol = sample.Symbol, s_raw = sample.SRaw, z = sample.Z, sigma = sample.Sigma, ts = sample.Ts });
+						await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "INFO_SENTIMENT_Z_V1", zPayload), ct);
+						if (sample.Clamped)
+						{
+							var clampPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { symbol = sample.Symbol, reason = "volatility_guard", ts = sample.Ts });
+							await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "INFO_SENTIMENT_CLAMP_V1", clampPayload), ct);
+						}
+					}
 					// Emit risk probe (synthetic) if services configured
 					if (_riskFormulas is not null && _basketAggregator is not null && _riskProbeEnabled)
 					{
@@ -189,7 +213,12 @@ public sealed class EngineLoop
 						_openPositions.Add(new PositionInitialRisk(bar.InstrumentId, positionInitialRiskMoney, new Currency("USD")));
 						var basketPct = _basketAggregator.ComputeBasketRiskPct(_openPositions, BasketMode.Base, new Currency("USD"), equity);
 						// Canonical RISK_PROBE_V1 payload (PascalCase required fields) + extras retained
-						var decisionId = Guid.NewGuid().ToString("N");
+						// Deterministic decision id for risk probe to ensure promotion determinism across runs
+						var rpSymbol = bar.InstrumentId.Value;
+						if (!_riskProbeCounters.TryGetValue(rpSymbol, out var rpCount)) rpCount = 0;
+						rpCount++;
+						_riskProbeCounters[rpSymbol] = rpCount;
+						var decisionId = $"RP-{rpSymbol}-{rpCount:D4}";
 						var riskProbe = new {
 							// Required canonical fields for verifier
 							InstrumentId = bar.InstrumentId.Value,
