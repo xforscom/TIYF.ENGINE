@@ -178,7 +178,7 @@ static int RunVerifyStrict(List<string> args)
     }
     if (string.IsNullOrWhiteSpace(events) || string.IsNullOrWhiteSpace(trades) || string.IsNullOrWhiteSpace(schema))
         throw new VerifyFatalException("--events, --trades, --schema required for verify strict");
-    StrictJournalVerifier.StrictVerifyReport report;
+    StrictVerifyReport report;
     try
     {
         report = StrictJournalVerifier.Verify(new StrictVerifyRequest(events!, trades!, schema!, strict: !lenient));
