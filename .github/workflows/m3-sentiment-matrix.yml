@@ -64,6 +64,9 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - name: Build Sim (Release)
+        run: |
+          dotnet build src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj -c Release --no-restore --nologo
       - name: Download Release Binaries
         uses: actions/download-artifact@v4
         with:
@@ -83,12 +86,8 @@ jobs:
           else
             jq '.featureFlags.sentiment="off" | .featureFlags.riskProbe="disabled"' "$CFG" > "$TEMP_CFG"
           fi
-          SIM_DLL=$(ls src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll 2>/dev/null || true)
-          if [ -z "$SIM_DLL" ]; then
-            echo "Sim DLL not found in source tree; attempting artifact lookup" >&2
-            SIM_DLL=$(ls **/TiYf.Engine.Sim.dll | head -n1 || true)
-          fi
-          if [ -z "$SIM_DLL" ]; then echo "ERROR: TiYf.Engine.Sim.dll not found after artifact download" >&2; ls -R . | head -n200; exit 1; fi
+          SIM_DLL=src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll
+          if [ ! -f "$SIM_DLL" ]; then echo "ERROR: expected Sim DLL at $SIM_DLL after build" >&2; ls -R src/TiYf.Engine.Sim/bin || true; exit 1; fi
           echo "Using SIM DLL: $SIM_DLL"
           dotnet exec "$SIM_DLL" --config "$TEMP_CFG" --run-id CI-$MODE --quiet
           mkdir -p artifacts/$MODE
