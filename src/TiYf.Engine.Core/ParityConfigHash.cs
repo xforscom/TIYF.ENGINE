@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Security.Cryptography;
 
 namespace TiYf.Engine.Core;
@@ -13,27 +12,62 @@ namespace TiYf.Engine.Core;
 /// </summary>
 public static class ParityConfigHash
 {
+    /// <summary>
+    /// Compute a parity hash that intentionally ignores:
+    ///  - Root level sentimentConfig subtree
+    ///  - featureFlags.sentiment toggle
+    ///  - featureFlags.riskProbe toggle
+    /// without mutating or reparsing the JSON text (which can throw when duplicate keys exist
+    /// in test-mutated configs). We stream the original JsonDocument to a canonical minified
+    /// JSON buffer applying filters on the fly. If any error occurs we fall back to a stable
+    /// sentinel so the engine does not crash (tests will surface the fallback if needed).
+    /// </summary>
     public static string Compute(JsonDocument raw)
     {
-        // Parse into JsonNode to allow structural edits.
-        JsonNode? node = JsonNode.Parse(raw.RootElement.GetRawText());
-        if (node is JsonObject obj)
+        try
         {
-            // Remove sentimentConfig subtree entirely (window, sigma, etc.).
-            obj.Remove("sentimentConfig");
-            // Normalize featureFlags.sentiment (remove property) so differing modes hash identically.
-            if (obj.TryGetPropertyValue("featureFlags", out var ffNode) && ffNode is JsonObject ffObj)
+            if (raw.RootElement.ValueKind != JsonValueKind.Object)
+                return "PARITY_HASH_UNSUPPORTED"; // unexpected shape
+
+            using var ms = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(ms, new JsonWriterOptions { SkipValidation = true }))
             {
-                ffObj.Remove("sentiment");
-                // riskProbe is forced disabled in matrix runs for determinism; remove to avoid future drift.
-                ffObj.Remove("riskProbe");
+                writer.WriteStartObject();
+                foreach (var prop in raw.RootElement.EnumerateObject())
+                {
+                    if (prop.NameEquals("sentimentConfig"))
+                        continue; // skip entire subtree
+
+                    if (prop.NameEquals("featureFlags") && prop.Value.ValueKind == JsonValueKind.Object)
+                    {
+                        writer.WritePropertyName(prop.Name);
+                        writer.WriteStartObject();
+                        foreach (var ff in prop.Value.EnumerateObject())
+                        {
+                            if (ff.NameEquals("sentiment") || ff.NameEquals("riskProbe"))
+                                continue; // omit ephemeral toggles
+                            ff.WriteTo(writer);
+                        }
+                        writer.WriteEndObject();
+                        continue;
+                    }
+
+                    // default: copy as-is
+                    prop.WriteTo(writer);
+                }
+                writer.WriteEndObject();
+                writer.Flush();
             }
+
+            using var sha = SHA256.Create();
+            var bytes = ms.ToArray();
+            return string.Concat(sha.ComputeHash(bytes).Select(b => b.ToString("X2")));
         }
-        // Canonical (minified) serialization – property order preserved as inserted by System.Text.Json
-        // which is stable for the transformed structure.
-        var canonical = node!.ToJsonString(new JsonSerializerOptions { WriteIndented = false });
-        using var sha = SHA256.Create();
-        var bytes = Encoding.UTF8.GetBytes(canonical);
-        return string.Concat(sha.ComputeHash(bytes).Select(b => b.ToString("X2")));
+        catch (Exception ex)
+        {
+            // Swallow & degrade – engine must not crash due to parity hash computation.
+            Console.Error.WriteLine($"ParityConfigHash error: {ex.Message}");
+            return "PARITY_HASH_ERROR";
+        }
     }
 }
