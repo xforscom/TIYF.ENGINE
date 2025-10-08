@@ -168,7 +168,7 @@ static int RunVerify(List<string> args)
 // ------------------------------------------------------------
 static int RunPromote(List<string> args)
 {
-    string? baseline=null, candidate=null, workdir=null, culture=null; bool quiet=false; bool printMetrics=false; bool diagnose=false; // diagnose preserved for future extension
+    string? baseline=null, candidate=null, workdir=null, culture=null; bool quiet=false; bool printMetrics=false; // removed unused 'diagnose'
     for (int i=0;i<args.Count;i++)
     {
         switch(args[i])
@@ -178,7 +178,6 @@ static int RunPromote(List<string> args)
             case "--workdir": workdir=(++i<args.Count)? args[i]:null; break;
             case "--quiet": quiet=true; break;
             case "--print-metrics": printMetrics=true; break;
-            case "--diagnose-determinism": diagnose=true; break;
             case "--culture": culture=(++i<args.Count)? args[i]:null; break;
             default: Console.Error.WriteLine($"Unknown option {args[i]}"); return 2;
         }
