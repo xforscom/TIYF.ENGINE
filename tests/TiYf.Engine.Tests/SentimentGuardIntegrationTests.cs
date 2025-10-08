@@ -250,4 +250,96 @@ public class SentimentGuardIntegrationTests
         Assert.DoesNotContain(EventLines(eventsBase), l=>l.Contains("INFO_SENTIMENT_Z_V1", StringComparison.Ordinal));
         Assert.Contains(EventLines(eventsShadow), l=>l.Contains("INFO_SENTIMENT_Z_V1", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void OffVsShadow_TradesParity_EndToEnd()
+    {
+        string root = ResolveRepoRoot();
+        var cfgPath = Path.Combine(root, "tests/fixtures/backtest_m0/config.backtest-m0.candidate.json");
+        using var baseDoc = JsonDocument.Parse(File.ReadAllText(cfgPath));
+        (string eventsOff, string tradesOff) = RunSimWithConfig(baseDoc, writer => {
+            writer.WritePropertyName("featureFlags");
+            writer.WriteStartObject();
+            writer.WriteString("sentiment", "off");
+            writer.WriteString("learning", "disabled");
+            writer.WriteString("riskProbe", "disabled");
+            writer.WriteEndObject();
+        }, "parity_off");
+        (string eventsShadow, string tradesShadow) = RunSimWithConfig(baseDoc, writer => {
+            writer.WritePropertyName("featureFlags");
+            writer.WriteStartObject();
+            writer.WriteString("sentiment", "shadow");
+            writer.WriteString("learning", "disabled");
+            writer.WriteString("riskProbe", "disabled");
+            writer.WriteEndObject();
+            writer.WritePropertyName("sentimentConfig");
+            writer.WriteStartObject(); writer.WriteNumber("window", 12); writer.WriteNumber("volGuardSigma", 0.20m); writer.WriteEndObject();
+        }, "parity_shadow");
+
+        static string NormalizeTrades(string path)
+        {
+            var lines = File.ReadAllLines(path).Where(l=>!string.IsNullOrWhiteSpace(l)).ToList();
+            if (lines.Count == 0) return string.Empty;
+            var header = lines[0].Split(',');
+            int cfgIdx = Array.FindIndex(header, h=>h.Equals("config_hash", StringComparison.OrdinalIgnoreCase));
+            var sb = new StringBuilder();
+            sb.AppendLine(string.Join(',', header.Where((h,i)=>i!=cfgIdx)));
+            foreach (var row in lines.Skip(1))
+            {
+                var parts = row.Split(',');
+                sb.AppendLine(string.Join(',', parts.Where((c,i)=>i!=cfgIdx)));
+            }
+            using var sha = SHA256.Create();
+            return string.Concat(sha.ComputeHash(Encoding.UTF8.GetBytes(sb.ToString())).Select(b=>b.ToString("X2")));
+        }
+        Assert.Equal(NormalizeTrades(tradesOff), NormalizeTrades(tradesShadow));
+        // Sanity: shadow introduces Z events, off does not
+        Assert.DoesNotContain(EventLines(eventsOff), l=>l.Contains("INFO_SENTIMENT_Z_V1", StringComparison.Ordinal));
+        Assert.Contains(EventLines(eventsShadow), l=>l.Contains("INFO_SENTIMENT_Z_V1", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Shadow_NoApplied_NoUnitChange()
+    {
+        string root = ResolveRepoRoot();
+        var cfgPath = Path.Combine(root, "tests/fixtures/backtest_m0/config.backtest-m0.candidate.json");
+        using var baseDoc = JsonDocument.Parse(File.ReadAllText(cfgPath));
+        (string eventsOff, string tradesOff) = RunSimWithConfig(baseDoc, writer => {
+            writer.WritePropertyName("featureFlags");
+            writer.WriteStartObject();
+            writer.WriteString("sentiment", "off");
+            writer.WriteString("learning", "disabled");
+            writer.WriteString("riskProbe", "disabled");
+            writer.WriteEndObject();
+        }, "purity_off");
+        (string eventsShadow, string tradesShadow) = RunSimWithConfig(baseDoc, writer => {
+            writer.WritePropertyName("featureFlags");
+            writer.WriteStartObject();
+            writer.WriteString("sentiment", "shadow");
+            writer.WriteString("learning", "disabled");
+            writer.WriteString("riskProbe", "disabled");
+            writer.WriteEndObject();
+            writer.WritePropertyName("sentimentConfig");
+            writer.WriteStartObject(); writer.WriteNumber("window", 5); writer.WriteNumber("volGuardSigma", 0.0000001m); writer.WriteEndObject();
+        }, "purity_shadow");
+
+        // Ensure no INFO_SENTIMENT_APPLIED_V1 events in shadow mode
+        Assert.DoesNotContain(EventLines(eventsShadow), l=>l.Contains("INFO_SENTIMENT_APPLIED_V1", StringComparison.Ordinal));
+
+        // Compare trade volume_units column equality row-by-row (after sorting to deterministic order by open ts + symbol)
+        List<string[]> ParseTrades(string path)
+        {
+            var rows = File.ReadAllLines(path).Where(l=>!string.IsNullOrWhiteSpace(l)).ToList();
+            if (rows.Count < 2) return new List<string[]>();
+            return rows.Skip(1).Select(r=>r.Split(',')).OrderBy(r=>r[0]).ThenBy(r=>r[2]).ToList();
+        }
+        var offTrades = ParseTrades(tradesOff);
+        var shadowTrades = ParseTrades(tradesShadow);
+        Assert.Equal(offTrades.Count, shadowTrades.Count);
+        for (int i=0;i<offTrades.Count;i++)
+        {
+            // volume_units index = 6 (0-based) per header
+            Assert.Equal(offTrades[i][6], shadowTrades[i][6]);
+        }
+    }
 }
