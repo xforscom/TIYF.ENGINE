@@ -2,12 +2,45 @@ name: m3-sentiment-matrix
 
 on:
   push:
-    branches: [ feat/m3-active ]
+    branches: [ main, feat/m3-active ]
   pull_request:
-    branches: [ feat/m3-active ]
+    branches: [ main, feat/m3-active ]
 
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      sim_path: ${{ steps.locate.outputs.sim_path }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore
+      - name: Build Release (all)
+        run: dotnet build -c Release --no-restore
+      - name: Run Tests
+        run: dotnet test -c Release --no-build --no-restore
+      - name: Clean Working Tree (no diffs / untracked) # strict guard
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test $(git ls-files --others --exclude-standard | wc -l) -eq 0
+      - name: Locate Sim Binary
+        id: locate
+        run: |
+          echo "sim_path=src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll" >> $GITHUB_OUTPUT
+      - name: Archive Release Binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binaries
+          path: |
+            src/**/bin/Release/net8.0/*.dll
+            src/**/bin/Release/net8.0/*.exe
+
   sentiment:
+    needs: build
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -18,10 +51,10 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: Restore
-        run: dotnet restore
-      - name: Build Release
-        run: dotnet build -c Release --no-restore
+      - name: Download Release Binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: release-binaries
       - name: Prepare Config & Run (${{ matrix.mode }})
         env:
           MODE: ${{ matrix.mode }}
@@ -46,6 +79,11 @@ jobs:
         with:
           name: journals-${{ matrix.mode }}
           path: artifacts/${{ matrix.mode }}
+      - name: Working Tree Cleanliness (strict)
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test $(git ls-files --others --exclude-standard | wc -l) -eq 0
 
   invariants:
     runs-on: ubuntu-latest
@@ -55,8 +93,6 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: Build Release
-        run: dotnet build -c Release --no-restore
       - name: Validate Cross-Mode Invariants
         run: |
           set -euo pipefail
