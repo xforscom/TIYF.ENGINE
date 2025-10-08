@@ -1,0 +1,39 @@
+name: penalty-scaffold
+
+on:
+  push:
+    branches: [ main, feat/m4-seed ]
+  pull_request:
+    branches: [ main, feat/m4-seed ]
+
+jobs:
+  penalty:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore & Build
+        run: |
+          dotnet restore
+          dotnet build -c Release --no-restore
+      - name: Run sim with penalty shadow
+        run: |
+          CFG=tests/fixtures/backtest_m0/config.backtest-m0.json
+          TMP=$(mktemp /tmp/penalty-XXXX.json)
+          if ! command -v jq >/dev/null; then sudo apt-get update && sudo apt-get install -y jq; fi
+          jq '.featureFlags.penalty="shadow" | .penaltyConfig={"forcePenalty":true} | .featureFlags.sentiment="off"' $CFG > $TMP
+          dotnet exec src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll --config $TMP --run-id PEN-CI --quiet
+      - name: Assert penalty event present once
+        run: |
+          EV=$(ls journals/M0/*PEN-CI*/events.csv)
+          COUNT=$(grep -c PENALTY_APPLIED_V1 "$EV" || true)
+          echo "Penalty count=$COUNT"
+            if [ "$COUNT" -ne 1 ]; then echo "Expected exactly 1 PENALTY_APPLIED_V1 event"; exit 1; fi
+      - name: Upload journal (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: penalty-journal
+          path: journals/M0/*PEN-CI*/
