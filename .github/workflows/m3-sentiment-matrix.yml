@@ -64,9 +64,6 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: Build Sim (Release)
-        run: |
-          dotnet build src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj -c Release --no-restore --nologo
       - name: Download Release Binaries
         uses: actions/download-artifact@v4
         with:
@@ -76,6 +73,7 @@ jobs:
           MODE: ${{ matrix.mode }}
         run: |
           set -euo pipefail
+          echo "Listing artifact root (first 200 entries)"; find . -maxdepth 6 -type f | head -n 200
           CFG=tests/fixtures/backtest_m0/config.backtest-m0.candidate.json
           TEMP_CFG=$(mktemp /tmp/sentiment-XXXX.json)
           if ! command -v jq >/dev/null; then sudo apt-get update && sudo apt-get install -y jq; fi
@@ -86,8 +84,15 @@ jobs:
           else
             jq '.featureFlags.sentiment="off" | .featureFlags.riskProbe="disabled"' "$CFG" > "$TEMP_CFG"
           fi
-          SIM_DLL=src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll
-          if [ ! -f "$SIM_DLL" ]; then echo "ERROR: expected Sim DLL at $SIM_DLL after build" >&2; ls -R src/TiYf.Engine.Sim/bin || true; exit 1; fi
+          # Prefer canonical path; if not found, search artifact.
+          SIM_CANON=src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll
+          if [ -f "$SIM_CANON" ]; then SIM_DLL="$SIM_CANON"; else SIM_DLL=$(find . -name TiYf.Engine.Sim.dll | head -n1 || true); fi
+          if [ -z "$SIM_DLL" ]; then
+             echo "ERROR: TiYf.Engine.Sim.dll not found in artifact or expected path" >&2
+             echo "Debug listing around expected directories:" >&2
+             find . -maxdepth 6 -type d -path '*TiYf.Engine.Sim*' -print >&2 || true
+             exit 1
+          fi
           echo "Using SIM DLL: $SIM_DLL"
           dotnet exec "$SIM_DLL" --config "$TEMP_CFG" --run-id CI-$MODE --quiet
           mkdir -p artifacts/$MODE
