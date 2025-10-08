@@ -233,7 +233,7 @@ INFO_SENTIMENT_CLAMP_V1,{"symbol":"EURUSD","reason":"volatility_guard","ts":"202
 
 See `RELEASE_NOTES.md` v0.5.0 entry for release highlights.
 
-## Sentiment Active Mode (M3 – In Progress)
+## Sentiment Active Mode (M3)
 
 M3 elevates the previously shadow‑only sentiment volatility guard into an optionally impactful feature with deterministic scaling on clamped bars. Schema version: 1.2.0.
 

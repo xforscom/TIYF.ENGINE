@@ -63,7 +63,7 @@ INFO_SENTIMENT_Z_V1,{"symbol":"EURUSD","s_raw":0.000123,"z":0.00,"sigma":0.00005
 INFO_SENTIMENT_CLAMP_V1,{"symbol":"EURUSD","reason":"volatility_guard","ts":"2025-01-02T00:15:00Z"}
 ```
 
-## v0.6.0-m3-active (WIP – Sentiment Active Mode & Extended Gating)
+## v0.6.0-m3-active (Sentiment Active Mode & Extended Gating) – 2025-10-08
 
 Highlights:
 
@@ -98,4 +98,4 @@ Example promotion sentiment block:
 }
 ```
 
-Status: In Progress (subject to minor field additions prior to final tag).
+Status: Final.
