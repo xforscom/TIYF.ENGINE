@@ -49,6 +49,8 @@ jobs:
           path: |
             src/**/bin/Release/net8.0/*.dll
             src/**/bin/Release/net8.0/*.exe
+            src/**/bin/Release/net8.0/*.runtimeconfig.json
+            src/**/bin/Release/net8.0/*.deps.json
 
   sentiment:
     needs: build
@@ -81,7 +83,14 @@ jobs:
           else
             jq '.featureFlags.sentiment="off" | .featureFlags.riskProbe="disabled"' "$CFG" > "$TEMP_CFG"
           fi
-          dotnet exec src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll --config "$TEMP_CFG" --run-id CI-$MODE --quiet
+          SIM_DLL=$(ls src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll 2>/dev/null || true)
+          if [ -z "$SIM_DLL" ]; then
+            echo "Sim DLL not found in source tree; attempting artifact lookup" >&2
+            SIM_DLL=$(ls **/TiYf.Engine.Sim.dll | head -n1 || true)
+          fi
+          if [ -z "$SIM_DLL" ]; then echo "ERROR: TiYf.Engine.Sim.dll not found after artifact download" >&2; ls -R . | head -n200; exit 1; fi
+          echo "Using SIM DLL: $SIM_DLL"
+          dotnet exec "$SIM_DLL" --config "$TEMP_CFG" --run-id CI-$MODE --quiet
           mkdir -p artifacts/$MODE
           cp -r journals/M0/*CI-$MODE* artifacts/$MODE/ || true
       - name: Upload journals (${{ matrix.mode }})
