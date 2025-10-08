@@ -68,7 +68,17 @@ public class SentimentGuardIntegrationTests
         var psi = new ProcessStartInfo("dotnet", args){ WorkingDirectory = root, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true};
         var proc = Process.Start(psi)!; proc.WaitForExit(120_000);
         if (!proc.HasExited) { try { proc.Kill(entireProcessTree:true);} catch {} Assert.Fail("Sim timeout"); }
-        if (proc.ExitCode != 0) Assert.Fail($"Sim failed exit={proc.ExitCode} run={runId}");
+        if (proc.ExitCode != 0)
+        {
+            string stdout = string.Empty; string stderr = string.Empty;
+            try { stdout = proc.StandardOutput.ReadToEnd(); } catch {}
+            try { stderr = proc.StandardError.ReadToEnd(); } catch {}
+            var diag = new StringBuilder();
+            diag.AppendLine($"Sim failed exit={proc.ExitCode} run={runId}");
+            if (!string.IsNullOrWhiteSpace(stdout)) { diag.AppendLine("-- STDOUT --"); diag.AppendLine(stdout); }
+            if (!string.IsNullOrWhiteSpace(stderr)) { diag.AppendLine("-- STDERR --"); diag.AppendLine(stderr); }
+            Assert.Fail(diag.ToString());
+        }
         string events = Path.Combine(targetRunDir, "events.csv");
         string trades = Path.Combine(targetRunDir, "trades.csv");
         Assert.True(File.Exists(events)); Assert.True(File.Exists(trades));
