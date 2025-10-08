@@ -32,25 +32,14 @@ jobs:
             exit 1
           fi
       - name: Run Tests
-            # Normalize trades by dropping the config_hash column (12th) for parity hashing between off & shadow
-            # Header: utc_ts_open,utc_ts_close,symbol,direction,entry_price,exit_price,volume_units,pnl_ccy,pnl_r,decision_id,schema_version,config_hash,data_version
-            normalize_trades(){
-              awk -F',' 'NR==1{print;next}{OFS=","; $12="CONFIG_HASH_NORMALIZED"; print}' "$1" > "$2";
-            }
-            norm_off=$(mktemp); norm_shadow=$(mktemp)
-              normalize_trades "$OFF_TRADES" "$norm_off"
-              normalize_trades "$SHADOW_TRADES" "$norm_shadow"
         run: dotnet test -c Release --no-build --no-restore
       - name: Clean Working Tree (no diffs / untracked) # strict guard
         run: |
-            # Recompute normalized hashes (skip header) after config_hash normalization
-            off_trades_sha=$(tail -n +2 "$norm_off" | sha256sum | cut -d' ' -f1 || echo "")
-            shadow_trades_sha=$(tail -n +2 "$norm_shadow" | sha256sum | cut -d' ' -f1 || echo "")
           set -euo pipefail
           git diff --exit-code
           test $(git ls-files --others --exclude-standard | wc -l) -eq 0
-              tail -n +2 "$norm_off" > /tmp/off.trades.data
-              tail -n +2 "$norm_shadow" > /tmp/shadow.trades.data
+      - name: Locate Sim Binary
+        id: locate
         run: |
           echo "sim_path=src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll" >> $GITHUB_OUTPUT
       - name: Archive Release Binaries
@@ -94,9 +83,7 @@ jobs:
             jq '.featureFlags.sentiment="shadow" | .featureFlags.riskProbe="disabled" | .sentimentConfig={"window":5,"volGuardSigma":1e-7}' "$CFG" > "$TEMP_CFG"
           else
             jq '.featureFlags.sentiment="off" | .featureFlags.riskProbe="disabled"' "$CFG" > "$TEMP_CFG"
-            # Assert normalized parity only (original differing config_hash is acceptable)
-            if [ "$off_trades_sha" != "$shadow_trades_sha" ]; then echo 'ERROR: off vs shadow normalized trades mismatch'; exit 1; fi
-            # Filter sentiment info events from parity comparison: off must NOT contain Z/CLAMP, shadow must (but we don't fail parity on their presence)
+          fi
           SIM_CANON=src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll
           if [ -f "$SIM_CANON" ]; then SIM_DLL="$SIM_CANON"; else SIM_DLL=$(find . -name TiYf.Engine.Sim.dll | head -n1 || true); fi
           if [ -z "$SIM_DLL" ]; then
