@@ -32,14 +32,25 @@ jobs:
             exit 1
           fi
       - name: Run Tests
+            # Normalize trades by dropping the config_hash column (12th) for parity hashing between off & shadow
+            # Header: utc_ts_open,utc_ts_close,symbol,direction,entry_price,exit_price,volume_units,pnl_ccy,pnl_r,decision_id,schema_version,config_hash,data_version
+            normalize_trades(){
+              awk -F',' 'NR==1{print;next}{OFS=","; $12="CONFIG_HASH_NORMALIZED"; print}' "$1" > "$2";
+            }
+            norm_off=$(mktemp); norm_shadow=$(mktemp)
+              normalize_trades "$OFF_TRADES" "$norm_off"
+              normalize_trades "$SHADOW_TRADES" "$norm_shadow"
         run: dotnet test -c Release --no-build --no-restore
       - name: Clean Working Tree (no diffs / untracked) # strict guard
         run: |
+            # Recompute normalized hashes (skip header) after config_hash normalization
+            off_trades_sha=$(tail -n +2 "$norm_off" | sha256sum | cut -d' ' -f1 || echo "")
+            shadow_trades_sha=$(tail -n +2 "$norm_shadow" | sha256sum | cut -d' ' -f1 || echo "")
           set -euo pipefail
           git diff --exit-code
           test $(git ls-files --others --exclude-standard | wc -l) -eq 0
-      - name: Locate Sim Binary
-        id: locate
+              tail -n +2 "$norm_off" > /tmp/off.trades.data
+              tail -n +2 "$norm_shadow" > /tmp/shadow.trades.data
         run: |
           echo "sim_path=src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll" >> $GITHUB_OUTPUT
       - name: Archive Release Binaries
@@ -83,8 +94,9 @@ jobs:
             jq '.featureFlags.sentiment="shadow" | .featureFlags.riskProbe="disabled" | .sentimentConfig={"window":5,"volGuardSigma":1e-7}' "$CFG" > "$TEMP_CFG"
           else
             jq '.featureFlags.sentiment="off" | .featureFlags.riskProbe="disabled"' "$CFG" > "$TEMP_CFG"
-          fi
-          # Prefer canonical path; if not found, search artifact.
+            # Assert normalized parity only (original differing config_hash is acceptable)
+            if [ "$off_trades_sha" != "$shadow_trades_sha" ]; then echo 'ERROR: off vs shadow normalized trades mismatch'; exit 1; fi
+            # Filter sentiment info events from parity comparison: off must NOT contain Z/CLAMP, shadow must (but we don't fail parity on their presence)
           SIM_CANON=src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll
           if [ -f "$SIM_CANON" ]; then SIM_DLL="$SIM_CANON"; else SIM_DLL=$(find . -name TiYf.Engine.Sim.dll | head -n1 || true); fi
           if [ -z "$SIM_DLL" ]; then
@@ -174,66 +186,26 @@ jobs:
           echo "--- Hash summaries (raw from artifacts) ---"
           cat dl/off/hashes.txt || echo "(missing off hashes)"
           cat dl/shadow/hashes.txt || echo "(missing shadow hashes)"
-          cat dl/active/hashes.txt || echo "(missing active hashes)"
+            cat dl/active/hashes.txt || echo "(missing active hashes)"
           OFF_EVENTS=$(ls $ROOT/*CI-off*/events.csv)
           SHADOW_EVENTS=$(ls $ROOT/*CI-shadow*/events.csv)
           ACTIVE_EVENTS=$(ls $ROOT/*CI-active*/events.csv)
           OFF_TRADES=$(ls $ROOT/*CI-off*/trades.csv)
           SHADOW_TRADES=$(ls $ROOT/*CI-shadow*/trades.csv)
           ACTIVE_TRADES=$(ls $ROOT/*CI-active*/trades.csv)
-          # Compare trade hashes off vs shadow first
-          off_trades_sha=$(grep '^trades_sha=' dl/off/hashes.txt | cut -d'=' -f2 || echo "")
-          shadow_trades_sha=$(grep '^trades_sha=' dl/shadow/hashes.txt | cut -d'=' -f2 || echo "")
-          if [ -n "$off_trades_sha" ] && [ -n "$shadow_trades_sha" ] && [ "$off_trades_sha" != "$shadow_trades_sha" ]; then
-            echo "TRADE HASH MISMATCH off($off_trades_sha) shadow($shadow_trades_sha)" >&2
-            # Produce first differing line (excluding header) with 3-line prior context
-            tail -n +2 "$OFF_TRADES" > /tmp/off.trades.data
-            tail -n +2 "$SHADOW_TRADES" > /tmp/shadow.trades.data
-            {
-              echo "-- First difference in trades.csv (off vs shadow) --"
-              exec 3</tmp/shadow.trades.data
-              ln=0
-              declare -a prevOff
-              declare -a prevShadow
-              while IFS= read -r offLine && IFS= read -r shadowLine <&3; do
-                ln=$((ln+1))
-                if [ "$offLine" != "$shadowLine" ]; then
-                  echo "Data row (excluding header): $ln"
-                  for ctx in 3 2 1; do
-                    idx=$((ln-ctx))
-                    if [ $idx -gt 0 ]; then
-                      echo "context-$ctx-off: ${prevOff[$((ln-ctx-1))]}"
-                      echo "context-$ctx-shadow: ${prevShadow[$((ln-ctx-1))]}"
-                    fi
-                  done
-                  echo "off:    $offLine"
-                  echo "shadow: $shadowLine"
-                  break
-                fi
-                prevOff[$((ln-1))]="$offLine"
-                prevShadow[$((ln-1))]="$shadowLine"
-              done < /tmp/off.trades.data
-            } || true
-            # Events first difference
-            tail -n +2 "$OFF_EVENTS" > /tmp/off.events.data
-            tail -n +2 "$SHADOW_EVENTS" > /tmp/shadow.events.data
-            {
-              echo "-- First difference in events.csv (off vs shadow) --"
-              exec 4</tmp/shadow.events.data
-              ln=0
-              while IFS= read -r offLine && IFS= read -r shadowLine <&4; do
-                ln=$((ln+1))
-                if [ "$offLine" != "$shadowLine" ]; then
-                  echo "Events data row (excluding header): $ln"
-                  echo "off:    $offLine"
-                  echo "shadow: $shadowLine"
-                  break
-                fi
-              done < /tmp/off.events.data
-            } || true
+          normalize_trades(){
+            awk -F',' 'NR==1{print;next}{OFS=","; $12="CONFIG_HASH_NORMALIZED"; print}' "$1" > "$2";
+          }
+          norm_off=$(mktemp); norm_shadow=$(mktemp)
+          normalize_trades "$OFF_TRADES" "$norm_off"
+          normalize_trades "$SHADOW_TRADES" "$norm_shadow"
+          off_trades_sha=$(tail -n +2 "$norm_off" | sha256sum | cut -d' ' -f1)
+          shadow_trades_sha=$(tail -n +2 "$norm_shadow" | sha256sum | cut -d' ' -f1)
+          if [ "$off_trades_sha" != "$shadow_trades_sha" ]; then
+            echo "TRADE HASH MISMATCH (normalized) off($off_trades_sha) shadow($shadow_trades_sha)" >&2
+            diff -u <(head -n 1 "$norm_off"; tail -n +2 "$norm_off" | head -n 20) <(head -n 1 "$norm_shadow"; tail -n +2 "$norm_shadow" | head -n 20) || true
+            echo 'ERROR: off vs shadow normalized trades mismatch'; exit 1;
           fi
-          hash_skip_meta(){ tail -n +2 "$1" | sha256sum | cut -d' ' -f1; }
-          if [ "$(hash_skip_meta "$OFF_TRADES")" != "$(hash_skip_meta "$SHADOW_TRADES")" ]; then echo 'ERROR: off vs shadow trades mismatch'; exit 1; fi
           if grep -q INFO_SENTIMENT_Z_V1 "$OFF_EVENTS"; then echo 'ERROR: off mode has Z events'; exit 1; fi
           if ! grep -q INFO_SENTIMENT_Z_V1 "$SHADOW_EVENTS"; then echo 'ERROR: shadow missing Z events'; exit 1; fi
           if grep -q INFO_SENTIMENT_APPLIED_V1 "$ACTIVE_EVENTS"; then

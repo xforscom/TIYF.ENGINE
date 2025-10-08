@@ -56,10 +56,12 @@ catch (Exception ex)
 SampleDataSeeder.EnsureSample(Directory.GetCurrentDirectory());
 
 var (cfg, cfgHashOriginal, raw) = EngineConfigLoader.Load(fullConfigPath);
-// Compute parity-normalized hash (ignores sentiment / riskProbe toggles) to ensure OFF vs SHADOW
-// trades & journals remain identical for invariants.
-var cfgHash = TiYf.Engine.Core.ParityConfigHash.Compute(raw);
-Console.WriteLine($"Loaded config RunId={cfg.RunId} hash(original)={cfgHashOriginal} parityHash={cfgHash}");
+// Compute parity-normalized hash (ignores sentiment / riskProbe toggles) for diagnostics ONLY.
+// We intentionally DO NOT substitute this into journaled config_hash fields so existing tests
+// (which assert on the original hash semantics) remain stable. Parity hash is consumed by
+// CI invariants logic which normalizes away config_hash differences when comparing off vs shadow.
+var parityHash = TiYf.Engine.Core.ParityConfigHash.Compute(raw);
+Console.WriteLine($"Loaded config RunId={cfg.RunId} hash={cfgHashOriginal} parityHash={parityHash}");
 
 Instrument instrument = new Instrument(new InstrumentId("INST1"), "FOO", 2); // legacy fallback (non-M0)
 var catalog = new InMemoryInstrumentCatalog(new[] { instrument });
@@ -340,7 +342,7 @@ try
                         reason,
                         issues_emitted = dqResult.Issues,
                         tolerated = toleratedCount,
-                        config_hash = cfgHash,
+                        config_hash = cfgHashOriginal,
                         tolerance_profile_hash = toleranceProfileHash
                     });
                     qaEvents.Add(new JournalEvent(0, tsBase, "DATA_QA_ABORT_V1", abortPayload));
@@ -393,7 +395,7 @@ static TiYf.Engine.Core.DataQaResult ApplyTolerance(TiYf.Engine.Core.DataQaResul
 }
 
 // Journal writer with optional data_version (open before emitting QA events)
-await using var journal = new FileJournalWriter(journalRoot, runId, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, cfgHash, dataVersion);
+await using var journal = new FileJournalWriter(journalRoot, runId, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, cfgHashOriginal, dataVersion);
             if (qaEvents is not null && qaEvents.Count>0)
             {
                 qaEvents = qaEvents
@@ -415,7 +417,7 @@ TradesJournalWriter? tradesWriter = null; PositionTracker? positions = null; IEx
 if (raw.RootElement.TryGetProperty("name", out var nmEl) && nmEl.ValueKind==JsonValueKind.String && (nmEl.GetString()=="backtest-m0" || (nmEl.GetString()?.StartsWith("backtest-m0", StringComparison.Ordinal) ?? false)))
 {
     positions = new PositionTracker();
-    tradesWriter = new TradesJournalWriter(journalRoot, runId, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, cfgHash, dataVersion);
+    tradesWriter = new TradesJournalWriter(journalRoot, runId, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, cfgHashOriginal, dataVersion);
     // Build multi-instrument tick book from fixture files if present
     try
     {
@@ -510,7 +512,7 @@ catch (Exception ex)
 
 var riskFormulas = new RiskFormulas();
 var basketAgg = new BasketRiskAggregator();
-var enforcer = new RiskEnforcer(riskFormulas, basketAgg, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, cfgHash);
+var enforcer = new RiskEnforcer(riskFormulas, basketAgg, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, cfgHashOriginal);
 
 // Strategy size units (defaults) from config strategy.params
 long sizeUnitsFx = 1000; long sizeUnitsXau = 1;
@@ -554,7 +556,7 @@ var loop = new EngineLoop(clock, builders, barKeyTracker!, journal, tickSource, 
 {
     // Persist after each emitted bar (simple, can batch later)
     BarKeyTrackerPersistence.Save(snapshotPath, (InMemoryBarKeyTracker)barKeyTracker, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, EngineInstanceId);
-}, riskFormulas, basketAgg, cfgHash, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, enforcer, riskConfig, equity, 
+}, riskFormulas, basketAgg, cfgHashOriginal, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, enforcer, riskConfig, equity, 
     deterministicStrategy: isM0 ? new DeterministicScriptStrategy(clock, catalog.All(), sequence.First()) : null,
     execution: execution,
     positions: positions,
