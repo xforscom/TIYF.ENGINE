@@ -20,6 +20,17 @@ jobs:
         run: dotnet restore
       - name: Build Release (all)
         run: dotnet build -c Release --no-restore
+      - name: Build Tools (explicit)
+        run: dotnet build src/TiYf.Engine.Tools/TiYf.Engine.Tools.csproj -c Release --no-restore --nologo
+      - name: Guard Tools Release DLL
+        run: |
+          set -euo pipefail
+          TOOLS=src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll
+          if [ ! -f "$TOOLS" ]; then
+            echo "ERROR: Expected Tools DLL at $TOOLS after Release build" >&2
+            ls -R src/TiYf.Engine.Tools/bin || true
+            exit 1
+          fi
       - name: Run Tests
         run: dotnet test -c Release --no-build --no-restore
       - name: Clean Working Tree (no diffs / untracked) # strict guard
