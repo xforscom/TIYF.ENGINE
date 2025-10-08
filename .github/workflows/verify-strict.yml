@@ -1,0 +1,36 @@
+name: verify-strict
+
+on:
+  push:
+    branches: [ main, feat/m4-seed ]
+  pull_request:
+    branches: [ main, feat/m4-seed ]
+
+jobs:
+  verify-strict:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore & Build Release
+        run: |
+          dotnet restore TiYf.Engine.sln
+          dotnet build TiYf.Engine.sln -c Release --no-restore -warnaserror
+      - name: Run Sim to produce fixture journal (M0)
+        run: |
+          dotnet exec src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll --config tests/fixtures/backtest_m0/config.backtest-m0.json --run-id STRICT-FIX --quiet
+      - name: Run strict verifier
+        run: |
+          EVENTS=$(ls journals/M0/*STRICT-FIX*/events.csv)
+          TRADES=$(ls journals/M0/*STRICT-FIX*/trades.csv)
+          echo "Events=$EVENTS"; echo "Trades=$TRADES"
+          dotnet exec src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll verify strict --events "$EVENTS" --trades "$TRADES" --schema 1.2.0 || exit_code=$?
+          if [ "${exit_code:-0}" -ne 0 ]; then echo "Strict verifier failed with exit $exit_code"; exit $exit_code; fi
+      - name: Upload journal (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-strict-journal
+          path: journals/M0/*STRICT-FIX*/

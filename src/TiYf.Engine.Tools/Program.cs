@@ -31,15 +31,17 @@ catch (VerifyFatalException vf)
 catch (Exception ex)
 {
     Console.Error.WriteLine($"Error: {ex.Message}");
-    return 2;
+    // For generic runtime/IO/parsing errors return 1 (reserved) per strict verify spec
+    return 1;
 }
 
 static int Unknown(){ Console.Error.WriteLine("Unknown command"); PrintHelp(); return 2; }
 static void PrintHelp() => Console.WriteLine(@"Usage:
-  diff   --a <fileA> --b <fileB> [--keys k1,k2,...] [--report-duplicates]
+    diff   --a <fileA> --b <fileB> [--keys k1,k2,...] [--report-duplicates]
     verify --file <journal.csv> [--json] [--max-errors N] [--report-duplicates]
+    verify strict --events <events.csv> --trades <trades.csv> --schema <minVersion> [--json] [--lenient-order]
     promote --baseline <config.json> --candidate <config.json> [--workdir <dir>] [--quiet] [--print-metrics] [--culture name]
-  dataversion --config <config.json> [--instruments path] [--ticks SYMBOL=path ...] [--out data_version.txt] [--echo-rows]");
+    dataversion --config <config.json> [--instruments path] [--ticks SYMBOL=path ...] [--out data_version.txt] [--echo-rows]");
 
 static int RunDataVersion(List<string> args)
 {
@@ -137,6 +139,10 @@ static int RunDiff(List<string> args)
 
 static int RunVerify(List<string> args)
 {
+    // Support subcommand 'strict'
+    if (args.Count>0 && string.Equals(args[0],"strict", StringComparison.OrdinalIgnoreCase))
+        return RunVerifyStrict(args.Skip(1).ToList());
+
     string? file=null; bool json=false; int maxErrors=50; bool reportDup=false;
     for (int i=0;i<args.Count;i++)
     {
@@ -153,6 +159,57 @@ static int RunVerify(List<string> args)
     var result = VerifyEngine.Run(file!, new VerifyOptions(maxErrors,json,reportDup));
     if (result.JsonOutput != null) Console.WriteLine(result.JsonOutput); else Console.WriteLine(result.HumanSummary);
     return result.ExitCode;
+}
+
+static int RunVerifyStrict(List<string> args)
+{
+    string? events=null; string? trades=null; string? schema=null; bool json=false; bool lenient=false;
+    for (int i=0;i<args.Count;i++)
+    {
+        switch(args[i])
+        {
+            case "--events": events = (++i<args.Count)? args[i]: null; break;
+            case "--trades": trades = (++i<args.Count)? args[i]: null; break;
+            case "--schema": schema = (++i<args.Count)? args[i]: null; break;
+            case "--json": json = true; break;
+            case "--lenient-order": lenient = true; break;
+            default: throw new VerifyFatalException($"Unknown option {args[i]}");
+        }
+    }
+    if (string.IsNullOrWhiteSpace(events) || string.IsNullOrWhiteSpace(trades) || string.IsNullOrWhiteSpace(schema))
+        throw new VerifyFatalException("--events, --trades, --schema required for verify strict");
+    StrictJournalVerifier.StrictVerifyReport report;
+    try
+    {
+        report = StrictJournalVerifier.Verify(new StrictVerifyRequest(events!, trades!, schema!, strict: !lenient));
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"STRICT VERIFY RUNTIME ERROR: {ex.Message}");
+        return 1; // runtime error
+    }
+    if (json)
+    {
+        Console.WriteLine(report.JsonReport);
+    }
+    else
+    {
+        if (report.ExitCode==0)
+        {
+            // parse counts from JSON for summary without re-parsing files
+            Console.WriteLine("STRICT VERIFY: OK");
+        }
+        else
+        {
+            Console.WriteLine($"STRICT VERIFY: FAIL violations={report.Violations.Count}");
+            foreach (var v in report.Violations.Take(10))
+            {
+                Console.WriteLine($"  {v.Sequence}:{v.Kind}:{v.Detail}");
+            }
+            if (report.Violations.Count>10) Console.WriteLine($"  ...(truncated, total={report.Violations.Count})");
+        }
+    }
+    return report.ExitCode; // 0 ok, 2 fail
 }
 
 // ------------------------------------------------------------

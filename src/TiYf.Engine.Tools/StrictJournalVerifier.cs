@@ -66,25 +66,26 @@ public static class StrictJournalVerifier
             parsed.Add(new ParsedEvent(seq, ts, evtType, payload));
         }
 
-        // Ordering rules relative placement within bar (approx by looking for sequences): enforce pattern BAR -> Z -> CLAMP? -> APPLIED?
-        var barSeqs = parsed.Where(p=>p.Type=="BAR_V1").Select(p=>p.Seq).ToHashSet();
-        foreach (var ev in parsed)
+        if (req.strict)
         {
-            if (ev.Type=="INFO_SENTIMENT_Z_V1")
+            // Ordering rules relative placement within bar (approx by looking for sequences): enforce pattern BAR -> Z -> CLAMP? -> APPLIED?
+            foreach (var ev in parsed)
             {
-                // previous must be BAR_V1 (not strictly immediate if data QA events existed earlier, but for scaffold strictness keep simple)
-                var prev = parsed.FirstOrDefault(p=>p.Seq == ev.Seq-1);
-                if (prev==null || prev.Type!="BAR_V1") V("order_violation", ev.Seq, GetSym(ev.Payload), ev.Ts.ToString("O"), "Z must immediately follow BAR");
-            }
-            else if (ev.Type=="INFO_SENTIMENT_CLAMP_V1")
-            {
-                var prev = parsed.FirstOrDefault(p=>p.Seq == ev.Seq-1);
-                if (prev==null || prev.Type!="INFO_SENTIMENT_Z_V1") V("order_violation", ev.Seq, GetSym(ev.Payload), ev.Ts.ToString("O"), "CLAMP must follow Z");
-            }
-            else if (ev.Type=="INFO_SENTIMENT_APPLIED_V1")
-            {
-                var prev = parsed.FirstOrDefault(p=>p.Seq == ev.Seq-1);
-                if (prev==null || (prev.Type!="INFO_SENTIMENT_Z_V1" && prev.Type!="INFO_SENTIMENT_CLAMP_V1")) V("order_violation", ev.Seq, GetSym(ev.Payload), ev.Ts.ToString("O"), "APPLIED must follow Z or CLAMP");
+                if (ev.Type=="INFO_SENTIMENT_Z_V1")
+                {
+                    var prev = parsed.FirstOrDefault(p=>p.Seq == ev.Seq-1);
+                    if (prev==null || prev.Type!="BAR_V1") V("order_violation", ev.Seq, GetSym(ev.Payload), ev.Ts.ToString("O"), "Z must immediately follow BAR");
+                }
+                else if (ev.Type=="INFO_SENTIMENT_CLAMP_V1")
+                {
+                    var prev = parsed.FirstOrDefault(p=>p.Seq == ev.Seq-1);
+                    if (prev==null || prev.Type!="INFO_SENTIMENT_Z_V1") V("order_violation", ev.Seq, GetSym(ev.Payload), ev.Ts.ToString("O"), "CLAMP must follow Z");
+                }
+                else if (ev.Type=="INFO_SENTIMENT_APPLIED_V1")
+                {
+                    var prev = parsed.FirstOrDefault(p=>p.Seq == ev.Seq-1);
+                    if (prev==null || (prev.Type!="INFO_SENTIMENT_Z_V1" && prev.Type!="INFO_SENTIMENT_CLAMP_V1")) V("order_violation", ev.Seq, GetSym(ev.Payload), ev.Ts.ToString("O"), "APPLIED must follow Z or CLAMP");
+                }
             }
         }
 
