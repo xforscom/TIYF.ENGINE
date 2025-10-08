@@ -198,6 +198,13 @@ public sealed class EngineLoop
 											finalUnits = scaled;
 											lastOriginalUnits = baseUnits; lastAdjustedUnits = finalUnits;
 										}
+										#if DEBUG
+										else if (barClamp && _sentimentConfig is { Mode: var ms } && ms.Equals("shadow", StringComparison.OrdinalIgnoreCase))
+										{
+											// Tripwire: in shadow we must not have altered units.
+											System.Diagnostics.Debug.Assert(lastOriginalUnits is null && lastAdjustedUnits is null, "Shadow mode must not adjust units");
+										}
+										#endif
 										_openUnits[act.DecisionId] = finalUnits;
 										var req = new OrderRequest(act.DecisionId, act.Symbol, side, finalUnits, tickMinute);
 										var result = await _execution.ExecuteMarketAsync(req, ct);

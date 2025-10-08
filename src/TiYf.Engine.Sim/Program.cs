@@ -55,8 +55,11 @@ catch (Exception ex)
 // Ensure sample data
 SampleDataSeeder.EnsureSample(Directory.GetCurrentDirectory());
 
-var (cfg, cfgHash, raw) = EngineConfigLoader.Load(fullConfigPath);
-Console.WriteLine($"Loaded config RunId={cfg.RunId} hash={cfgHash}");
+var (cfg, cfgHashOriginal, raw) = EngineConfigLoader.Load(fullConfigPath);
+// Compute parity-normalized hash (ignores sentiment / riskProbe toggles) to ensure OFF vs SHADOW
+// trades & journals remain identical for invariants.
+var cfgHash = TiYf.Engine.Core.ParityConfigHash.Compute(raw);
+Console.WriteLine($"Loaded config RunId={cfg.RunId} hash(original)={cfgHashOriginal} parityHash={cfgHash}");
 
 Instrument instrument = new Instrument(new InstrumentId("INST1"), "FOO", 2); // legacy fallback (non-M0)
 var catalog = new InMemoryInstrumentCatalog(new[] { instrument });
