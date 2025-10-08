@@ -560,7 +560,9 @@ var loop = new EngineLoop(clock, builders, barKeyTracker!, journal, tickSource, 
     sizeUnitsFx: sizeUnitsFx,
     sizeUnitsXau: sizeUnitsXau,
     riskProbeEnabled: !(raw.RootElement.TryGetProperty("featureFlags", out var ff) && ff.ValueKind==JsonValueKind.Object && ff.TryGetProperty("riskProbe", out var rp) && rp.ValueKind==JsonValueKind.String && rp.GetString()=="disabled"),
-    sentimentConfig: BuildSentimentConfig(raw)
+    sentimentConfig: BuildSentimentConfig(raw),
+    penaltyConfig: (raw.RootElement.TryGetProperty("featureFlags", out var ffP) && ffP.ValueKind==JsonValueKind.Object && ffP.TryGetProperty("penalty", out var penNode) && penNode.ValueKind==JsonValueKind.String) ? penNode.GetString() : "off",
+    forcePenalty: (raw.RootElement.TryGetProperty("penaltyConfig", out var pCfg) && pCfg.ValueKind==JsonValueKind.Object && pCfg.TryGetProperty("forcePenalty", out var fp) && fp.ValueKind==JsonValueKind.True)
 );
 await loop.RunAsync();
 

@@ -92,12 +92,13 @@ public sealed class EngineLoop
 
 	private string? ExtractDataVersion() => _dataVersion;
 
-	public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action? onBarEmitted = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true, SentimentGuardConfig? sentimentConfig = null)
+	public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action? onBarEmitted = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true, SentimentGuardConfig? sentimentConfig = null, string? penaltyConfig = null, bool forcePenalty = false)
 	{
-		_clock = clock; _builders = builders; _barKeyTracker = tracker; _journal = journal; _ticks = ticks; _barEventType = barEventType; _seq = (journal is FileJournalWriter fj ? fj.NextSequence : 1UL) - 1UL; _onBarEmitted = onBarEmitted; _riskFormulas = riskFormulas; _basketAggregator = basketAggregator; _configHash = configHash; _schemaVersion = schemaVersion; _riskEnforcer = riskEnforcer; _riskConfig = riskConfig; _equityOverride = equityOverride; _deterministicStrategy = deterministicStrategy; _execution = execution; _positions = positions; _tradesWriter = tradesWriter; _dataVersion = dataVersion; _riskProbeEnabled = riskProbeEnabled; _sentimentConfig = sentimentConfig;
+		_clock = clock; _builders = builders; _barKeyTracker = tracker; _journal = journal; _ticks = ticks; _barEventType = barEventType; _seq = (journal is FileJournalWriter fj ? fj.NextSequence : 1UL) - 1UL; _onBarEmitted = onBarEmitted; _riskFormulas = riskFormulas; _basketAggregator = basketAggregator; _configHash = configHash; _schemaVersion = schemaVersion; _riskEnforcer = riskEnforcer; _riskConfig = riskConfig; _equityOverride = equityOverride; _deterministicStrategy = deterministicStrategy; _execution = execution; _positions = positions; _tradesWriter = tradesWriter; _dataVersion = dataVersion; _riskProbeEnabled = riskProbeEnabled; _sentimentConfig = sentimentConfig; _penaltyMode = penaltyConfig ?? "off"; _forcePenalty = forcePenalty;
 		_sizeUnitsFx = sizeUnitsFx; _sizeUnitsXau = sizeUnitsXau;
 	}
 	private readonly long _sizeUnitsFx; private readonly long _sizeUnitsXau;
+	private readonly string _penaltyMode; private readonly bool _forcePenalty;
 
 	public async Task RunAsync(CancellationToken ct = default)
 	{
@@ -206,12 +207,22 @@ public sealed class EngineLoop
 									}
 								}
 							}
-							// Emit APPLIED event if scaling occurred
+										// Emit APPLIED event if scaling occurred
 							if (lastOriginalUnits.HasValue && lastAdjustedUnits.HasValue && lastAppliedSymbol is not null && lastAppliedTs.HasValue && _sentimentConfig is { Mode: var modeApplied } && modeApplied.Equals("active", StringComparison.OrdinalIgnoreCase))
 							{
 								var appliedPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { symbol = lastAppliedSymbol, ts = lastAppliedTs.Value, original_units = lastOriginalUnits.Value, adjusted_units = lastAdjustedUnits.Value, reason = "volatility_guard" });
 								await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "INFO_SENTIMENT_APPLIED_V1", appliedPayload), ct);
 							}
+
+										// Penalty scaffold emission (no trade impact): after sizing logic, deterministic condition
+										if ((_penaltyMode.Equals("shadow", StringComparison.OrdinalIgnoreCase) || _penaltyMode.Equals("active", StringComparison.OrdinalIgnoreCase)) && _forcePenalty && lastOriginalUnits.HasValue && lastAdjustedUnits.HasValue && lastAppliedSymbol is not null)
+										{
+											// For scaffold reuse sentiment scaling numbers if present, else fabricate deterministic halves
+											decimal orig = lastOriginalUnits ?? 100m;
+											decimal adj = lastAdjustedUnits ?? Math.Max(1, (long)Math.Floor(orig * 0.5m));
+											var penaltyPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { symbol = lastAppliedSymbol, ts = bar.EndUtc, reason = "drawdown_guard", original_units = orig, adjusted_units = adj, penalty_scalar = (orig==0?0m: (adj/orig)) });
+											await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "PENALTY_APPLIED_V1", penaltyPayload), ct);
+										}
 						}
 					// Emit risk probe (synthetic) if services configured
 					if (_riskFormulas is not null && _basketAggregator is not null && _riskProbeEnabled)

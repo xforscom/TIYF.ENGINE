@@ -18,7 +18,8 @@ public static class StrictJournalVerifier
     {
         "BAR_V1","RISK_PROBE_V1",
         "INFO_SENTIMENT_Z_V1","INFO_SENTIMENT_CLAMP_V1","INFO_SENTIMENT_APPLIED_V1",
-        "DATA_QA_BEGIN_V1","DATA_QA_ISSUE_V1","DATA_QA_SUMMARY_V1","DATA_QA_ABORT_V1"
+        "DATA_QA_BEGIN_V1","DATA_QA_ISSUE_V1","DATA_QA_SUMMARY_V1","DATA_QA_ABORT_V1",
+        "PENALTY_APPLIED_V1"
     };
 
     private sealed record ParsedEvent(ulong Seq, DateTime Ts, string Type, JsonElement Payload);
@@ -86,6 +87,13 @@ public static class StrictJournalVerifier
                     var prev = parsed.FirstOrDefault(p=>p.Seq == ev.Seq-1);
                     if (prev==null || (prev.Type!="INFO_SENTIMENT_Z_V1" && prev.Type!="INFO_SENTIMENT_CLAMP_V1")) V("order_violation", ev.Seq, GetSym(ev.Payload), ev.Ts.ToString("O"), "APPLIED must follow Z or CLAMP");
                 }
+                else if (ev.Type=="PENALTY_APPLIED_V1")
+                {
+                    var prev = parsed.FirstOrDefault(p=>p.Seq == ev.Seq-1);
+                    // Allow penalty after APPLIED/CLAMP/Z/BAR but enforce immediate predecessor relationship for strict determinism
+                    if (prev==null || (prev.Type!="INFO_SENTIMENT_APPLIED_V1" && prev.Type!="INFO_SENTIMENT_CLAMP_V1" && prev.Type!="INFO_SENTIMENT_Z_V1" && prev.Type!="BAR_V1"))
+                        V("order_violation", ev.Seq, GetSym(ev.Payload), ev.Ts.ToString("O"), "PENALTY must follow BAR or sentiment event");
+                }
             }
         }
 
@@ -98,6 +106,17 @@ public static class StrictJournalVerifier
             bool hasReason = ap.Payload.TryGetProperty("reason", out var rEl) && rEl.ValueKind==JsonValueKind.String;
             if (!(hasSymbol && hasFrom && hasTo && hasReason)) V("missing_field", ap.Seq, hasSymbol? symEl.GetString():null, ap.Ts.ToString("O"), "APPLIED missing required fields");
             if (req.sentimentMode=="shadow") V("mode_violation", ap.Seq, hasSymbol? symEl.GetString():null, ap.Ts.ToString("O"), "APPLIED not allowed in shadow mode");
+        }
+
+        // Field requirements for PENALTY_APPLIED_V1 (scaffold)
+        foreach (var pen in parsed.Where(p=>p.Type=="PENALTY_APPLIED_V1"))
+        {
+            bool hasSymbol = pen.Payload.TryGetProperty("symbol", out var sEl) && sEl.ValueKind==JsonValueKind.String;
+            bool hasReason = pen.Payload.TryGetProperty("reason", out var rsEl) && rsEl.ValueKind==JsonValueKind.String;
+            bool hasOrig = pen.Payload.TryGetProperty("original_units", out var oEl) && oEl.ValueKind==JsonValueKind.Number;
+            bool hasAdj = pen.Payload.TryGetProperty("adjusted_units", out var aEl) && aEl.ValueKind==JsonValueKind.Number;
+            bool hasScalar = pen.Payload.TryGetProperty("penalty_scalar", out var scEl) && scEl.ValueKind==JsonValueKind.Number;
+            if (!(hasSymbol && hasReason && hasOrig && hasAdj && hasScalar)) V("missing_field", pen.Seq, hasSymbol? sEl.GetString():null, pen.Ts.ToString("O"), "PENALTY missing required fields");
         }
 
         // Numeric invariants on trades
