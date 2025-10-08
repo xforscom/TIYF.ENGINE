@@ -1,0 +1,49 @@
+name: m2-shadow
+
+on:
+  push:
+    branches: [ feat/risk-enforcement ]
+  pull_request:
+    branches: [ feat/risk-enforcement ]
+  workflow_dispatch: {}
+
+jobs:
+  build-test-shadow:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore
+      - name: Build Release
+        run: dotnet build -c Release --no-restore
+      - name: Run Tests
+        run: dotnet test -c Release --no-build --verbosity minimal
+      - name: Shadow Sim Run (normal sigma)
+        run: |
+          echo 'Creating shadow config'
+          cp tests/fixtures/backtest_m0/config.backtest-m0.candidate.json shadow.json
+          # enable sentiment shadow + moderate sigma
+          jq '.featureFlags.sentiment="shadow" | .sentimentConfig={"window":10,"volGuardSigma":0.20}' shadow.json > shadow_mod.json
+          dotnet exec src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll --config shadow_mod.json --quiet --run-id CI-SHADOW
+          test -f journals/M0/M0-RUN-CI-SHADOW/events.csv
+          grep -q 'DATA_QA_SUMMARY_V1' journals/M0/M0-RUN-CI-SHADOW/events.csv
+          grep 'DATA_QA_SUMMARY_V1' journals/M0/M0-RUN-CI-SHADOW/events.csv | grep -q '"passed":true'
+          grep -q 'INFO_SENTIMENT_Z_V1' journals/M0/M0-RUN-CI-SHADOW/events.csv
+      - name: Shadow Sim Run (clamp sigma)
+        run: |
+          cp tests/fixtures/backtest_m0/config.backtest-m0.candidate.json shadow_clamp.json
+          jq '.featureFlags.sentiment="shadow" | .sentimentConfig={"window":5,"volGuardSigma":0.0000001}' shadow_clamp.json > shadow_clamp_mod.json
+          dotnet exec src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll --config shadow_clamp_mod.json --quiet --run-id CI-SHADOW-CLAMP
+          test -f journals/M0/M0-RUN-CI-SHADOW-CLAMP/events.csv
+          grep -q 'INFO_SENTIMENT_CLAMP_V1' journals/M0/M0-RUN-CI-SHADOW-CLAMP/events.csv
+      - name: Artifact (optional) Upload Events
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: m2-shadow-journals
+          path: journals/M0/M0-RUN-CI-SHADOW*/events.csv
