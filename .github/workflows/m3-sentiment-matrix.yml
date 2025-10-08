@@ -117,6 +117,36 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - name: Download journals (off)
+        uses: actions/download-artifact@v4
+        with:
+          name: journals-off
+          path: dl/off
+      - name: Download journals (shadow)
+        uses: actions/download-artifact@v4
+        with:
+          name: journals-shadow
+          path: dl/shadow
+      - name: Download journals (active)
+        uses: actions/download-artifact@v4
+        with:
+          name: journals-active
+          path: dl/active
+      - name: Assemble Journals Layout
+        run: |
+          set -euo pipefail
+          mkdir -p journals/M0
+          # Copy each run directory (containing events.csv) into canonical journals/M0 layout
+          while IFS= read -r dir; do
+            base=$(basename "$dir")
+            if [ -d "journals/M0/$base" ]; then
+              echo "Skipping existing $base"; continue
+            fi
+            echo "Assembling run directory: $base";
+            cp -r "$dir" "journals/M0/$base"
+          done < <(find dl -type f -name events.csv -printf '%h\n')
+          echo "Resulting journals/M0 contents:";
+            find journals/M0 -maxdepth 2 -type f -name events.csv -printf '%h\n' || true
       - name: Validate Cross-Mode Invariants
         run: |
           set -euo pipefail
