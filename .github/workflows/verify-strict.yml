@@ -14,23 +14,40 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: Restore & Build Release
+      - name: Build + Generate + Verify (strict)
+        shell: bash
         run: |
-          dotnet restore TiYf.Engine.sln
-          dotnet build TiYf.Engine.sln -c Release --no-restore -warnaserror
-      - name: Run Sim to produce fixture journal (M0)
-        run: |
-          dotnet exec src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll --config tests/fixtures/backtest_m0/config.backtest-m0.json --run-id STRICT-FIX --quiet
-      - name: Run strict verifier
-        run: |
-          EVENTS=$(ls journals/M0/*STRICT-FIX*/events.csv)
-          TRADES=$(ls journals/M0/*STRICT-FIX*/trades.csv)
-          echo "Events=$EVENTS"; echo "Trades=$TRADES"
-          dotnet exec src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll verify strict --events "$EVENTS" --trades "$TRADES" --schema 1.2.0 || exit_code=$?
-          if [ "${exit_code:-0}" -ne 0 ]; then echo "Strict verifier failed with exit $exit_code"; exit $exit_code; fi
-      - name: Upload journal (always)
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE"
+          SLN="$ROOT/TiYf.Engine.sln"
+          TOOLS="$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
+          SIM="$ROOT/src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"
+          CFG="$ROOT/tests/fixtures/backtest_m0/config.backtest-m0.json"
+          echo "[Step] Build solution"
+          dotnet build "$SLN" -c Release --nologo
+          echo "[Step] Run Sim (fixture)"
+          rm -rf "$ROOT/journals" || true
+          dotnet exec "$SIM" --config "$CFG" --run-id STRICT-CI --quiet || { echo 'Sim run failed'; exit 2; }
+          RUN_DIR="$(find "$ROOT/journals" -type d -name '*STRICT-CI*' | sort | tail -n1)"
+          echo "RUN_DIR=$RUN_DIR"
+          test -n "$RUN_DIR" || { echo 'No run directory found'; ls -R "$ROOT/journals" || true; exit 2; }
+          EV="$RUN_DIR/events.csv"; TR="$RUN_DIR/trades.csv"
+          test -f "$EV" && test -f "$TR" || { echo 'Missing events/trades'; ls -R "$RUN_DIR"; exit 2; }
+          echo "Events size: $(wc -l < "$EV") lines"; echo "Trades size: $(wc -l < "$TR") lines"
+          echo "[Step] Strict verify"
+          set +e
+          VERIFY_JSON=$(dotnet exec "$TOOLS" verify strict --events "$EV" --trades "$TR" --schema 1.2.0 --json)
+          EC=$?
+          set -e
+          echo "::group::STRICT VERIFY JSON"; echo "$VERIFY_JSON"; echo "::endgroup::"
+          mkdir -p artifacts/verify-strict
+          cp "$EV" "$TR" artifacts/verify-strict/
+          if [ $EC -ne 0 ]; then
+            echo "Verifier exit code=$EC"; exit $EC
+          fi
+      - name: Upload artifacts (always)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: verify-strict-journal
-          path: journals/M0/*STRICT-FIX*/
+          name: verify-strict-artifacts
+          path: artifacts/verify-strict
