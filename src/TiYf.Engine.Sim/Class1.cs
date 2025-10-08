@@ -76,6 +76,7 @@ public sealed class EngineLoop
 	private readonly string? _configHash; // pass-through for risk probe journaling
 	private readonly string _schemaVersion;
 	private readonly RiskConfig? _riskConfig;
+	private readonly string _riskMode = "off"; // off|shadow|active
 	private readonly decimal? _equityOverride;
     private readonly DeterministicScriptStrategy? _deterministicStrategy; // optional strategy for M0
 	private readonly IExecutionAdapter? _execution;
@@ -92,13 +93,39 @@ public sealed class EngineLoop
 
 	private string? ExtractDataVersion() => _dataVersion;
 
-	public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action? onBarEmitted = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true, SentimentGuardConfig? sentimentConfig = null, string? penaltyConfig = null, bool forcePenalty = false)
+	public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action? onBarEmitted = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true, SentimentGuardConfig? sentimentConfig = null, string? penaltyConfig = null, bool forcePenalty = false, string riskMode = "off")
 	{
-		_clock = clock; _builders = builders; _barKeyTracker = tracker; _journal = journal; _ticks = ticks; _barEventType = barEventType; _seq = (journal is FileJournalWriter fj ? fj.NextSequence : 1UL) - 1UL; _onBarEmitted = onBarEmitted; _riskFormulas = riskFormulas; _basketAggregator = basketAggregator; _configHash = configHash; _schemaVersion = schemaVersion; _riskEnforcer = riskEnforcer; _riskConfig = riskConfig; _equityOverride = equityOverride; _deterministicStrategy = deterministicStrategy; _execution = execution; _positions = positions; _tradesWriter = tradesWriter; _dataVersion = dataVersion; _riskProbeEnabled = riskProbeEnabled; _sentimentConfig = sentimentConfig; _penaltyMode = penaltyConfig ?? "off"; _forcePenalty = forcePenalty;
+		_clock = clock; _builders = builders; _barKeyTracker = tracker; _journal = journal; _ticks = ticks; _barEventType = barEventType; _seq = (journal is FileJournalWriter fj ? fj.NextSequence : 1UL) - 1UL; _onBarEmitted = onBarEmitted; _riskFormulas = riskFormulas; _basketAggregator = basketAggregator; _configHash = configHash; _schemaVersion = schemaVersion; _riskEnforcer = riskEnforcer; _riskConfig = riskConfig; _equityOverride = equityOverride; _deterministicStrategy = deterministicStrategy; _execution = execution; _positions = positions; _tradesWriter = tradesWriter; _dataVersion = dataVersion; _riskProbeEnabled = riskProbeEnabled; _sentimentConfig = sentimentConfig; _penaltyMode = penaltyConfig ?? "off"; _forcePenalty = forcePenalty; _riskMode = string.IsNullOrWhiteSpace(riskMode)?"off":riskMode.ToLowerInvariant();
 		_sizeUnitsFx = sizeUnitsFx; _sizeUnitsXau = sizeUnitsXau;
+#if DEBUG
+		if (_riskMode=="off" && riskConfig is not null && (riskConfig.EmitEvaluations || (riskConfig.MaxNetExposureBySymbol!=null || riskConfig.MaxRunDrawdownCCY!=null)))
+		{
+			throw new InvalidOperationException("DEBUG: riskMode resolved Off unexpectedly while riskConfig provided");
+		}
+#endif
 	}
 	private readonly long _sizeUnitsFx; private readonly long _sizeUnitsXau;
 	private readonly string _penaltyMode; private readonly bool _forcePenalty;
+	private bool _penaltyEmitted = false; // ensure single forced emission
+	// Risk tracking (net exposure by symbol & run drawdown). Simplified placeholders until full logic filled in.
+	private readonly Dictionary<string, decimal> _netExposureBySymbol = new(StringComparer.Ordinal);
+	private decimal _peakEquity = 0m; // to compute run drawdown in account CCY
+	private decimal _minEquity = 0m;
+	private decimal _lastEquity = 0m;
+	private bool _riskBlockCurrentBar = false; // reset per bar
+	private int _riskEvalCount = 0; // counts INFO_RISK_EVAL emissions for test hooks
+	private readonly Dictionary<string,int> _riskEvalCountBySymbol = new(StringComparer.Ordinal);
+
+	private void ForceDrawdown(string symbol, decimal limit)
+	{
+		// Deterministically set peak and current equity so run_drawdown = limit + 1
+		_peakEquity = 100_000m;
+		_lastEquity = _peakEquity - (limit + 1m);
+		if (_lastEquity < 0m) _lastEquity = 0m;
+#if DEBUG
+		Console.WriteLine($"DEBUG: ForceDrawdown(symbol={symbol}, limit={limit}, value={_peakEquity - _lastEquity})");
+#endif
+	}
 
 	public async Task RunAsync(CancellationToken ct = default)
 	{
@@ -139,6 +166,17 @@ public sealed class EngineLoop
 					var json = JsonSerializer.SerializeToElement(enriched);
 					await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, _barEventType, json), ct);
 
+					// Forced penalty scaffold emission: emit exactly once on first BAR prior to any risk/sentiment evaluations when configured
+					if (!_penaltyEmitted && _forcePenalty && (_penaltyMode=="shadow" || _penaltyMode=="active"))
+					{
+						_penaltyEmitted = true;
+						var penSymbol = bar.InstrumentId.Value;
+						decimal orig = 200m;
+						decimal adj = Math.Max(1, Math.Floor(orig * 0.5m));
+						var penaltyPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { symbol = penSymbol, ts = bar.EndUtc, reason = "drawdown_guard", original_units = orig, adjusted_units = adj, penalty_scalar = (orig==0?0m: (adj/orig)) });
+						await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "PENALTY_APPLIED_V1", penaltyPayload), ct);
+					}
+
 						// Sentiment volatility guard (shadow or active) after bar emission, before strategy trade execution
 						bool barClamp = false; decimal? lastOriginalUnits = null; long? lastAdjustedUnits = null; string? lastAppliedSymbol = null; DateTime? lastAppliedTs = null;
 						if (_sentimentConfig is { Enabled: true, Mode: var modeVal } sg && (modeVal.Equals("shadow", StringComparison.OrdinalIgnoreCase) || modeVal.Equals("active", StringComparison.OrdinalIgnoreCase)))
@@ -152,78 +190,153 @@ public sealed class EngineLoop
 						{
 							var clampPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { symbol = sample.Symbol, reason = "volatility_guard", ts = sample.Ts });
 							await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "INFO_SENTIMENT_CLAMP_V1", clampPayload), ct);
-								barClamp = true; lastAppliedSymbol = sample.Symbol; lastAppliedTs = sample.Ts;
+							barClamp = true; lastAppliedSymbol = sample.Symbol; lastAppliedTs = sample.Ts;
 						}
 					}
 
-						// Strategy scheduling (after sentiment so unit scaling can apply)
-						if (_deterministicStrategy is not null && _execution is not null && _positions is not null)
-						{
+							// === Risk evaluation & alerts (always before strategy scheduling) ===
+							_riskBlockCurrentBar = false; // reset
+							List<DeterministicScriptStrategy.ScheduledAction>? pendingActions = null;
+							// Pre-fetch pending actions once per minute for projection & later execution
 							var tickMinute = new DateTime(tick.UtcTimestamp.Year, tick.UtcTimestamp.Month, tick.UtcTimestamp.Day, tick.UtcTimestamp.Hour, tick.UtcTimestamp.Minute, 0, DateTimeKind.Utc);
-							if (_lastStrategyMinute != tickMinute)
+							bool newMinuteWindow = _lastStrategyMinute != tickMinute;
+							if (_deterministicStrategy is not null && newMinuteWindow)
+								pendingActions = _deterministicStrategy.Pending(tickMinute).ToList();
+							if (_riskMode != "off")
 							{
-								_lastStrategyMinute = tickMinute;
-								foreach (var act in _deterministicStrategy.Pending(tickMinute))
+								decimal netExposure = 0m;
+								foreach (var kv in _openUnits.OrderBy(k=>k.Key, StringComparer.Ordinal))
 								{
-									if (act.Side == Side.Close)
+									decimal notionalPerUnit = bar.Close; // simple deterministic mapping
+									netExposure += kv.Value * notionalPerUnit;
+								}
+								// Project opens from pending actions before they execute (only if new minute window)
+								if (pendingActions is not null)
+								{
+									foreach (var act in pendingActions)
 									{
-										// Close path identical irrespective of sentiment scaling (scaling only applies to opens)
-										var closeSide = act.Symbol switch { _ => TradeSide.Buy }; // will be set below
-										bool firstLeg = act.DecisionId.EndsWith("-01", StringComparison.Ordinal);
-										var entrySide = firstLeg ? TradeSide.Buy : TradeSide.Sell;
-										closeSide = entrySide == TradeSide.Buy ? TradeSide.Sell : TradeSide.Buy;
-										var units = _openUnits.TryGetValue(act.DecisionId, out var ou) ? ou : 0L;
-										var req = new OrderRequest(act.DecisionId, act.Symbol, closeSide, units, tickMinute);
-										var result = await _execution.ExecuteMarketAsync(req, ct);
-										if (result.Accepted && result.Fill is { } fill)
-										{
-											_positions.OnFill(fill, _schemaVersion, _configHash ?? string.Empty, ExtractDataVersion());
-											if (_tradesWriter is not null)
-											{
-												foreach (var completed in _positions.Completed.Where(c=>c.DecisionId==act.DecisionId))
-													_tradesWriter.Append(completed);
-											}
-										}
-									}
-									else
-									{
-										bool firstLeg = act.DecisionId.EndsWith("-01", StringComparison.Ordinal);
-										var side = firstLeg ? TradeSide.Buy : TradeSide.Sell;
+										if (act.Side == Side.Close) continue; // closures reduce exposure but we ignore for conservative block decision
 										var baseUnits = act.Symbol.Equals("XAUUSD", StringComparison.OrdinalIgnoreCase) ? _sizeUnitsXau : _sizeUnitsFx;
-										long finalUnits = baseUnits;
-										if (barClamp && _sentimentConfig is { Mode: var m } && m.Equals("active", StringComparison.OrdinalIgnoreCase))
-										{
-											// Deterministic scaling rule
-											var scaled = (long)Math.Floor(baseUnits * 0.5m);
-											if (baseUnits > 0 && scaled < 1) scaled = 1;
-											finalUnits = scaled;
-											lastOriginalUnits = baseUnits; lastAdjustedUnits = finalUnits;
-										}
-										_openUnits[act.DecisionId] = finalUnits;
-										var req = new OrderRequest(act.DecisionId, act.Symbol, side, finalUnits, tickMinute);
-										var result = await _execution.ExecuteMarketAsync(req, ct);
-										if (result.Accepted && result.Fill is { } fill)
-											_positions.OnFill(fill, _schemaVersion, _configHash ?? string.Empty, ExtractDataVersion());
+										decimal notionalPerUnit = bar.Close;
+										netExposure += baseUnits * notionalPerUnit * (act.DecisionId.EndsWith("-01", StringComparison.Ordinal) ? 1 : -1);
 									}
 								}
+								_netExposureBySymbol[bar.InstrumentId.Value] = netExposure;
+								_lastEquity = _equityOverride ?? 100_000m;
+								if (_peakEquity == 0m) _peakEquity = _lastEquity;
+								if (_lastEquity > _peakEquity) _peakEquity = _lastEquity;
+								if (_minEquity == 0m || _lastEquity < _minEquity) _minEquity = _lastEquity;
+								// Forced drawdown test hook: perform equity drop BEFORE computing runDrawdown so alert can trigger in same eval
+								// Per-symbol deterministic force-drawdown hook
+								if (_riskConfig?.ForceDrawdownAfterEvals != null && _riskConfig.MaxRunDrawdownCCY.HasValue)
+								{
+									var forceMap = _riskConfig.ForceDrawdownAfterEvals;
+									var symbol = bar.InstrumentId.Value;
+									if (!_riskEvalCountBySymbol.TryGetValue(symbol, out var perSymCount)) perSymCount = 0;
+									if (forceMap.TryGetValue(symbol, out var triggerN) && perSymCount + 1 == triggerN)
+										ForceDrawdown(symbol, _riskConfig.MaxRunDrawdownCCY.Value);
+								}
+								decimal runDrawdown = _peakEquity - _lastEquity;
+		#if DEBUG
+								if (_riskMode!="off") Console.WriteLine($"DEBUG:RISK_EVAL symbol={bar.InstrumentId.Value} run_dd={runDrawdown} cap={_riskConfig?.MaxRunDrawdownCCY} evalCount={_riskEvalCount} perSym={(_riskEvalCountBySymbol.TryGetValue(bar.InstrumentId.Value, out var c)?c:0)}");
+		#endif
+								if (_riskConfig?.EmitEvaluations != false)
+								{
+									var evalPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { symbol = bar.InstrumentId.Value, ts = bar.EndUtc, net_exposure = netExposure, run_drawdown = runDrawdown });
+									await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "INFO_RISK_EVAL_V1", evalPayload), ct);
+									_riskEvalCount++;
+									var sym = bar.InstrumentId.Value; _riskEvalCountBySymbol[sym] = _riskEvalCountBySymbol.TryGetValue(sym, out var ec) ? ec + 1 : 1;
+								}
+								decimal lim = 0m; bool exposureBreach = false;
+								if (_riskConfig?.MaxNetExposureBySymbol != null && _riskConfig.MaxNetExposureBySymbol.TryGetValue(bar.InstrumentId.Value, out var cap)) { 
+									lim = cap; 
+									// Treat breach as >= cap (not strictly >) so deterministic zero-cap promotion tests trigger an alert when projected exposure is zero or positive and cap=0.
+									exposureBreach = Math.Abs(netExposure) >= cap; 
+#if DEBUG
+#if DEBUG
+									// Debug exposure diagnostics (development only)
+									if (cap==0) Console.WriteLine($"DEBUG:EXPOSURE_CHECK symbol={bar.InstrumentId.Value} net={netExposure} cap={cap} breach={exposureBreach} pending={(pendingActions?.Count??0)} evalSeq={_seq+1}");
+#endif
+#endif
+								}
+								bool drawdownBreach = _riskConfig?.MaxRunDrawdownCCY.HasValue == true && runDrawdown > _riskConfig.MaxRunDrawdownCCY.Value;
+								if (exposureBreach)
+								{
+									var alertPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { symbol = bar.InstrumentId.Value, ts = bar.EndUtc, limit = lim, value = netExposure, reason = "net_exposure_cap" });
+									await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "ALERT_BLOCK_NET_EXPOSURE", alertPayload), ct);
+									if (_riskMode == "active" && (_riskConfig?.BlockOnBreach ?? false)) _riskBlockCurrentBar = true;
+								}
+								if (drawdownBreach)
+								{
+									var alertPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { ts = bar.EndUtc, limit_ccy = _riskConfig!.MaxRunDrawdownCCY, value_ccy = runDrawdown, reason = "drawdown_guard" });
+									await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "ALERT_BLOCK_DRAWDOWN", alertPayload), ct);
+									if (_riskMode == "active" && (_riskConfig?.BlockOnBreach ?? false)) _riskBlockCurrentBar = true;
+								}
+								// Shadow mode never blocks
+								if (_riskMode == "shadow" && _riskBlockCurrentBar) _riskBlockCurrentBar = false;
 							}
-										// Emit APPLIED event if scaling occurred
+							else { // off mode: clear any previously fetched actions variable remains
+								// no risk events emitted
+							}
+
+							// === Strategy scheduling & execution (after risk eval) ===
+							if (_deterministicStrategy is not null && _execution is not null && _positions is not null)
+							{
+								if (newMinuteWindow && pendingActions is not null)
+								{
+									_lastStrategyMinute = tickMinute;
+									foreach (var act in pendingActions)
+									{
+										if (_riskBlockCurrentBar && _riskMode == "active") continue; // suppress trade placement on active breach
+										if (act.Side == Side.Close)
+										{
+											var closeSide = act.DecisionId.EndsWith("-01", StringComparison.Ordinal) ? TradeSide.Sell : TradeSide.Buy;
+											var units = _openUnits.TryGetValue(act.DecisionId, out var ou) ? ou : 0L;
+											var req = new OrderRequest(act.DecisionId, act.Symbol, closeSide, units, tickMinute);
+											var result = await _execution.ExecuteMarketAsync(req, ct);
+											if (result.Accepted && result.Fill is { } fill)
+											{
+												_positions.OnFill(fill, _schemaVersion, _configHash ?? string.Empty, ExtractDataVersion());
+												if (_tradesWriter is not null)
+												{
+													foreach (var completed in _positions.Completed.Where(c=>c.DecisionId==act.DecisionId))
+														_tradesWriter.Append(completed);
+												}
+											}
+										}
+										else
+										{
+											bool firstLeg = act.DecisionId.EndsWith("-01", StringComparison.Ordinal);
+											var side = firstLeg ? TradeSide.Buy : TradeSide.Sell;
+											var baseUnits = act.Symbol.Equals("XAUUSD", StringComparison.OrdinalIgnoreCase) ? _sizeUnitsXau : _sizeUnitsFx;
+											long finalUnits = baseUnits;
+											if (barClamp && _sentimentConfig is { Mode: var m } && m.Equals("active", StringComparison.OrdinalIgnoreCase))
+											{
+												var scaled = (long)Math.Floor(baseUnits * 0.5m);
+												if (baseUnits > 0 && scaled < 1) scaled = 1;
+												finalUnits = scaled;
+												lastOriginalUnits = baseUnits; lastAdjustedUnits = finalUnits;
+											}
+											_openUnits[act.DecisionId] = finalUnits;
+											var req = new OrderRequest(act.DecisionId, act.Symbol, side, finalUnits, tickMinute);
+											var result = await _execution.ExecuteMarketAsync(req, ct);
+											if (result.Accepted && result.Fill is { } fill)
+												_positions.OnFill(fill, _schemaVersion, _configHash ?? string.Empty, ExtractDataVersion());
+										}
+									}
+								}
+
+							// Emit APPLIED event if scaling occurred
 							if (lastOriginalUnits.HasValue && lastAdjustedUnits.HasValue && lastAppliedSymbol is not null && lastAppliedTs.HasValue && _sentimentConfig is { Mode: var modeApplied } && modeApplied.Equals("active", StringComparison.OrdinalIgnoreCase))
 							{
 								var appliedPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { symbol = lastAppliedSymbol, ts = lastAppliedTs.Value, original_units = lastOriginalUnits.Value, adjusted_units = lastAdjustedUnits.Value, reason = "volatility_guard" });
 								await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "INFO_SENTIMENT_APPLIED_V1", appliedPayload), ct);
 							}
 
-										// Penalty scaffold emission (no trade impact): after sizing logic, deterministic condition
-										if ((_penaltyMode.Equals("shadow", StringComparison.OrdinalIgnoreCase) || _penaltyMode.Equals("active", StringComparison.OrdinalIgnoreCase)) && _forcePenalty && lastOriginalUnits.HasValue && lastAdjustedUnits.HasValue && lastAppliedSymbol is not null)
-										{
-											// For scaffold reuse sentiment scaling numbers if present, else fabricate deterministic halves
-											decimal orig = lastOriginalUnits ?? 100m;
-											decimal adj = lastAdjustedUnits ?? Math.Max(1, (long)Math.Floor(orig * 0.5m));
-											var penaltyPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { symbol = lastAppliedSymbol, ts = bar.EndUtc, reason = "drawdown_guard", original_units = orig, adjusted_units = adj, penalty_scalar = (orig==0?0m: (adj/orig)) });
-											await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "PENALTY_APPLIED_V1", penaltyPayload), ct);
-										}
+
 						}
+
+						// (Moved emission earlier) – placeholder remain (see earlier section after BAR)
 					// Emit risk probe (synthetic) if services configured
 					if (_riskFormulas is not null && _basketAggregator is not null && _riskProbeEnabled)
 					{

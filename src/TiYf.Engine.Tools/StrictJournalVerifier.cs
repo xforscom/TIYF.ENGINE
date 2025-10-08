@@ -19,7 +19,8 @@ public static class StrictJournalVerifier
         "BAR_V1","RISK_PROBE_V1",
         "INFO_SENTIMENT_Z_V1","INFO_SENTIMENT_CLAMP_V1","INFO_SENTIMENT_APPLIED_V1",
         "DATA_QA_BEGIN_V1","DATA_QA_ISSUE_V1","DATA_QA_SUMMARY_V1","DATA_QA_ABORT_V1",
-        "PENALTY_APPLIED_V1"
+        "PENALTY_APPLIED_V1",
+        "INFO_RISK_EVAL_V1","ALERT_BLOCK_NET_EXPOSURE","ALERT_BLOCK_DRAWDOWN"
     };
 
     private sealed record ParsedEvent(ulong Seq, DateTime Ts, string Type, JsonElement Payload);
@@ -90,9 +91,22 @@ public static class StrictJournalVerifier
                 else if (ev.Type=="PENALTY_APPLIED_V1")
                 {
                     var prev = parsed.FirstOrDefault(p=>p.Seq == ev.Seq-1);
-                    // Allow penalty after APPLIED/CLAMP/Z/BAR but enforce immediate predecessor relationship for strict determinism
-                    if (prev==null || (prev.Type!="INFO_SENTIMENT_APPLIED_V1" && prev.Type!="INFO_SENTIMENT_CLAMP_V1" && prev.Type!="INFO_SENTIMENT_Z_V1" && prev.Type!="BAR_V1"))
+                    // Allow penalty after BAR or any sentiment event (Z/CLAMP/APPLIED)
+                    if (prev==null || (prev.Type!="BAR_V1" && !prev.Type.StartsWith("INFO_SENTIMENT_", StringComparison.Ordinal)))
                         V("order_violation", ev.Seq, GetSym(ev.Payload), ev.Ts.ToString("O"), "PENALTY must follow BAR or sentiment event");
+                }
+                else if (ev.Type=="INFO_RISK_EVAL_V1")
+                {
+                    // Must follow BAR or a sentiment event and precede any ALERT_BLOCK_* (implicitly by sequence check when alert examined)
+                    var prev = parsed.FirstOrDefault(p=>p.Seq == ev.Seq-1);
+                    if (prev==null || (prev.Type!="BAR_V1" && !prev.Type.StartsWith("INFO_SENTIMENT_", StringComparison.Ordinal)))
+                        V("order_violation", ev.Seq, GetSym(ev.Payload), ev.Ts.ToString("O"), "RISK_EVAL must follow BAR or sentiment");
+                }
+                else if (ev.Type.StartsWith("ALERT_BLOCK_", StringComparison.Ordinal))
+                {
+                    var prev = parsed.FirstOrDefault(p=>p.Seq == ev.Seq-1);
+                    if (prev==null || (prev.Type!="INFO_RISK_EVAL_V1" && !prev.Type.StartsWith("ALERT_BLOCK_", StringComparison.Ordinal)))
+                        V("order_violation", ev.Seq, GetSym(ev.Payload), ev.Ts.ToString("O"), "ALERT_BLOCK must follow INFO_RISK_EVAL or previous ALERT_BLOCK");
                 }
             }
         }
@@ -117,6 +131,35 @@ public static class StrictJournalVerifier
             bool hasAdj = pen.Payload.TryGetProperty("adjusted_units", out var aEl) && aEl.ValueKind==JsonValueKind.Number;
             bool hasScalar = pen.Payload.TryGetProperty("penalty_scalar", out var scEl) && scEl.ValueKind==JsonValueKind.Number;
             if (!(hasSymbol && hasReason && hasOrig && hasAdj && hasScalar)) V("missing_field", pen.Seq, hasSymbol? sEl.GetString():null, pen.Ts.ToString("O"), "PENALTY missing required fields");
+        }
+
+        // Field requirements for INFO_RISK_EVAL_V1
+        foreach (var rv in parsed.Where(p=>p.Type=="INFO_RISK_EVAL_V1"))
+        {
+            bool hasSymbol = rv.Payload.TryGetProperty("symbol", out var sEl) && sEl.ValueKind==JsonValueKind.String;
+            bool hasTs = rv.Payload.TryGetProperty("ts", out var tsEl) && (tsEl.ValueKind==JsonValueKind.String || tsEl.ValueKind==JsonValueKind.Number);
+            bool hasNet = rv.Payload.TryGetProperty("net_exposure", out var neEl) && neEl.ValueKind==JsonValueKind.Number;
+            bool hasDd = rv.Payload.TryGetProperty("run_drawdown", out var ddEl) && ddEl.ValueKind==JsonValueKind.Number;
+            if (!(hasSymbol && hasTs && hasNet && hasDd)) V("missing_field", rv.Seq, hasSymbol? sEl.GetString():null, rv.Ts.ToString("O"), "RISK_EVAL missing required fields");
+        }
+        // Field requirements + cross rules for ALERT_BLOCK_* events
+        foreach (var ab in parsed.Where(p=>p.Type.StartsWith("ALERT_BLOCK_", StringComparison.Ordinal)))
+        {
+            if (ab.Type=="ALERT_BLOCK_NET_EXPOSURE")
+            {
+                bool hasSymbol = ab.Payload.TryGetProperty("symbol", out var sEl) && sEl.ValueKind==JsonValueKind.String;
+                bool hasLimit = ab.Payload.TryGetProperty("limit", out var lEl) && lEl.ValueKind==JsonValueKind.Number;
+                bool hasVal = ab.Payload.TryGetProperty("value", out var vEl) && vEl.ValueKind==JsonValueKind.Number;
+                bool hasReason = ab.Payload.TryGetProperty("reason", out var rEl) && rEl.ValueKind==JsonValueKind.String;
+                if (!(hasSymbol && hasLimit && hasVal && hasReason)) V("missing_field", ab.Seq, hasSymbol? sEl.GetString():null, ab.Ts.ToString("O"), "ALERT_BLOCK_NET_EXPOSURE missing fields");
+            }
+            else if (ab.Type=="ALERT_BLOCK_DRAWDOWN")
+            {
+                bool hasLimit = ab.Payload.TryGetProperty("limit_ccy", out var lEl) && lEl.ValueKind==JsonValueKind.Number;
+                bool hasVal = ab.Payload.TryGetProperty("value_ccy", out var vEl) && vEl.ValueKind==JsonValueKind.Number;
+                bool hasReason = ab.Payload.TryGetProperty("reason", out var rEl) && rEl.ValueKind==JsonValueKind.String;
+                if (!(hasLimit && hasVal && hasReason)) V("missing_field", ab.Seq, null, ab.Ts.ToString("O"), "ALERT_BLOCK_DRAWDOWN missing fields");
+            }
         }
 
         // Numeric invariants on trades

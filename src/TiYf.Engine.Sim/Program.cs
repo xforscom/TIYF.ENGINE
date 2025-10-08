@@ -24,6 +24,7 @@ IEnumerable<string> SafeReadLines(string? p)
 string? configPath = null;
 string? outPath = null;
 string? runIdOverride = null; // provided via --run-id for deterministic multi-run parity tests
+bool verbose = false; bool diagnose = false;
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--config" && i + 1 < args.Length)
@@ -32,6 +33,8 @@ for (int i = 0; i < args.Length; i++)
         outPath = args[i + 1];
     if (args[i] == "--run-id" && i + 1 < args.Length)
         runIdOverride = args[i + 1];
+    if (args[i] == "--verbose" || args[i]=="-v") verbose = true;
+    if (args[i] == "--diagnose") diagnose = true;
 }
 
 configPath ??= "sample-config.json";
@@ -202,6 +205,16 @@ if (isM0)
     {
         runId = "M0-RUN"; // baseline deterministic default
     }
+    // Derive risk mode early; previously used static suffix A/B/C which caused cross-test file locking.
+    // Now append a short GUID segment to ensure uniqueness per process while retaining deterministic prefix for readability.
+    try
+    {
+        var parsedMode = TiYf.Engine.Sim.RiskParsing.ParseRiskMode(raw.RootElement);
+        string suffix = parsedMode switch { TiYf.Engine.Sim.RiskMode.Off => "A", TiYf.Engine.Sim.RiskMode.Shadow => "B", TiYf.Engine.Sim.RiskMode.Active => "C", _ => "A" };
+        var gid = Guid.NewGuid().ToString("N").Substring(0,8);
+        runId = $"M0-RUN-TEST-{suffix}-{gid}"; // e.g. M0-RUN-TEST-A-deadbeef
+    }
+    catch { }
 }
 else
 {
@@ -451,41 +464,91 @@ RiskConfig riskConfig = new();
 try
 {
     if (raw.RootElement.TryGetProperty("equity", out var eqEl) && eqEl.ValueKind == JsonValueKind.Number) equity = eqEl.GetDecimal();
-    if (raw.RootElement.TryGetProperty("risk", out var riskEl) && riskEl.ValueKind == JsonValueKind.Object)
+    // Accept both legacy "risk" and newer "riskConfig" blocks, later entries override earlier ones
+    var riskBlocks = new List<JsonElement>();
+    if (raw.RootElement.TryGetProperty("risk", out var legacyRisk) && legacyRisk.ValueKind==JsonValueKind.Object) riskBlocks.Add(legacyRisk);
+    if (raw.RootElement.TryGetProperty("riskConfig", out var rcBlock) && rcBlock.ValueKind==JsonValueKind.Object) riskBlocks.Add(rcBlock);
+    if (riskBlocks.Count > 0)
     {
-        decimal TryNum(string name, decimal fallback)
+        decimal TryNum(string name, decimal? fallbackNullable)
         {
-            // accept both snake_case and camelCase variants
-            if (riskEl.TryGetProperty(name, out var v) && v.ValueKind==JsonValueKind.Number) return v.GetDecimal();
-            // map camelCase <-> snake_case
-            string alt = name.Contains('_')
-                ? string.Concat(name.Split('_', StringSplitOptions.RemoveEmptyEntries).Select((s,i)=> i==0 ? s : char.ToUpperInvariant(s[0])+s.Substring(1)))
-                : string.Concat(name.Select(c => char.IsUpper(c) ? '_' + char.ToLowerInvariant(c) : c)).TrimStart('_');
-            if (riskEl.TryGetProperty(alt, out var v2) && v2.ValueKind==JsonValueKind.Number) return v2.GetDecimal();
-            return fallback;
+            foreach (var blk in riskBlocks)
+            {
+                if (blk.TryGetProperty(name, out var v) && v.ValueKind==JsonValueKind.Number) return v.GetDecimal();
+                // camel/snake translation
+                string alt = name.Contains('_')
+                    ? string.Concat(name.Split('_', StringSplitOptions.RemoveEmptyEntries).Select((s,i)=> i==0 ? s : char.ToUpperInvariant(s[0])+s.Substring(1)))
+                    : string.Concat(name.Select(c => char.IsUpper(c) ? '_' + char.ToLowerInvariant(c) : c)).TrimStart('_');
+                if (blk.TryGetProperty(alt, out var v2) && v2.ValueKind==JsonValueKind.Number) return v2.GetDecimal();
+                // case-insensitive fallback scan (captures variants like maxRunDrawdownCCY with different casing)
+                if (blk.ValueKind==JsonValueKind.Object)
+                {
+                    foreach (var prop in blk.EnumerateObject())
+                    {
+                        if (prop.Value.ValueKind==JsonValueKind.Number && prop.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) return prop.Value.GetDecimal();
+                        if (prop.Value.ValueKind==JsonValueKind.Number && prop.Name.Equals(alt, StringComparison.OrdinalIgnoreCase)) return prop.Value.GetDecimal();
+                    }
+                }
+            }
+            return fallbackNullable ?? 0m;
         }
         bool TryBool(string name, bool fallback)
         {
-            if (riskEl.TryGetProperty(name, out var v) && (v.ValueKind==JsonValueKind.True || v.ValueKind==JsonValueKind.False)) return v.GetBoolean();
-            string alt = name.Contains('_')
-                ? string.Concat(name.Split('_', StringSplitOptions.RemoveEmptyEntries).Select((s,i)=> i==0 ? s : char.ToUpperInvariant(s[0])+s.Substring(1)))
-                : string.Concat(name.Select(c => char.IsUpper(c) ? '_' + char.ToLowerInvariant(c) : c)).TrimStart('_');
-            if (riskEl.TryGetProperty(alt, out var v2) && (v2.ValueKind==JsonValueKind.True || v2.ValueKind==JsonValueKind.False)) return v2.GetBoolean();
+            foreach (var blk in riskBlocks)
+            {
+                if (blk.TryGetProperty(name, out var v) && (v.ValueKind==JsonValueKind.True || v.ValueKind==JsonValueKind.False)) return v.GetBoolean();
+                string alt = name.Contains('_')
+                    ? string.Concat(name.Split('_', StringSplitOptions.RemoveEmptyEntries).Select((s,i)=> i==0 ? s : char.ToUpperInvariant(s[0])+s.Substring(1)))
+                    : string.Concat(name.Select(c => char.IsUpper(c) ? '_' + char.ToLowerInvariant(c) : c)).TrimStart('_');
+                if (blk.TryGetProperty(alt, out var v2) && (v2.ValueKind==JsonValueKind.True || v2.ValueKind==JsonValueKind.False)) return v2.GetBoolean();
+            }
             return fallback;
         }
         string TryStr(string name, string fallback)
         {
-            if (riskEl.TryGetProperty(name, out var v) && v.ValueKind==JsonValueKind.String) return v.GetString() ?? fallback;
-            string alt = name.Contains('_')
-                ? string.Concat(name.Split('_', StringSplitOptions.RemoveEmptyEntries).Select((s,i)=> i==0 ? s : char.ToUpperInvariant(s[0])+s.Substring(1)))
-                : string.Concat(name.Select(c => char.IsUpper(c) ? '_' + char.ToLowerInvariant(c) : c)).TrimStart('_');
-            if (riskEl.TryGetProperty(alt, out var v2) && v2.ValueKind==JsonValueKind.String) return v2.GetString() ?? fallback;
+            foreach (var blk in riskBlocks)
+            {
+                if (blk.TryGetProperty(name, out var v) && v.ValueKind==JsonValueKind.String) return v.GetString() ?? fallback;
+                string alt = name.Contains('_')
+                    ? string.Concat(name.Split('_', StringSplitOptions.RemoveEmptyEntries).Select((s,i)=> i==0 ? s : char.ToUpperInvariant(s[0])+s.Substring(1)))
+                    : string.Concat(name.Select(c => char.IsUpper(c) ? '_' + char.ToLowerInvariant(c) : c)).TrimStart('_');
+                if (blk.TryGetProperty(alt, out var v2) && v2.ValueKind==JsonValueKind.String) return v2.GetString() ?? fallback;
+            }
             return fallback;
         }
         var buckets = new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
-        if (riskEl.TryGetProperty("instrument_buckets", out var bEl) && bEl.ValueKind==JsonValueKind.Object)
+        foreach (var blk in riskBlocks)
         {
-            foreach (var p in bEl.EnumerateObject()) if (p.Value.ValueKind==JsonValueKind.String) buckets[p.Name] = p.Value.GetString() ?? string.Empty;
+            if (blk.TryGetProperty("instrument_buckets", out var bEl) && bEl.ValueKind==JsonValueKind.Object)
+            {
+                foreach (var p in bEl.EnumerateObject()) if (p.Value.ValueKind==JsonValueKind.String) buckets[p.Name] = p.Value.GetString() ?? string.Empty;
+            }
+        }
+        var exposureDict = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        foreach (var blk in riskBlocks)
+        {
+            if (blk.TryGetProperty("maxNetExposureBySymbol", out var expNode) || blk.TryGetProperty("max_net_exposure_by_symbol", out expNode))
+            {
+                if (expNode.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var p2 in expNode.EnumerateObject()) if (p2.Value.ValueKind==JsonValueKind.Number) exposureDict[p2.Name] = p2.Value.GetDecimal();
+                }
+            }
+        }
+        var maxRunDD = TryNum("max_run_drawdown_ccy", null);
+        if (maxRunDD == 0m) maxRunDD = 0m; // interpret 0 as null below
+        // Parse force_drawdown_after_evals (object map symbol->int)
+        Dictionary<string,int>? forceDdMap = null;
+        foreach (var blk in riskBlocks)
+        {
+            if (blk.TryGetProperty("forceDrawdownAfterEvals", out var fd) || blk.TryGetProperty("force_drawdown_after_evals", out fd))
+            {
+                if (fd.ValueKind==JsonValueKind.Object)
+                {
+                    forceDdMap ??= new Dictionary<string,int>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var p in fd.EnumerateObject()) if (p.Value.ValueKind==JsonValueKind.Number) forceDdMap[p.Name] = p.Value.GetInt32();
+                }
+            }
         }
         riskConfig = new RiskConfig
         {
@@ -496,7 +559,12 @@ try
             InstrumentBuckets = buckets,
             EnableScaleToFit = TryBool("enable_scale_to_fit", false),
             EnforcementEnabled = TryBool("enforcement_enabled", true),
-            LotStep = TryNum("lot_step", 0.01m)
+            LotStep = TryNum("lot_step", 0.01m),
+            EmitEvaluations = TryBool("emit_evaluations", true),
+            BlockOnBreach = TryBool("block_on_breach", true),
+            MaxRunDrawdownCCY = maxRunDD == 0m ? null : maxRunDD,
+            MaxNetExposureBySymbol = exposureDict.Count==0 ? null : exposureDict,
+            ForceDrawdownAfterEvals = forceDdMap
         };
     }
 }
@@ -508,6 +576,27 @@ catch (Exception ex)
 var riskFormulas = new RiskFormulas();
 var basketAgg = new BasketRiskAggregator();
 var enforcer = new RiskEnforcer(riskFormulas, basketAgg, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, cfgHash);
+var parsedRiskModeEnum = TiYf.Engine.Sim.RiskParsing.ParseRiskMode(raw.RootElement);
+var parsedRiskMode = parsedRiskModeEnum switch { TiYf.Engine.Sim.RiskMode.Active => "active", TiYf.Engine.Sim.RiskMode.Shadow => "shadow", _ => "off" };
+Console.WriteLine($"RUN_ID={runId}");
+// Penalty feature flag parse (shadow scaffold) + debug echo when verbose/diagnose
+string penaltyMode = "off"; bool forcePenalty = false;
+try
+{
+    if (raw.RootElement.TryGetProperty("featureFlags", out var ffPen) && ffPen.ValueKind==JsonValueKind.Object && ffPen.TryGetProperty("penalty", out var penNode) && penNode.ValueKind==JsonValueKind.String)
+    {
+        penaltyMode = (penNode.GetString() ?? "off").ToLowerInvariant();
+    }
+    if (raw.RootElement.TryGetProperty("penaltyConfig", out var pCfg) && pCfg.ValueKind==JsonValueKind.Object && pCfg.TryGetProperty("forcePenalty", out var fp) && (fp.ValueKind==JsonValueKind.True || fp.ValueKind==JsonValueKind.False))
+    {
+        forcePenalty = fp.ValueKind==JsonValueKind.True;
+    }
+}
+catch { }
+if (verbose || diagnose)
+{
+    Console.WriteLine($"PENALTY_MODE_RESOLVED={penaltyMode} force={forcePenalty.ToString().ToLowerInvariant()}");
+}
 
 // Strategy size units (defaults) from config strategy.params
 long sizeUnitsFx = 1000; long sizeUnitsXau = 1;
@@ -561,13 +650,15 @@ var loop = new EngineLoop(clock, builders, barKeyTracker!, journal, tickSource, 
     sizeUnitsXau: sizeUnitsXau,
     riskProbeEnabled: !(raw.RootElement.TryGetProperty("featureFlags", out var ff) && ff.ValueKind==JsonValueKind.Object && ff.TryGetProperty("riskProbe", out var rp) && rp.ValueKind==JsonValueKind.String && rp.GetString()=="disabled"),
     sentimentConfig: BuildSentimentConfig(raw),
-    penaltyConfig: (raw.RootElement.TryGetProperty("featureFlags", out var ffP) && ffP.ValueKind==JsonValueKind.Object && ffP.TryGetProperty("penalty", out var penNode) && penNode.ValueKind==JsonValueKind.String) ? penNode.GetString() : "off",
-    forcePenalty: (raw.RootElement.TryGetProperty("penaltyConfig", out var pCfg) && pCfg.ValueKind==JsonValueKind.Object && pCfg.TryGetProperty("forcePenalty", out var fp) && fp.ValueKind==JsonValueKind.True)
+    penaltyConfig: penaltyMode,
+    forcePenalty: forcePenalty
+        , riskMode: parsedRiskMode
 );
 await loop.RunAsync();
 
 Console.WriteLine("Engine run complete.");
 if (tradesWriter is not null) await tradesWriter.DisposeAsync();
+await journal.DisposeAsync();
 
 // If --out provided, copy the produced journal events file to that path for deterministic tooling
 if (!string.IsNullOrWhiteSpace(outPath))
@@ -593,4 +684,108 @@ if (!string.IsNullOrWhiteSpace(outPath))
     {
         Console.Error.WriteLine($"Failed to copy journal to --out path: {ex.Message}");
     }
+}
+
+// ------------------------------------------------------------
+// Parity Artifact Generation (artifact-only, no journal events)
+//   artifacts/parity/<run-id>/hashes.txt
+//   events_sha=<SHA256 normalized events.csv>
+//   trades_sha=<SHA256 normalized trades.csv>
+//   applied_count=<INFO_SENTIMENT_APPLIED_V1 occurrences>
+//   penalty_count=<PENALTY_APPLIED_V1 occurrences>
+// Normalization rules:
+//   * Strip meta + header lines
+//   * Convert CRLF -> LF
+//   * Drop config_hash column (events: meta line contains config_hash already; trades: remove the config_hash column entirely before hashing)
+//   * Preserve field order from source after column removal
+// ------------------------------------------------------------
+try
+{
+    var runDir = Path.Combine(journalRoot, runId);
+    var eventsPath = Path.Combine(runDir, "events.csv");
+    var tradesPath = Path.Combine(runDir, "trades.csv");
+    if (File.Exists(eventsPath))
+    {
+        Directory.CreateDirectory(Path.Combine(runDir, "..", "..")); // ensure journals root present (defensive)
+    var parityDirName = runId.StartsWith("M0-RUN-", StringComparison.Ordinal) ? runId.Substring("M0-RUN-".Length) : runId;
+    var parityDir = Path.Combine("artifacts", "parity", parityDirName);
+        Directory.CreateDirectory(parityDir);
+
+        string NormalizeEvents(string path)
+        {
+            var lines = File.ReadAllLines(path);
+            if (lines.Length <= 2) return string.Empty; // only meta+header or empty
+            // Skip meta + header
+            var data = lines.Skip(2);
+            var sb = new System.Text.StringBuilder();
+            bool first=true;
+            foreach (var raw in data)
+            {
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                var line = raw.Replace("\r\n", "\n").Replace("\r", "");
+                // events.csv does not include config_hash as a separate column (it's in meta line) so nothing to drop
+                if (!first) sb.Append('\n'); first=false; sb.Append(line);
+            }
+            return sb.ToString();
+        }
+
+        string NormalizeTrades(string path)
+        {
+            if (!File.Exists(path)) return string.Empty;
+            var lines = File.ReadAllLines(path);
+            if (lines.Length <= 1) return string.Empty; // header only
+            var header = lines[0].Split(',');
+            var dropIdx = Array.FindIndex(header, h => h.Equals("config_hash", StringComparison.OrdinalIgnoreCase));
+            var keepIdx = new List<int>();
+            for (int i=0;i<header.Length;i++) if (i != dropIdx) keepIdx.Add(i);
+            var sb = new System.Text.StringBuilder(); bool firstLine=true;
+            foreach (var raw in lines.Skip(1))
+            {
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                var parts = raw.Split(',');
+                var proj = keepIdx.Select(i => i < parts.Length ? parts[i] : string.Empty);
+                var line = string.Join(',', proj).Replace("\r\n", "\n").Replace("\r", "");
+                if (!firstLine) sb.Append('\n'); firstLine=false; sb.Append(line);
+            }
+            return sb.ToString();
+        }
+
+        string Sha256(string content)
+        {
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            var bytes = System.Text.Encoding.UTF8.GetBytes(content);
+            var hash = sha.ComputeHash(bytes);
+            return string.Concat(hash.Select(b=>b.ToString("X2")));
+        }
+
+        var normEvents = NormalizeEvents(eventsPath);
+        var normTrades = NormalizeTrades(tradesPath);
+        var eventsSha = Sha256(normEvents);
+        var tradesSha = Sha256(normTrades);
+        int appliedCount = 0, penaltyCount = 0;
+        try
+        {
+            foreach (var line in File.ReadLines(eventsPath))
+            {
+                if (line.Contains("INFO_SENTIMENT_APPLIED_V1", StringComparison.Ordinal)) appliedCount++;
+                else if (line.Contains("PENALTY_APPLIED_V1", StringComparison.Ordinal)) penaltyCount++;
+            }
+        }
+        catch { /* ignore count errors */ }
+
+        var hashFile = Path.Combine(parityDir, "hashes.txt");
+        var linesOut = new []
+        {
+            $"events_sha={eventsSha}",
+            $"trades_sha={tradesSha}",
+            $"applied_count={appliedCount}",
+            $"penalty_count={penaltyCount}"
+        };
+        File.WriteAllLines(hashFile, linesOut);
+        Console.WriteLine($"Parity artifacts written: {hashFile}");
+    }
+}
+catch (Exception pax)
+{
+    Console.Error.WriteLine($"Parity artifact generation failed: {pax.Message}");
 }
