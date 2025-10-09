@@ -1,8 +1,9 @@
 name: dataqa-tolerance
 
 on:
+  workflow_dispatch:
   push:
-    branches: [ fix/dataqa-tolerance-missing-bars ]
+    branches: [ main, fix/dataqa-tolerance-missing-bars ]
   pull_request:
     branches: [ main ]
 
