@@ -237,6 +237,8 @@ See `RELEASE_NOTES.md` v0.5.0 entry for release highlights.
 
 M3 elevates the previously shadow‑only sentiment volatility guard into an optionally impactful feature with deterministic scaling on clamped bars. Schema version: 1.2.0.
 
+M5 introduces penalty activation and deep verification groundwork. Current journal schema version: 1.3.0.
+
 ### Feature Flag States
 
 | Config Value | Normalized Mode | Impact on Trades | Events Emitted |

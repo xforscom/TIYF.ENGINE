@@ -21,7 +21,7 @@ public class VerifyStrictTests
     internal (string eventsPath,string tradesPath) BuildHealthyJournal()
     {
         var eventsSb = new StringBuilder();
-        eventsSb.AppendLine("schema_version=1.2.0,config_hash=ABC123");
+    eventsSb.AppendLine("schema_version=1.3.0,config_hash=ABC123");
         eventsSb.AppendLine("sequence,utc_ts,event_type,payload_json");
         // BAR (seq 1)
         var ts = new DateTime(2025,1,1,0,0,0,DateTimeKind.Utc).ToString("O");
@@ -33,7 +33,7 @@ public class VerifyStrictTests
         var eventsPath = TempFile("events.csv", eventsSb.ToString());
         var tradesSb = new StringBuilder();
         tradesSb.AppendLine("utc_ts_open,utc_ts_close,symbol,direction,entry_price,exit_price,volume_units,pnl_ccy,pnl_r,decision_id,schema_version,config_hash,data_version");
-        tradesSb.AppendLine($"{ts},{ts},EURUSD,BUY,1.1000,1.1002,100,0.20,0,DEC1,1.2.0,ABC123,");
+    tradesSb.AppendLine($"{ts},{ts},EURUSD,BUY,1.1000,1.1002,100,0.20,0,DEC1,1.3.0,ABC123,");
         var tradesPath = TempFile("trades.csv", tradesSb.ToString());
         return (eventsPath,tradesPath);
     }
@@ -108,7 +108,7 @@ public class VerifyStrictTests
     {
         var dll = Path.Combine(Directory.GetCurrentDirectory(), "src","TiYf.Engine.Tools","bin","Release","net8.0","TiYf.Engine.Tools.dll");
         if (!File.Exists(dll)) throw new FileNotFoundException("Tools CLI not built in Release at " + dll);
-        var psi = new System.Diagnostics.ProcessStartInfo("dotnet", $"exec \"{dll}\" verify strict --events \"{events}\" --trades \"{trades}\" --schema 1.2.0 --json")
+    var psi = new System.Diagnostics.ProcessStartInfo("dotnet", $"exec \"{dll}\" verify strict --events \"{events}\" --trades \"{trades}\" --schema 1.3.0 --json")
         {
             RedirectStandardOutput=true,
             RedirectStandardError=true,
@@ -152,7 +152,7 @@ public class VerifyStrictCliTests
     public void Cli_Strict_Healthy_Exit0()
     {
         var (events,trades) = Healthy();
-        var outp = ExecTool($"verify strict --events \"{events}\" --trades \"{trades}\" --schema 1.2.0");
+    var outp = ExecTool($"verify strict --events \"{events}\" --trades \"{trades}\" --schema 1.3.0");
         Assert.Contains("STRICT VERIFY: OK", outp);
         Assert.Contains("EXIT=0", outp);
     }
@@ -162,7 +162,7 @@ public class VerifyStrictCliTests
     {
         var (events,trades) = Healthy();
         File.AppendAllText(events, $"3,2025-01-01T00:00:00Z,FOO_BAR_V99,\"{{}}\"{Environment.NewLine}");
-        var outp = ExecTool($"verify strict --events \"{events}\" --trades \"{trades}\" --schema 1.2.0");
+    var outp = ExecTool($"verify strict --events \"{events}\" --trades \"{trades}\" --schema 1.3.0");
         Assert.Contains("STRICT VERIFY: FAIL", outp);
         Assert.Contains("EXIT=2", outp);
     }
@@ -174,7 +174,7 @@ public class VerifyStrictCliTests
         // Inject APPLIED before Z by replacing Z row
         var content = File.ReadAllText(events).Replace("INFO_SENTIMENT_Z_V1","INFO_SENTIMENT_APPLIED_V1");
         File.WriteAllText(events, content);
-        var outp = ExecTool($"verify strict --events \"{events}\" --trades \"{trades}\" --schema 1.2.0");
+    var outp = ExecTool($"verify strict --events \"{events}\" --trades \"{trades}\" --schema 1.3.0");
         Assert.Contains("STRICT VERIFY: FAIL", outp);
         Assert.Contains("EXIT=2", outp);
     }
@@ -186,7 +186,7 @@ public class VerifyStrictCliTests
         var lines = File.ReadAllLines(trades);
         lines[1] = lines[1].Replace(",0.20,",",2.0E-1,");
         File.WriteAllLines(trades, lines);
-        var outp = ExecTool($"verify strict --events \"{events}\" --trades \"{trades}\" --schema 1.2.0");
+    var outp = ExecTool($"verify strict --events \"{events}\" --trades \"{trades}\" --schema 1.3.0");
         Assert.Contains("STRICT VERIFY: FAIL", outp);
         Assert.Contains("EXIT=2", outp);
     }
