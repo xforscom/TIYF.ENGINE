@@ -124,7 +124,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: parity-*
-          merge-multiple: true
           path: parity_all
       - name: Evaluate invariants
         run: |
