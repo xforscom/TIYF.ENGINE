@@ -72,6 +72,26 @@ Example diff usage (for regression comparison):
 dotnet run --project src/TiYf.Engine.Tools -- diff --a journals/BASE/events.csv --b journals/NEW/events.csv --report-duplicates
 ```
 
+### Deep verify example
+
+Validate cross-file invariants between events and trades journals (JSON output).
+
+bash/zsh:
+
+```bash
+dotnet exec src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll \
+  verify deep --events journals/M0/M0-RUN-DEEP-CI/events.csv \
+  --trades journals/M0/M0-RUN-DEEP-CI/trades.csv --json
+```
+
+PowerShell:
+
+```powershell
+dotnet exec src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll `
+  verify deep --events journals\M0\M0-RUN-DEEP-CI\events.csv `
+  --trades journals\M0\M0-RUN-DEEP-CI\trades.csv --json
+```
+
 ## Risk Enforcement Events
 
 When risk enforcement is enabled, additional alert/scaling events are journaled. These are whitelisted by the Verify CLI (only basic structural checks applied beyond UTC timestamp + valid JSON).
