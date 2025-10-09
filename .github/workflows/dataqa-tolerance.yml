@@ -125,17 +125,21 @@ jobs:
           J_EVENTS="${_paths[0]}"; J_TRADES="${_paths[1]}"
           test -f "$J_EVENTS" || (echo "events missing: $J_EVENTS" && exit 1)
           # Assert summary passed=true and no abort (pure Node)
-          EVENTS="$J_EVENTS" node -e '
-            const fs=require("fs");
-            const lines=fs.readFileSync(process.env.EVENTS,"utf8").split(/\r?\n/).filter(Boolean);
-            const line=lines.find(l=>l.includes(",DATA_QA_SUMMARY_V1,"));
-            if(!line){ console.error("DATA_QA_SUMMARY_V1 not found"); process.exit(1); }
-            function splitCsv(s){ const out=[]; let buf="", q=false; for(let i=0;i<s.length;i++){ const c=s[i]; if(q){ if(c==='"'){ if(i+1<s.length && s[i+1]==='"'){ buf+='"'; i++; } else { q=false; } } else buf+=c; } else { if(c===','){ out.push(buf); buf=""; } else if(c==='"'){ q=true; } else buf+=c; } } out.push(buf); return out; }
-            const cols=splitCsv(line);
-            const payload=cols[3];
+          EVENTS="$J_EVENTS" node - <<'JS'
+          const fs=require("fs");
+          const line=(fs.readFileSync(process.env.EVENTS,"utf8").split(/\r?\n/).find(l=>l.includes(",DATA_QA_SUMMARY_V1,"))||"");
+          if(!line){ console.error("DATA_QA_SUMMARY_V1 not found"); process.exit(1); }
+          const QUOTE=String.fromCharCode(34);
+          function splitCsv(s){ const out=[]; let buf="", q=false; for(let i=0;i<s.length;i++){ const c=s[i]; if(q){ if(c===QUOTE){ if(i+1<s.length && s[i+1]===QUOTE){ buf+=QUOTE; i++; } else { q=false; } } else { buf+=c; } } else { if(c===','){ out.push(buf); buf=""; } else if(c===QUOTE){ q=true; } else { buf+=c; } } } out.push(buf); return out; }
+          const cols=splitCsv(line);
+          const payload=cols[3];
+          try {
             const j=JSON.parse(payload);
             if(!(j.passed===true && j.aborted===false)){ console.error("Unexpected DATA_QA_SUMMARY_V1", j); process.exit(1); }
-          '
+          } catch(e) {
+            console.error("Failed to parse payload as JSON:", payload); process.exit(1);
+          }
+          JS
           if grep -q ',DATA_QA_ABORT_V1,' "$J_EVENTS"; then echo 'Unexpected abort'; exit 1; fi
           # Deep verify
           dotnet exec "$tools" verify deep --events "$J_EVENTS" --trades "$J_TRADES" --json
@@ -218,16 +222,20 @@ jobs:
           J_EVENTS="${_paths[0]}"; J_TRADES="${_paths[1]}"
           test -f "$J_EVENTS" || (echo "events missing: $J_EVENTS" && exit 1)
           # Assert summary passed=false (pure Node)
-          EVENTS="$J_EVENTS" node -e '
-            const fs=require("fs");
-            const lines=fs.readFileSync(process.env.EVENTS,"utf8").split(/\r?\n/).filter(Boolean);
-            const line=lines.find(l=>l.includes(",DATA_QA_SUMMARY_V1,"));
-            if(!line){ console.error("DATA_QA_SUMMARY_V1 not found"); process.exit(1); }
-            function splitCsv(s){ const out=[]; let buf="", q=false; for(let i=0;i<s.length;i++){ const c=s[i]; if(q){ if(c==='"'){ if(i+1<s.length && s[i+1]==='"'){ buf+='"'; i++; } else { q=false; } } else buf+=c; } else { if(c===','){ out.push(buf); buf=""; } else if(c==='"'){ q=true; } else buf+=c; } } out.push(buf); return out; }
-            const cols=splitCsv(line);
-            const payload=cols[3];
+          EVENTS="$J_EVENTS" node - <<'JS'
+          const fs=require("fs");
+          const line=(fs.readFileSync(process.env.EVENTS,"utf8").split(/\r?\n/).find(l=>l.includes(",DATA_QA_SUMMARY_V1,"))||"");
+          if(!line){ console.error("DATA_QA_SUMMARY_V1 not found"); process.exit(1); }
+          const QUOTE=String.fromCharCode(34);
+          function splitCsv(s){ const out=[]; let buf="", q=false; for(let i=0;i<s.length;i++){ const c=s[i]; if(q){ if(c===QUOTE){ if(i+1<s.length && s[i+1]===QUOTE){ buf+=QUOTE; i++; } else { q=false; } } else { buf+=c; } } else { if(c===','){ out.push(buf); buf=""; } else if(c===QUOTE){ q=true; } else { buf+=c; } } } out.push(buf); return out; }
+          const cols=splitCsv(line);
+          const payload=cols[3];
+          try {
             const j=JSON.parse(payload);
             if(j.passed!==false){ console.error("Expected passed=false in DATA_QA_SUMMARY_V1", j); process.exit(1); }
-          '
+          } catch(e) {
+            console.error("Failed to parse payload as JSON:", payload); process.exit(1);
+          }
+          JS
           # Deep verify (JSON may be ok or 2; we tolerate non-zero here as long as it runs)
           tools_out=0; dotnet exec "$tools" verify deep --events "$J_EVENTS" --trades "$J_TRADES" --json || tools_out=$?; if [ "$tools_out" -ne 0 ] && [ "$tools_out" -ne 2 ]; then exit 1; fi
