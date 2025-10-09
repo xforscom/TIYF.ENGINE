@@ -112,17 +112,18 @@ jobs:
           for f in "$TMP_DIR"/ticks_*.csv; do echo "== $f =="; head -n 3 "$f"; done
           # Run sim with prepared config
           dotnet exec "$sim" --config "$CONFIG_OUT" --run-id K1-PASS --verbosity quiet
-          # Resolve journal paths using config
-          node -e '
+          # Resolve journal paths using config into local variables
+          mapfile -t _paths < <(node -e '
             const fs=require("fs"); const path=require("path");
             const cfgPath=process.env.CONFIG_OUT; const runId="M0-RUN-K1-PASS";
             const j=JSON.parse(fs.readFileSync(cfgPath,"utf8"));
             const jdir=(j.output && j.output.journalDir) ? j.output.journalDir : path.resolve("journals","M0");
             const events=path.join(jdir, runId, "events.csv");
             const trades=path.join(jdir, runId, "trades.csv");
-            fs.appendFileSync(process.env.GITHUB_ENV, `J_EVENTS=${events}\nJ_TRADES=${trades}\n`);
-          '
-          test -f "$J_EVENTS"
+            console.log(events); console.log(trades);
+          ')
+          J_EVENTS="${_paths[0]}"; J_TRADES="${_paths[1]}"
+          test -f "$J_EVENTS" || (echo "events missing: $J_EVENTS" && exit 1)
           # Assert summary passed=true and no abort (pure Node)
           EVENTS="$J_EVENTS" node -e '
             const fs=require("fs");
@@ -204,17 +205,18 @@ jobs:
           for f in "$TMP_DIR"/ticks_*.csv; do echo "== $f =="; head -n 3 "$f"; done
           # Run sim with prepared config
           dotnet exec "$sim" --config "$CONFIG_OUT" --run-id K1-FAIL --verbosity quiet
-          # Resolve journal paths using config
-          node -e '
+          # Resolve journal paths using config into local variables
+          mapfile -t _paths < <(node -e '
             const fs=require("fs"); const path=require("path");
             const cfgPath=process.env.CONFIG_OUT; const runId="M0-RUN-K1-FAIL";
             const j=JSON.parse(fs.readFileSync(cfgPath,"utf8"));
             const jdir=(j.output && j.output.journalDir) ? j.output.journalDir : path.resolve("journals","M0");
             const events=path.join(jdir, runId, "events.csv");
             const trades=path.join(jdir, runId, "trades.csv");
-            fs.appendFileSync(process.env.GITHUB_ENV, `J_EVENTS=${events}\nJ_TRADES=${trades}\n`);
-          '
-          test -f "$J_EVENTS"
+            console.log(events); console.log(trades);
+          ')
+          J_EVENTS="${_paths[0]}"; J_TRADES="${_paths[1]}"
+          test -f "$J_EVENTS" || (echo "events missing: $J_EVENTS" && exit 1)
           # Assert summary passed=false (pure Node)
           EVENTS="$J_EVENTS" node -e '
             const fs=require("fs");
