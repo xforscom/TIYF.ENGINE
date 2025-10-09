@@ -191,6 +191,8 @@ Introduces two shadow-only capabilities that do not alter trading outcomes:
      - `spikeZ >= 50` (or `dropSpikes=false`)
    - Analyzer stays pure (no embedded suppression logic) ensuring reproducible scan semantics.
 
+  Note on K tolerance: when `maxMissingBarsPerInstrument = K`, the tolerance drops the earliest K missing-bar gaps per symbol (ordered by timestamp). Any overflow remains and will still trigger a fail/abort in active mode.
+
 2. Sentiment Volatility Guard (shadow mode)
    - Enable via `featureFlags.sentiment = "shadow"` plus optional `sentimentConfig` block:
 

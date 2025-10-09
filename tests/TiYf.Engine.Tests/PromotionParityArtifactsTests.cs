@@ -1,9 +1,6 @@
 using System.Text.Json;
 using Xunit;
 
-// This test shells dotnet build/run and relies on locating Release binaries and writing artifacts.
-// It is intentionally covered by dedicated CI (nightly-canary) with parity uploads and invariants.
-// Marked [Skip] here to avoid flaky behavior on constrained agents and local dev environments.
 public class PromotionParityArtifactsTests
 {
     private static string RepoRoot
@@ -131,7 +128,7 @@ public class PromotionParityArtifactsTests
         return (exit, runDir, runId);
     }
 
-    [Fact(Skip = "Covered by nightly-canary workflow; environment-dependent run + artifact paths")]
+    [Fact]
     public void ParityArtifacts_AreGeneratedAndConsistent()
     {
         // Use existing backtest-m0 fixture config (assumed present in repo) or skip if missing

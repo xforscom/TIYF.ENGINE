@@ -100,6 +100,10 @@ Example promotion sentiment block:
 
 Status: Final.
 
+### Bug fixes (post-release patch)
+
+- fix(dataqa): apply per-symbol missing_bar tolerance deterministically (drop up to K by ts)
+
 ## v0.7.0-m4-parity (Strict Verifier, Penalty Scaffold, Parity Artifacts) – 2025-10-08
 
 Highlights:

@@ -303,6 +303,8 @@ public sealed class EngineLoop
 													foreach (var completed in _positions.Completed.Where(c=>c.DecisionId==act.DecisionId))
 														_tradesWriter.Append(completed);
 												}
+												// Clear open-units tracking on successful close so risk exposure reflects current book
+												_openUnits.Remove(act.DecisionId);
 											}
 										}
 										else

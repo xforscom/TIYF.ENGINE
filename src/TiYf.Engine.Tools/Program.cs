@@ -40,7 +40,6 @@ static void PrintHelp() => Console.WriteLine(@"Usage:
     diff   --a <fileA> --b <fileB> [--keys k1,k2,...] [--report-duplicates]
     verify --file <journal.csv> [--json] [--max-errors N] [--report-duplicates]
     verify strict --events <events.csv> --trades <trades.csv> --schema <minVersion> [--json] [--lenient-order]
-    verify deep --events <events.csv> --trades <trades.csv> [--json]
     promote --baseline <config.json> --candidate <config.json> [--workdir <dir>] [--quiet] [--print-metrics] [--culture name]
     dataversion --config <config.json> [--instruments path] [--ticks SYMBOL=path ...] [--out data_version.txt] [--echo-rows]");
 
@@ -143,8 +142,6 @@ static int RunVerify(List<string> args)
     // Support subcommand 'strict'
     if (args.Count>0 && string.Equals(args[0],"strict", StringComparison.OrdinalIgnoreCase))
         return RunVerifyStrict(args.Skip(1).ToList());
-    if (args.Count>0 && string.Equals(args[0],"deep", StringComparison.OrdinalIgnoreCase))
-        return RunVerifyDeep(args.Skip(1).ToList());
 
     string? file=null; bool json=false; int maxErrors=50; bool reportDup=false;
     for (int i=0;i<args.Count;i++)
@@ -162,25 +159,6 @@ static int RunVerify(List<string> args)
     var result = VerifyEngine.Run(file!, new VerifyOptions(maxErrors,json,reportDup));
     if (result.JsonOutput != null) Console.WriteLine(result.JsonOutput); else Console.WriteLine(result.HumanSummary);
     return result.ExitCode;
-}
-
-static int RunVerifyDeep(List<string> args)
-{
-    string? events=null, trades=null; bool json=false;
-    for (int i=0;i<args.Count;i++)
-    {
-        switch(args[i])
-        {
-            case "--events": events=(++i<args.Count)? args[i]:null; break;
-            case "--trades": trades=(++i<args.Count)? args[i]:null; break;
-            case "--json": json=true; break;
-            default: throw new VerifyFatalException($"Unknown option {args[i]}");
-        }
-    }
-    if (string.IsNullOrWhiteSpace(events) || string.IsNullOrWhiteSpace(trades)) throw new VerifyFatalException("--events and --trades required for verify deep");
-    var rep = TiYf.Engine.Tools.DeepJournalVerifier.Verify(events!, trades!);
-    if (json) Console.WriteLine(rep.Json); else Console.WriteLine(rep.ExitCode==0?"DEEP VERIFY: OK":"DEEP VERIFY: FAIL");
-    return rep.ExitCode;
 }
 
 static int RunVerifyStrict(List<string> args)

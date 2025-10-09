@@ -103,20 +103,36 @@ if (isM0)
     {
         var tickObj = raw.RootElement.GetProperty("data").GetProperty("ticks");
         var allTs = new HashSet<DateTime>();
+        // Optional diagnostics: track per-file stats for guardrail
+        var diag = new List<(string Sym,string Path,bool Exists,int DataRows)>();
         foreach (var entry in tickObj.EnumerateObject())
         {
             var path = entry.Value.GetString();
-            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) continue;
-            foreach (var line in SafeReadLines(path).Skip(1))
+            bool exists = !string.IsNullOrWhiteSpace(path) && File.Exists(path);
+            int dataRows = 0;
+            if (exists)
             {
-                if (string.IsNullOrWhiteSpace(line)) continue;
-                var parts = line.Split(',');
-                if (parts.Length < 4) continue;
-                var ts = DateTime.Parse(parts[0], null, System.Globalization.DateTimeStyles.AssumeUniversal|System.Globalization.DateTimeStyles.AdjustToUniversal);
-                allTs.Add(ts);
+                foreach (var line in SafeReadLines(path).Skip(1))
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    var parts = line.Split(',');
+                    if (parts.Length < 4) continue;
+                    dataRows++;
+                    var ts = DateTime.Parse(parts[0], null, System.Globalization.DateTimeStyles.AssumeUniversal|System.Globalization.DateTimeStyles.AdjustToUniversal);
+                    allTs.Add(ts);
+                }
             }
+            diag.Add((entry.Name, path ?? string.Empty, exists, dataRows));
         }
         sequence = allTs.OrderBy(t=>t).ToList();
+        if (sequence.Count == 0)
+        {
+            Console.Error.WriteLine("No timestamps found when building M0 tick sequence. Diagnostics:");
+            foreach (var d in diag)
+                Console.Error.WriteLine($"  symbol={d.Sym} path={d.Path} exists={d.Exists.ToString().ToLowerInvariant()} data_rows={d.DataRows}");
+            // Exit gracefully so CI shows actionable info
+            return;
+        }
     }
     catch (Exception ex) { Console.Error.WriteLine($"M0 tick aggregation failed: {ex.Message}"); }
 }
@@ -135,6 +151,40 @@ else
     {
         Console.Error.WriteLine("Warning: Legacy InputTicksFile not provided or missing – proceeding with empty sequence (no bars). Provide --config with valid ticks or use M0 fixture.");
     }
+}
+// Guardrail: if M0 and no timestamps aggregated, emit diagnostics and exit gracefully
+if (isM0 && (sequence == null || sequence.Count == 0))
+{
+    try
+    {
+        Console.Error.WriteLine("Data QA guardrail: no timestamps aggregated from M0 tick files. Diagnostics:");
+        if (raw.RootElement.TryGetProperty("data", out var dNode) && dNode.ValueKind == JsonValueKind.Object &&
+            dNode.TryGetProperty("ticks", out var tNode) && tNode.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var entry in tNode.EnumerateObject())
+            {
+                var sym = entry.Name;
+                var p = entry.Value.GetString();
+                var exists = (!string.IsNullOrWhiteSpace(p)) && File.Exists(p);
+                int dataRows = 0;
+                if (exists)
+                {
+                    try { dataRows = SafeReadLines(p).Skip(1).Count(); } catch { /* ignore */ }
+                }
+                Console.Error.WriteLine($" - {sym}: path='{p}', exists={exists}, data_rows={dataRows}");
+            }
+        }
+        else
+        {
+            Console.Error.WriteLine(" - config.data.ticks is missing or invalid");
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Guardrail diagnostics failed: {ex.Message}");
+    }
+    Console.Error.WriteLine("Aborting run due to empty aggregated timestamp sequence.");
+    Environment.Exit(2);
 }
 var clock = new DeterministicSequenceClock(sequence);
 
@@ -401,15 +451,24 @@ static TiYf.Engine.Core.DataQaResult ApplyTolerance(TiYf.Engine.Core.DataQaResul
         if (removed > 0)
             Console.WriteLine($"QA_TOLERATE_MISSING removed={removed} threshold={cfg.MaxMissingBarsPerInstrument}");
     }
-    else
+    else if (cfg.MaxMissingBarsPerInstrument > 0)
     {
-        // Otherwise enforce per-symbol threshold by truncating up to allowed count and retaining overflow (fail logic below will capture)
-        var perSymMissing = filtered.Where(i=>i.Kind=="missing_bar").GroupBy(i=>i.Symbol).ToDictionary(g=>g.Key,g=>g.ToList());
-        foreach (var kv in perSymMissing)
+        // Drop up to K missing_bar issues per symbol, deterministically by timestamp
+        var bySym = filtered
+            .Where(i => i.Kind == "missing_bar")
+            .GroupBy(i => i.Symbol);
+
+        foreach (var g in bySym)
         {
-            if (kv.Value.Count <= cfg.MaxMissingBarsPerInstrument) continue; // keep all (will fail gate) – we do not partially drop to keep determinism of failure diagnostics
+            var items = g.OrderBy(i => i.Ts).ToList();
+            int drop = Math.Min(cfg.MaxMissingBarsPerInstrument, items.Count);
+            for (int k = 0; k < drop; k++)
+            {
+                filtered.Remove(items[k]);
+            }
         }
     }
+    // else K == 0 -> no tolerance; keep all missing_bar issues
 
     // Spikes: if spikeZ very large OR dropSpikes==false treat spike issues as tolerated (removed)
     if (cfg.SpikeZ >= 50m || !cfg.DropSpikes)
