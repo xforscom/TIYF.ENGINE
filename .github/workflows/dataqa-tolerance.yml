@@ -33,6 +33,7 @@ jobs:
         id: prep
         shell: bash
         run: |
+          set -euo pipefail
           ROOT="$(pwd)"
           echo "root=$ROOT" >> $GITHUB_OUTPUT
           echo "sim=$ROOT/src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll" >> $GITHUB_OUTPUT

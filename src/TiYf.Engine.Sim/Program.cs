@@ -152,6 +152,40 @@ else
         Console.Error.WriteLine("Warning: Legacy InputTicksFile not provided or missing – proceeding with empty sequence (no bars). Provide --config with valid ticks or use M0 fixture.");
     }
 }
+// Guardrail: if M0 and no timestamps aggregated, emit diagnostics and exit gracefully
+if (isM0 && (sequence == null || sequence.Count == 0))
+{
+    try
+    {
+        Console.Error.WriteLine("Data QA guardrail: no timestamps aggregated from M0 tick files. Diagnostics:");
+        if (raw.RootElement.TryGetProperty("data", out var dNode) && dNode.ValueKind == JsonValueKind.Object &&
+            dNode.TryGetProperty("ticks", out var tNode) && tNode.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var entry in tNode.EnumerateObject())
+            {
+                var sym = entry.Name;
+                var p = entry.Value.GetString();
+                var exists = (!string.IsNullOrWhiteSpace(p)) && File.Exists(p);
+                int dataRows = 0;
+                if (exists)
+                {
+                    try { dataRows = SafeReadLines(p).Skip(1).Count(); } catch { /* ignore */ }
+                }
+                Console.Error.WriteLine($" - {sym}: path='{p}', exists={exists}, data_rows={dataRows}");
+            }
+        }
+        else
+        {
+            Console.Error.WriteLine(" - config.data.ticks is missing or invalid");
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Guardrail diagnostics failed: {ex.Message}");
+    }
+    Console.Error.WriteLine("Aborting run due to empty aggregated timestamp sequence.");
+    Environment.Exit(2);
+}
 var clock = new DeterministicSequenceClock(sequence);
 
 ITickSource tickSource = isM0 ? new MultiInstrumentTickSource(raw) : new CsvTickSource(cfg.InputTicksFile, instrument.Id);
