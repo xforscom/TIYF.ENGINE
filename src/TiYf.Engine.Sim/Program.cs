@@ -192,44 +192,60 @@ catch { /* Non-fatal; omit data_version if any parsing fails */ }
 string runId;
 if (isM0)
 {
+    // Priority: explicit --run-id > config RunId > synthesized test id
     if (!string.IsNullOrWhiteSpace(runIdOverride))
     {
-        runId = $"M0-RUN-{runIdOverride}"; // e.g. M0-RUN-candA
+        runId = runIdOverride.StartsWith("M0-RUN", StringComparison.Ordinal) ? runIdOverride : $"M0-RUN-{runIdOverride}";
     }
     else if (!string.IsNullOrWhiteSpace(cfg.RunId))
     {
-        // If config already supplies an M0 style id leave it, else prefix
         runId = cfg.RunId!.StartsWith("M0-RUN", StringComparison.Ordinal) ? cfg.RunId! : $"M0-RUN-{cfg.RunId}";
     }
     else
     {
-        runId = "M0-RUN"; // baseline deterministic default
+        // Historical deterministic run id for M0 tests; add suffix when explicit risk flag present to avoid cross-test collisions
+        try
+        {
+            if (raw.RootElement.TryGetProperty("featureFlags", out var ffR) && ffR.ValueKind==JsonValueKind.Object && ffR.TryGetProperty("risk", out var rMode) && rMode.ValueKind==JsonValueKind.String)
+            {
+                var r = (rMode.GetString() ?? "off").ToLowerInvariant();
+                runId = $"M0-RUN-{r}";
+            }
+            else
+            {
+                runId = "M0-RUN";
+            }
+        }
+        catch { runId = "M0-RUN"; }
     }
-    // Derive risk mode early; previously used static suffix A/B/C which caused cross-test file locking.
-    // Now append a short GUID segment to ensure uniqueness per process while retaining deterministic prefix for readability.
-    try
+    // Data QA stability: never rewrite ids containing 'dataqa'
+    if (runId.IndexOf("dataqa", StringComparison.OrdinalIgnoreCase) >= 0)
     {
-        var parsedMode = TiYf.Engine.Sim.RiskParsing.ParseRiskMode(raw.RootElement);
-        string suffix = parsedMode switch { TiYf.Engine.Sim.RiskMode.Off => "A", TiYf.Engine.Sim.RiskMode.Shadow => "B", TiYf.Engine.Sim.RiskMode.Active => "C", _ => "A" };
-        var gid = Guid.NewGuid().ToString("N").Substring(0,8);
-        runId = $"M0-RUN-TEST-{suffix}-{gid}"; // e.g. M0-RUN-TEST-A-deadbeef
+        // unchanged; placeholder for future logic if needed
     }
-    catch { }
 }
 else
 {
     runId = runIdOverride ?? cfg.RunId ?? "RUN";
 }
 var journalRoot = isM0 && !string.IsNullOrWhiteSpace(m0JournalDir) ? m0JournalDir : (cfg.JournalRoot ?? (isM0 ? "journals/M0" : "journals"));
-// For M0 determinism, ensure a clean run directory each invocation (avoid stale appended events creating false alerts)
-if (isM0)
+// For M0 determinism & parallel test safety, serialize access to the single run folder via a named mutex
+System.Threading.Mutex? m0Mutex = null; bool m0Locked=false;
+try
 {
-    var runDir = Path.Combine(journalRoot, runId);
-    if (Directory.Exists(runDir))
+    if (isM0)
     {
-        try { Directory.Delete(runDir, true); } catch { /* best effort */ }
+        m0Mutex = new System.Threading.Mutex(false, "Global\\TIYF.M0.RUNLOCK");
+        // Wait up to 2 minutes to avoid deadlocks in CI; if cannot acquire, proceed best-effort
+        try { m0Locked = m0Mutex.WaitOne(TimeSpan.FromMinutes(2)); } catch { m0Locked=false; }
+        var runDir = Path.Combine(journalRoot, runId);
+        if (Directory.Exists(runDir))
+        {
+            try { Directory.Delete(runDir, true); } catch { /* best effort */ }
+        }
     }
 }
+catch { }
 // Prepare Data QA (shadow/active) if configured in JSON (dataQA node + featureFlags.dataQa)
 List<JournalEvent>? qaEvents = null;
 bool qaAbort = false;
@@ -329,13 +345,15 @@ try
                         qaEvents.Add(new JournalEvent(0, issue.Ts, "DATA_QA_ISSUE_V1", issuePayload));
                     }
                 }
+                bool abortedFlagLocal = (!dqResult.Passed && dataQaMode=="active");
+                Console.WriteLine($"QA_DECISION passed={dqResult.Passed.ToString().ToLowerInvariant()} aborted={abortedFlagLocal.ToString().ToLowerInvariant()} mode={dataQaMode}");
                 var summaryPayload = JsonSerializer.SerializeToElement(new {
                     symbols_checked = dqResult.SymbolsChecked,
                     issues = dqResult.Issues,
                     repaired = dqResult.Repaired,
                     passed = dqResult.Passed,
                     tolerated_count = toleratedCount,
-                    aborted = (!dqResult.Passed && dataQaMode=="active"),
+                    aborted = abortedFlagLocal,
                     tolerance_profile_hash = toleranceProfileHash
                 });
                 qaEvents.Add(new JournalEvent(0, tsBase, "DATA_QA_SUMMARY_V1", summaryPayload));
@@ -404,6 +422,13 @@ static TiYf.Engine.Core.DataQaResult ApplyTolerance(TiYf.Engine.Core.DataQaResul
 
 // Journal writer with optional data_version (open before emitting QA events)
 await using var journal = new FileJournalWriter(journalRoot, runId, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, cfgHash, dataVersion);
+try
+{
+    Console.WriteLine($"RUN_ID_RESOLVED={runId}");
+    Console.WriteLine($"JOURNAL_DIR_EVENTS={Path.Combine(journalRoot, runId, "events.csv")}");
+    Console.WriteLine($"JOURNAL_DIR_TRADES={Path.Combine(journalRoot, runId, "trades.csv")}");
+}
+catch { }
             if (qaEvents is not null && qaEvents.Count>0)
             {
                 qaEvents = qaEvents
@@ -576,11 +601,21 @@ catch (Exception ex)
 var riskFormulas = new RiskFormulas();
 var basketAgg = new BasketRiskAggregator();
 var enforcer = new RiskEnforcer(riskFormulas, basketAgg, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, cfgHash);
-var parsedRiskModeEnum = TiYf.Engine.Sim.RiskParsing.ParseRiskMode(raw.RootElement);
-var parsedRiskMode = parsedRiskModeEnum switch { TiYf.Engine.Sim.RiskMode.Active => "active", TiYf.Engine.Sim.RiskMode.Shadow => "shadow", _ => "off" };
+TiYf.Engine.Core.RiskMode parsedRiskModeEnum = TiYf.Engine.Core.RiskMode.Off;
+try
+{
+    if (raw.RootElement.TryGetProperty("featureFlags", out var ffNode2))
+    {
+        var node2 = System.Text.Json.Nodes.JsonNode.Parse(ffNode2.GetRawText());
+        parsedRiskModeEnum = TiYf.Engine.Core.RiskParsing.ParseRiskMode(node2);
+    }
+}
+catch { }
+var parsedRiskMode = parsedRiskModeEnum switch { TiYf.Engine.Core.RiskMode.Active => "active", TiYf.Engine.Core.RiskMode.Shadow => "shadow", _ => "off" };
 Console.WriteLine($"RUN_ID={runId}");
 // Penalty feature flag parse (shadow scaffold) + debug echo when verbose/diagnose
 string penaltyMode = "off"; bool forcePenalty = false;
+bool ciPenaltyScaffold = false; // new root-level opt-in for CI-only forced penalty emission
 try
 {
     if (raw.RootElement.TryGetProperty("featureFlags", out var ffPen) && ffPen.ValueKind==JsonValueKind.Object && ffPen.TryGetProperty("penalty", out var penNode) && penNode.ValueKind==JsonValueKind.String)
@@ -591,11 +626,16 @@ try
     {
         forcePenalty = fp.ValueKind==JsonValueKind.True;
     }
+    // Explicit CI scaffold opt-in (default false). Only when true do we emit the early penalty scaffold.
+    if (raw.RootElement.TryGetProperty("ciPenaltyScaffold", out var ciPen) && (ciPen.ValueKind==JsonValueKind.True || ciPen.ValueKind==JsonValueKind.False))
+    {
+        ciPenaltyScaffold = ciPen.ValueKind==JsonValueKind.True;
+    }
 }
 catch { }
 if (verbose || diagnose)
 {
-    Console.WriteLine($"PENALTY_MODE_RESOLVED={penaltyMode} force={forcePenalty.ToString().ToLowerInvariant()}");
+    Console.WriteLine($"PENALTY_MODE_RESOLVED={penaltyMode} force={forcePenalty.ToString().ToLowerInvariant()} ci_scaffold={ciPenaltyScaffold.ToString().ToLowerInvariant()}");
 }
 
 // Strategy size units (defaults) from config strategy.params
@@ -651,7 +691,8 @@ var loop = new EngineLoop(clock, builders, barKeyTracker!, journal, tickSource, 
     riskProbeEnabled: !(raw.RootElement.TryGetProperty("featureFlags", out var ff) && ff.ValueKind==JsonValueKind.Object && ff.TryGetProperty("riskProbe", out var rp) && rp.ValueKind==JsonValueKind.String && rp.GetString()=="disabled"),
     sentimentConfig: BuildSentimentConfig(raw),
     penaltyConfig: penaltyMode,
-    forcePenalty: forcePenalty
+    forcePenalty: forcePenalty,
+    ciPenaltyScaffold: ciPenaltyScaffold
         , riskMode: parsedRiskMode
 );
 await loop.RunAsync();
@@ -686,6 +727,9 @@ if (!string.IsNullOrWhiteSpace(outPath))
     }
 }
 
+// Release M0 mutex if held
+try { if (m0Locked) m0Mutex?.ReleaseMutex(); m0Mutex?.Dispose(); } catch { }
+
 // ------------------------------------------------------------
 // Parity Artifact Generation (artifact-only, no journal events)
 //   artifacts/parity/<run-id>/hashes.txt
@@ -708,7 +752,7 @@ try
     {
         Directory.CreateDirectory(Path.Combine(runDir, "..", "..")); // ensure journals root present (defensive)
     var parityDirName = runId.StartsWith("M0-RUN-", StringComparison.Ordinal) ? runId.Substring("M0-RUN-".Length) : runId;
-    var parityDir = Path.Combine("artifacts", "parity", parityDirName);
+    var parityDir = Path.Combine("artifacts", "parity", parityDirName); // retain trimmed naming to align with tests
         Directory.CreateDirectory(parityDir);
 
         string NormalizeEvents(string path)

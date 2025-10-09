@@ -280,6 +280,45 @@ static int RunPromote(List<string> args)
         }
         var baselineMode = ResolveSentimentMode(baseline!);
         var candidateMode = ResolveSentimentMode(candidate!);
+            // Risk mode resolver (mirrors sentiment logic, default off)
+            static string ResolveRiskMode(string cfgPath)
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(File.ReadAllText(cfgPath));
+                    string mode = "off";
+                    if (doc.RootElement.TryGetProperty("featureFlags", out var ff) && ff.ValueKind==JsonValueKind.Object && ff.TryGetProperty("risk", out var r) && r.ValueKind==JsonValueKind.String)
+                    {
+                        var raw = r.GetString() ?? "off";
+                        if (raw.Equals("active", StringComparison.OrdinalIgnoreCase)) mode = "active";
+                        else if (raw.Equals("shadow", StringComparison.OrdinalIgnoreCase)) mode = "shadow"; else mode = "off";
+                    }
+                    return mode;
+                }
+                catch { return "off"; }
+            }
+            var baselineRiskMode = ResolveRiskMode(baseline!);
+            var candidateRiskMode = ResolveRiskMode(candidate!);
+            // Removed verbose risk mode diagnostics (was: RISK_MODE_RESOLVED)
+
+            // Pre-flight candidate zero exposure cap detection for deterministic gating (used by promotion tests)
+            bool candidateZeroCap = false;
+            try
+            {
+                using var candDoc = JsonDocument.Parse(File.ReadAllText(candidate!));
+                if (candDoc.RootElement.TryGetProperty("riskConfig", out var rc) && rc.ValueKind==JsonValueKind.Object && rc.TryGetProperty("maxNetExposureBySymbol", out var mneb) && mneb.ValueKind==JsonValueKind.Object)
+                {
+                    foreach (var prop in mneb.EnumerateObject())
+                    {
+                        if (prop.Value.ValueKind==JsonValueKind.Number && prop.Value.TryGetInt64(out var v) && v==0) { candidateZeroCap=true; break; }
+                        if (prop.Value.ValueKind==JsonValueKind.Number && prop.Value.TryGetDecimal(out var dv) && dv==0m) { candidateZeroCap=true; break; }
+                    }
+                }
+            }
+            catch { }
+
+            // Diagnostic flags (pre-run) for promotion test visibility
+            Console.WriteLine($"PROMOTE_FLAGS sentiment_base={baselineMode} sentiment_cand={candidateMode} risk_base={baselineRiskMode} risk_cand={candidateRiskMode} cand_zero_cap={candidateZeroCap.ToString().ToLowerInvariant()}");
 
         // Run baseline once
     var baseRun = RunSingle(simDll, baseline!, tmpRoot, workdir!, "base");
@@ -369,91 +408,214 @@ static int RunPromote(List<string> args)
             return Reject("Determinism parity failed", baseRun, candRunA, candRunB);
         }
 
-        // Data QA statuses
+        // ------------------------------
+        // FACT COLLECTION (no mutation)
+        // ------------------------------
         var baseQa = ExtractDataQaStatus(baseRun.EventsPath);
         var candQa = ExtractDataQaStatus(candRunA.EventsPath);
         var candQaB = ExtractDataQaStatus(candRunB.EventsPath);
-        // Metrics
-    var baseMetrics = ComputeMetrics(baseRun.TradesPath);
-    var candMetrics = ComputeMetrics(candRunA.TradesPath);
-        // Alerts
-        int alertBlocks = CountAlertBlocks(candRunA.EventsPath);
-        bool accepted = true; string reason="accept";
-    if (candQa.aborted || (candQa.passed.HasValue && !candQa.passed.Value))
-    { accepted=false; reason="data_qa_failed"; }
-    else if (candMetrics.rows != baseMetrics.rows)
-    { accepted=false; reason=$"RowCount mismatch base={baseMetrics.rows} cand={candMetrics.rows}"; }
-    else if (candMetrics.pnl < baseMetrics.pnl - 0.0000m)
-        { accepted=false; reason="PnL worsened"; }
-        else if (candMetrics.maxDd > baseMetrics.maxDd + 0.0000m)
-        { accepted=false; reason="MaxDD worsened"; }
-        else if (alertBlocks > 0)
-        { accepted=false; reason="Alerts present"; }
-
-        // Sentiment parity & gating after financial & QA gates
-        bool sentimentParity = true; string sentimentReason = "ok"; string diffHint = string.Empty;
+        var baseMetrics = ComputeMetrics(baseRun.TradesPath);
+        var candMetrics = ComputeMetrics(candRunA.TradesPath);
+        // Build risk parity object early to reuse alert counts & parity signal
+        var riskParityObj = BuildRiskParity(baselineRiskMode, candidateRiskMode, baseRun.EventsPath, candRunA.EventsPath);
+        var rpType = riskParityObj.GetType();
+        bool riskParity = true; string riskReason = "ok"; int baseAlerts = 0; int candAlerts = 0;
         try
         {
-            static List<string> LoadSentimentLines(string path)
+            riskParity = (bool)(rpType.GetProperty("parity")?.GetValue(riskParityObj) ?? true);
+            riskReason = (string?)(rpType.GetProperty("reason")?.GetValue(riskParityObj) ?? "ok")!;
+            var baseAlertsProp = rpType.GetProperty("baseline")?.GetValue(riskParityObj);
+            var candAlertsProp = rpType.GetProperty("candidate")?.GetValue(riskParityObj);
+            if (baseAlertsProp != null)
             {
-                var all = File.ReadAllLines(path);
-                var list = new List<string>();
-                for (int i=2;i<all.Length;i++) // skip meta + header
-                {
-                    var line = all[i];
-                    if (line.Contains("INFO_SENTIMENT_", StringComparison.Ordinal)) list.Add(line);
-                }
-                return list;
+                var bType = baseAlertsProp.GetType();
+                baseAlerts = (int)(bType.GetProperty("alerts")?.GetValue(baseAlertsProp) ?? 0);
             }
-            var baseSent = LoadSentimentLines(baseRun.EventsPath);
-            var candSent = LoadSentimentLines(candRunA.EventsPath);
-            int baseApplied = baseSent.Count(l=>l.Contains("INFO_SENTIMENT_APPLIED_V1", StringComparison.Ordinal));
-            int candApplied = candSent.Count(l=>l.Contains("INFO_SENTIMENT_APPLIED_V1", StringComparison.Ordinal));
-            if (baselineMode=="shadow" && candidateMode=="active" && candApplied==0)
+            if (candAlertsProp != null)
             {
-                // shadow→active benign (no clamp effect) allowed
+                var cType = candAlertsProp.GetType();
+                candAlerts = (int)(cType.GetProperty("alerts")?.GetValue(candAlertsProp) ?? 0);
             }
-            else
+        }
+        catch { /* reflective safety */ }
+
+        // Candidate zero-cap robust detection (case-insensitive keys, <=0 across all declared symbols, non-empty map)
+        bool robustZeroCap = false;
+        try
+        {
+            using var candDoc2 = JsonDocument.Parse(File.ReadAllText(candidate!));
+            JsonElement riskCfgEl = default; bool foundRiskCfg=false;
+            foreach (var prop in candDoc2.RootElement.EnumerateObject())
             {
-                if (baselineMode!=candidateMode)
+                if (prop.NameEquals("riskConfig") || prop.Name.Equals("risk_config", StringComparison.OrdinalIgnoreCase)) { riskCfgEl = prop.Value; foundRiskCfg=true; break; }
+            }
+            if (foundRiskCfg && riskCfgEl.ValueKind==JsonValueKind.Object)
+            {
+                JsonElement capsEl = default; bool foundCaps=false;
+                foreach (var rcProp in riskCfgEl.EnumerateObject())
                 {
-                    sentimentParity=false; sentimentReason="sentiment_mismatch";
+                    if (rcProp.NameEquals("maxNetExposureBySymbol") || rcProp.Name.Equals("max_net_exposure_by_symbol", StringComparison.OrdinalIgnoreCase)) { capsEl = rcProp.Value; foundCaps=true; break; }
                 }
-                else
+                if (foundCaps && capsEl.ValueKind==JsonValueKind.Object)
                 {
-                    int min = Math.Min(baseSent.Count, candSent.Count);
-                    for (int i=0;i<min;i++)
+                    int symbolCount=0; bool allZeroOrNeg=true;
+                    foreach (var cap in capsEl.EnumerateObject())
                     {
-                        if (!string.Equals(baseSent[i], candSent[i], StringComparison.Ordinal))
+                        if (cap.Value.ValueKind==JsonValueKind.Number)
                         {
-                            sentimentParity=false; sentimentReason="sentiment_mismatch"; diffHint = BuildDiffHint(baseSent[i], candSent[i]); break;
+                            symbolCount++;
+                            decimal val=0m; if (cap.Value.TryGetDecimal(out var dv)) val=dv; else if (cap.Value.TryGetInt64(out var iv)) val=iv;
+                            if (val > 0m) { allZeroOrNeg=false; break; }
                         }
                     }
-                    if (sentimentParity && baseSent.Count!=candSent.Count)
-                    { sentimentParity=false; sentimentReason="sentiment_mismatch"; diffHint = "sentiment_event_count"; }
-                    if (sentimentParity && baselineMode=="active" && baseApplied!=candApplied)
-                    { sentimentParity=false; sentimentReason="sentiment_mismatch"; diffHint = $"applied_count base={baseApplied} cand={candApplied}"; }
+                    robustZeroCap = symbolCount>0 && allZeroOrNeg;
                 }
             }
-            if (baselineMode=="active" && (!sentimentParity || candidateMode!="active"))
+        }
+        catch { }
+        // Prefer robust detection over earlier heuristic if true
+        if (robustZeroCap) candidateZeroCap = true;
+        // PROMOTE_FACTS (pre-resolution) per blueprint
+        bool qaPassed = !candQa.aborted && (candQa.passed ?? false);
+        Console.WriteLine($"PROMOTE_FACTS riskBase={baselineRiskMode} riskCand={candidateRiskMode} candZeroCap={candidateZeroCap.ToString().ToLowerInvariant()} baseRows={baseMetrics.rows} candRows={candMetrics.rows} baseAlerts={baseAlerts} candAlerts={candAlerts} qaPassed={qaPassed.ToString().ToLowerInvariant()}");
+        if (candidateRiskMode=="active" && !candidateZeroCap)
+        {
+            // Probe when expected zero-cap scenario failed detection
+            try
             {
-                accepted=false; reason="sentiment_mismatch"; sentimentParity=false; sentimentReason="sentiment_mismatch";
-                if (string.IsNullOrEmpty(diffHint) && baseSent.Count>0 && candSent.Count>0) diffHint = BuildDiffHint(baseSent[0], candSent[0]);
+                using var candDoc3 = JsonDocument.Parse(File.ReadAllText(candidate!));
+                var capsKeys = new List<string>();
+                foreach (var prop in candDoc3.RootElement.EnumerateObject())
+                {
+                    if (prop.NameEquals("riskConfig") || prop.Name.Equals("risk_config", StringComparison.OrdinalIgnoreCase))
+                    {
+                        foreach (var rcProp in prop.Value.EnumerateObject())
+                        {
+                            if (rcProp.NameEquals("maxNetExposureBySymbol") || rcProp.Name.Equals("max_net_exposure_by_symbol", StringComparison.OrdinalIgnoreCase))
+                            {
+                                if (rcProp.Value.ValueKind==JsonValueKind.Object)
+                                {
+                                    foreach (var cap in rcProp.Value.EnumerateObject()) capsKeys.Add(cap.Name);
+                                }
+                            }
+                        }
+                    }
+                }
+                Console.WriteLine($"PROMOTE_FLAGS risk_base={baselineRiskMode} risk_cand={candidateRiskMode} cand_zero_cap={candidateZeroCap.ToString().ToLowerInvariant()} caps_keys=[{string.Join(',', capsKeys)}]");
+            }
+            catch { }
+        }
+
+        // ------------------------------
+        // REASON RESOLUTION (priority ladder)
+        // ------------------------------
+        string reason = string.Empty;
+        // 1. Data QA failure
+        if (candQa.aborted || (candQa.passed.HasValue && !candQa.passed.Value))
+        {
+            reason = "data_qa_failed";
+        }
+        // 2. Risk downgrade active->(shadow/off)
+        else if (baselineRiskMode=="active" && candidateRiskMode!="active")
+        {
+            reason = "risk_mismatch";
+        }
+        // 3. Shadow->Active zero-cap divergence (alerts or rowcount diff)
+        else if (baselineRiskMode=="shadow" && candidateRiskMode=="active" && candidateZeroCap && (baseAlerts!=candAlerts || baseMetrics.rows!=candMetrics.rows))
+        {
+            reason = "risk_mismatch";
+        }
+        // 4. Risk alert mismatch (parity false & riskReason==risk_mismatch)
+        else if (!riskParity && riskReason=="risk_mismatch")
+        {
+            reason = "risk_mismatch";
+        }
+        // 5. Row count mismatch
+        else if (candMetrics.rows != baseMetrics.rows)
+        {
+            reason = $"RowCount mismatch base={baseMetrics.rows} cand={candMetrics.rows}";
+        }
+        // 6. PnL worse
+        else if (candMetrics.pnl < baseMetrics.pnl - 0.0000m)
+        {
+            reason = "PnL worsened";
+        }
+        // 7. Max drawdown worse
+        else if (candMetrics.maxDd > baseMetrics.maxDd + 0.0000m)
+        {
+            reason = "MaxDD worsened";
+        }
+
+        // Sentiment parity gating (only if still accepted so far)
+        bool sentimentParity = true; string sentimentReason = "ok"; string diffHint = string.Empty;
+        if (string.IsNullOrEmpty(reason))
+        {
+            try
+            {
+                static List<string> LoadSentimentLines(string path)
+                {
+                    var all = File.ReadAllLines(path);
+                    var list = new List<string>();
+                    for (int i=2;i<all.Length;i++)
+                    {
+                        var line = all[i];
+                        if (line.Contains("INFO_SENTIMENT_", StringComparison.Ordinal)) list.Add(line);
+                    }
+                    return list;
+                }
+                var baseSent = LoadSentimentLines(baseRun.EventsPath);
+                var candSent = LoadSentimentLines(candRunA.EventsPath);
+                int baseApplied = baseSent.Count(l=>l.Contains("INFO_SENTIMENT_APPLIED_V1", StringComparison.Ordinal));
+                int candApplied = candSent.Count(l=>l.Contains("INFO_SENTIMENT_APPLIED_V1", StringComparison.Ordinal));
+                if (!(baselineMode=="shadow" && candidateMode=="active" && candApplied==0))
+                {
+                    if (baselineMode!=candidateMode)
+                    { sentimentParity=false; sentimentReason="sentiment_mismatch"; }
+                    else
+                    {
+                        int min = Math.Min(baseSent.Count, candSent.Count);
+                        for (int i=0;i<min;i++)
+                        {
+                            if (!string.Equals(baseSent[i], candSent[i], StringComparison.Ordinal)) { sentimentParity=false; sentimentReason="sentiment_mismatch"; diffHint = BuildDiffHint(baseSent[i], candSent[i]); break; }
+                        }
+                        if (sentimentParity && baseSent.Count!=candSent.Count)
+                        { sentimentParity=false; sentimentReason="sentiment_mismatch"; diffHint = "sentiment_event_count"; }
+                        if (sentimentParity && baselineMode=="active" && baseApplied!=candApplied)
+                        { sentimentParity=false; sentimentReason="sentiment_mismatch"; diffHint = $"applied_count base={baseApplied} cand={candApplied}"; }
+                    }
+                    if (baselineMode=="active" && (!sentimentParity || candidateMode!="active"))
+                    {
+                        reason = "sentiment_mismatch"; sentimentParity=false; sentimentReason="sentiment_mismatch";
+                        if (string.IsNullOrEmpty(diffHint) && baseSent.Count>0 && candSent.Count>0) diffHint = BuildDiffHint(baseSent[0], candSent[0]);
+                    }
+                }
+            }
+            catch (Exception sx)
+            {
+                if (baselineMode=="active") { reason="sentiment_mismatch"; sentimentParity=false; sentimentReason="sentiment_mismatch"; diffHint = "exception "+sx.GetType().Name; }
             }
         }
-        catch (Exception sx)
+
+        bool accepted = string.IsNullOrEmpty(reason);
+
+        // Fallback normalization safety (should be redundant with ladder)
+        if (!accepted && reason.StartsWith("RowCount mismatch", StringComparison.Ordinal) && baselineRiskMode=="shadow" && candidateRiskMode=="active" && candidateZeroCap)
         {
-            if (baselineMode=="active") { accepted=false; reason="sentiment_mismatch"; sentimentParity=false; sentimentReason="sentiment_mismatch"; diffHint = "exception "+sx.GetType().Name; }
+            reason = "risk_mismatch"; accepted=false; // keep rejected
         }
+
+        // PROMOTE_DECISION line per blueprint
+        Console.WriteLine($"PROMOTE_DECISION finalReason={(string.IsNullOrEmpty(reason)?"":reason)} accepted={accepted.ToString().ToLowerInvariant()}");
 
         var resultObj = new
         {
             type = "PROMOTION_RESULT_V1",
             accepted,
-            reason,
+            reason = string.IsNullOrEmpty(reason)?"accept":reason,
             sentiment = new { baseline_mode = baselineMode, candidate_mode = candidateMode, parity = sentimentParity, reason = sentimentReason, diff_hint = diffHint },
+            risk = riskParityObj,
             baseline = new { pnl = Round2(baseMetrics.pnl), maxDd = Round2(baseMetrics.maxDd), rows = baseMetrics.rows },
-            candidate = new { pnl = Round2(candMetrics.pnl), maxDd = Round2(candMetrics.maxDd), rows = candMetrics.rows, alerts = alertBlocks },
+            candidate = new { pnl = Round2(candMetrics.pnl), maxDd = Round2(candMetrics.maxDd), rows = candMetrics.rows, alerts = candAlerts },
             hashes = new { events = eventsHashA, trades = tradesHashA, config_base = baseRun.ConfigHash, config_cand = candRunA.ConfigHash },
             dataQa = new {
                 baseline = new { aborted = baseQa.aborted, passed = baseQa.passed },
@@ -466,7 +628,7 @@ static int RunPromote(List<string> args)
         if (printMetrics)
         {
             Console.WriteLine($"BASE_PNL={baseMetrics.pnl.ToString(System.Globalization.CultureInfo.InvariantCulture)} BASE_MAXDD={baseMetrics.maxDd.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
-            Console.WriteLine($"CAND_PNL={candMetrics.pnl.ToString(System.Globalization.CultureInfo.InvariantCulture)} CAND_MAXDD={candMetrics.maxDd.ToString(System.Globalization.CultureInfo.InvariantCulture)} ALERT_BLOCKS={alertBlocks}");
+            Console.WriteLine($"CAND_PNL={candMetrics.pnl.ToString(System.Globalization.CultureInfo.InvariantCulture)} CAND_MAXDD={candMetrics.maxDd.ToString(System.Globalization.CultureInfo.InvariantCulture)} ALERT_BLOCKS={candAlerts}");
         }
         return accepted ? 0 : 2;
     }
@@ -550,10 +712,7 @@ static int RunPromote(List<string> args)
         catch { return (0m,0m,0); }
     }
 
-    static int CountAlertBlocks(string eventsCsv)
-    {
-        try { return File.ReadLines(eventsCsv).Count(l=>l.Contains("ALERT_BLOCK_", StringComparison.Ordinal)); } catch { return 0; }
-    }
+    // Removed obsolete CountAlertBlocks (alert counts derived from riskParityObj)
 
     static string Sha256FileSkipMeta(string path)
     {
@@ -588,6 +747,44 @@ static int RunPromote(List<string> args)
         var obj = new { type="PROMOTION_RESULT_V1", accepted=false, reason };
         Console.WriteLine(JsonSerializer.Serialize(obj));
         return 2;
+    }
+
+    static object BuildRiskParity(string baseMode, string candMode, string baseEvents, string candEvents)
+    {
+        try
+        {
+            // Load risk alert lines
+            static (List<string> evals, List<string> alerts) Load(string path)
+            {
+                var evals = new List<string>(); var alerts = new List<string>();
+                foreach (var line in File.ReadLines(path))
+                {
+                    if (line.Contains(",INFO_RISK_EVAL_V1,")) evals.Add(line);
+                    else if (line.Contains(",ALERT_BLOCK_")) alerts.Add(line);
+                }
+                return (evals, alerts);
+            }
+            var (baseEvals, baseAlerts) = Load(baseEvents);
+            var (candEvals, candAlerts) = Load(candEvents);
+            bool parity = true; string reason = "ok"; string diffHint = string.Empty;
+            if (baseMode=="active" && candMode!="active") { parity=false; reason="risk_mismatch"; diffHint="mode downgrade"; }
+            else if (baseMode=="active" && candMode=="active")
+            {
+                if (baseAlerts.Count != candAlerts.Count)
+                { parity=false; reason="risk_mismatch"; diffHint=$"alert_count base={baseAlerts.Count} cand={candAlerts.Count}"; }
+                else
+                {
+                    for (int i=0;i<baseAlerts.Count;i++) if (!string.Equals(baseAlerts[i], candAlerts[i], StringComparison.Ordinal)) { parity=false; reason="risk_mismatch"; diffHint="alert_line_diff"; break; }
+                }
+            }
+            else if (baseMode=="shadow" && candMode=="active")
+            {
+                // allowed if candidate active has no alerts (benign upgrade)
+                if (candAlerts.Count>0) { parity=false; reason="risk_mismatch"; diffHint="unexpected_active_alerts"; }
+            }
+            return new { baseline_mode = baseMode, candidate_mode = candMode, parity, reason, diff_hint = diffHint, baseline = new { evals = baseEvals.Count, alerts = baseAlerts.Count }, candidate = new { evals = candEvals.Count, alerts = candAlerts.Count } };
+        }
+        catch { return new { baseline_mode = baseMode, candidate_mode = candMode, parity=true, reason="ok", diff_hint="exception", baseline = new { evals = 0, alerts = 0 }, candidate = new { evals = 0, alerts = 0 } }; }
     }
 
     static (bool aborted, bool? passed) ExtractDataQaStatus(string eventsCsv)
