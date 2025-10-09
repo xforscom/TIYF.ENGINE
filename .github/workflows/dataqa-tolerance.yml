@@ -194,7 +194,10 @@ jobs:
           cfg.data.instrumentsFile = path.resolve(instrumentsFile);
           if (!cfg.data.ticks || typeof cfg.data.ticks !== 'object') throw new Error('config.data.ticks missing or not an object');
           const rewritten = {};
-          const removeN = kMode === 'overflow' ? 2 : 1;
+          // Choose one target symbol to introduce an interior gap exceeding K=1
+          const tickSymbols = Object.keys(cfg.data.ticks || {});
+          if (tickSymbols.length === 0) throw new Error('No tick symbols found in config.data.ticks');
+          const targetSym = tickSymbols.find(s => /EURUSD/i.test(s)) || tickSymbols[0];
           for (const [sym, srcRaw] of Object.entries(cfg.data.ticks)) {
             if (typeof srcRaw !== 'string') continue;
             const src = path.resolve(srcRaw);
@@ -203,8 +206,30 @@ jobs:
             const lines = fs.readFileSync(src, 'utf8').split(/\r?\n/);
             const header = lines[0] ?? '';
             const data = lines.slice(1).filter(l => l.trim().length > 0);
-            const toRemove = Math.min(removeN, data.length);
-            const dataAfter = data.slice(toRemove);
+            let dataAfter = data;
+            if (kMode === 'overflow' && sym === targetSym) {
+              // Remove two interior rows to create a mid-sequence gap; avoid edges so union still spans these times
+              if (data.length > 5) {
+                const mid = Math.floor(data.length / 2);
+                const removeIdx = new Set([mid - 1, mid]);
+                console.log(`[overflow] Target ${sym}: removing interior indices ${mid-1} and ${mid} of ${data.length}`);
+                dataAfter = data.filter((_, i) => !removeIdx.has(i));
+              } else if (data.length > 3) {
+                console.log(`[overflow] Target ${sym}: short series, removing indices 1 and 2 of ${data.length}`);
+                const removeIdx = new Set([1, 2]);
+                dataAfter = data.filter((_, i) => !removeIdx.has(i));
+              } else if (data.length > 2) {
+                console.log(`[overflow] Target ${sym}: very short series, removing index 1 of ${data.length}`);
+                const removeIdx = new Set([1]);
+                dataAfter = data.filter((_, i) => !removeIdx.has(i));
+              } else {
+                // Too short to meaningfully remove interior rows; leave as-is to avoid empty file
+                console.warn(`[overflow] Target ${sym}: insufficient rows (${data.length}) to create interior gap; leaving data unchanged`);
+              }
+            } else if (kMode !== 'overflow') {
+              // For completeness if ever reused: remove one from start in non-overflow (not used here)
+              dataAfter = data.slice(1);
+            }
             const out = [header, ...dataAfter].join('\n') + '\n';
             fs.writeFileSync(dst, out, 'utf8');
             const verify = fs.readFileSync(dst, 'utf8').trim().split(/\r?\n/);
