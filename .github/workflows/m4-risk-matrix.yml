@@ -108,7 +108,7 @@ jobs:
             echo "alert_count=$ALERTS"
             [ "$MODE" = "active_with_breach" ] && echo "gated_zero_cap=true" || true
             echo "run_dir=$RUN_DIR"
-          } > artifacts/parity/hashes.txt
+          } > artifacts/parity/hashes-$MODE.txt
       - name: Upload parity artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -129,14 +129,29 @@ jobs:
         run: |
           set -euo pipefail
           echo 'Collected parity hash files:' >&2
-          find parity_all -name hashes.txt -print -exec cat {} \;
+          find parity_all -type f -name 'hashes*.txt' -print -exec cat {} \; || true
           declare -A TSHAS ALERTS ZERO
-          for f in parity_all/parity-*/hashes.txt; do
-            mode=$(basename $(dirname "$f"))
-            mode=${mode#parity-}
-            tsha=$(grep '^trades_sha=' "$f" | cut -d= -f2)
-            alerts=$(grep '^alert_count=' "$f" | cut -d= -f2)
-            zero=$(grep '^gated_zero_cap=' "$f" | cut -d= -f2 || echo 'false')
+          shopt -s nullglob globstar
+          files=(parity_all/parity-*/hashes.txt)
+          if [ ${#files[@]} -eq 0 ]; then
+            # Fallback to merged flat files like hashes-<mode>.txt
+            files=(parity_all/**/hashes-*.txt)
+          fi
+          for f in "${files[@]}"; do
+            base=$(basename "$f")
+            dir=$(basename "$(dirname "$f")")
+            mode=''
+            if [[ "$base" =~ ^hashes-([a-z_]+)\.txt$ ]]; then
+              mode="${BASH_REMATCH[1]}"
+            elif [[ "$dir" =~ ^parity-(.*)$ ]]; then
+              mode="${BASH_REMATCH[1]}"
+            else
+              mode=$(grep -m1 '^mode=' "$f" | cut -d= -f2 || true)
+            fi
+            [ -n "$mode" ] || { echo "Could not determine mode for $f" >&2; continue; }
+            tsha=$(grep -m1 '^trades_sha=' "$f" | cut -d= -f2)
+            alerts=$(grep -m1 '^alert_count=' "$f" | cut -d= -f2)
+            zero=$(grep -m1 '^gated_zero_cap=' "$f" | cut -d= -f2 || echo 'false')
             TSHAS[$mode]=$tsha
             ALERTS[$mode]=$alerts
             ZERO[$mode]=$zero
