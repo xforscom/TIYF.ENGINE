@@ -158,8 +158,8 @@ jobs:
           const text=fs.readFileSync(process.env.EVENTS,'utf8');
           if (text.includes(',DATA_QA_ABORT_V1,')) { console.error('Unexpected abort event found'); process.exit(1); }
           JS
-          # Deep verify
-          dotnet exec "$tools" verify deep --events "$J_EVENTS" --trades "$J_TRADES" --json
+          # Strict verify (deep)
+          dotnet exec "$tools" verify strict --events "$J_EVENTS" --trades "$J_TRADES" --schema 1.3.0 --json
 
       - name: Run K=1 with overflow (fail)
         shell: bash
@@ -254,5 +254,5 @@ jobs:
             console.error("Failed to parse payload as JSON:", payload); process.exit(1);
           }
           JS
-          # Deep verify (JSON may be ok or 2; we tolerate non-zero here as long as it runs)
-          tools_out=0; dotnet exec "$tools" verify deep --events "$J_EVENTS" --trades "$J_TRADES" --json || tools_out=$?; if [ "$tools_out" -ne 0 ] && [ "$tools_out" -ne 2 ]; then exit 1; fi
+          # Strict verify (JSON may be ok or 2; we tolerate non-zero here as long as it runs)
+          tools_out=0; dotnet exec "$tools" verify strict --events "$J_EVENTS" --trades "$J_TRADES" --schema 1.3.0 --json || tools_out=$?; if [ "$tools_out" -ne 0 ] && [ "$tools_out" -ne 2 ]; then exit 1; fi
