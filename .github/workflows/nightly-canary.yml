@@ -56,7 +56,7 @@ jobs:
               jq '.featureFlags.penalty="active"' "$OUTCFG" > "$OUTCFG.tmp" && mv "$OUTCFG.tmp" "$OUTCFG"
               ;;
             penalty-active)
-              jq '.featureFlags.penalty="active" | .penaltyConfig = (.penaltyConfig // {}) | .penaltyConfig.forcePenalty=true' "$OUTCFG" > "$OUTCFG.tmp" && mv "$OUTCFG.tmp" "$OUTCFG"
+              jq '.featureFlags.penalty="active" | .penaltyConfig = (.penaltyConfig // {}) | .penaltyConfig.forcePenalty=true | .ciPenaltyScaffold=true' "$OUTCFG" > "$OUTCFG.tmp" && mv "$OUTCFG.tmp" "$OUTCFG"
               ;;
           esac
           echo "Mutated config for mode=$MODE -> $OUTCFG"
