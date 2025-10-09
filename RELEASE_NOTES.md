@@ -104,6 +104,10 @@ Status: Final.
 
 - fix(dataqa): apply per-symbol missing_bar tolerance deterministically (drop up to K by ts)
 
+## v0.9.1-m5-tolerance-fix (Patch) – 2025-10-09
+
+- fix(dataqa): per-symbol missing_bar tolerance (drop up to K by ts); clear openUnits on close to avoid stale exposure.
+
 ## v0.7.0-m4-parity (Strict Verifier, Penalty Scaffold, Parity Artifacts) – 2025-10-08
 
 Highlights:
