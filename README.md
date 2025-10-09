@@ -239,6 +239,16 @@ M3 elevates the previously shadow‑only sentiment volatility guard into an opti
 
 M5 introduces penalty activation and deep verification groundwork. Current journal schema version: 1.3.0.
 
+### M5 (Penalty & Deep Verify)
+
+- Penalty activation path with `PENALTY_APPLIED_V1` after BAR and sentiment (before trades). Shadow-only by default; can be forced for CI scaffolding.
+- Deep Verifier (`verify deep`) checks cross-file invariants (monotonic sequences, UTC timestamps, trades formatting) and emits a JSON report; exit codes: 0 OK, 2 fail, 1 error.
+- CI additions:
+  - `verify-deep.yml` runs on push/PR for Linux+Windows (Release with Debug fallback), uploads deep verify JSON report, and includes a clean-tree guard.
+  - Nightly canary (`nightly-canary.yml`) runs daily (05:00 UTC) and supports manual dispatch. It covers `off`, `shadow`, `active`, and `penalty-active`; it publishes per‑mode parity artifacts and a compact CSV summary (mode,trades_sha,penalty_count), and writes a short job summary to the Actions UI.
+
+Contributing (tests): Prefer referencing the centralized schema constant `TiYf.Engine.Core.Infrastructure.Schema.Version` in any test-generated configs or headers, instead of hardcoding a string. This keeps the suite resilient to future schema bumps.
+
 ### Feature Flag States
 
 | Config Value | Normalized Mode | Impact on Trades | Events Emitted |

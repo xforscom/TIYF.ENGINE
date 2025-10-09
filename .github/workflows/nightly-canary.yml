@@ -1,0 +1,163 @@
+name: nightly-canary
+
+on:
+  schedule:
+    - cron: '0 5 * * *' # daily at 05:00 UTC
+  workflow_dispatch: {}
+
+concurrency:
+  group: nightly-canary
+  cancel-in-progress: true
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [ off, shadow, active, penalty-active ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Clean tree guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "$(git status --porcelain)" ]; then echo "Dirty tree before build"; git status; exit 1; fi
+      - name: Build (Release)
+        run: dotnet build TiYf.Engine.sln -c Release --nologo
+      - name: Run simulation (mode=${{ matrix.mode }})
+        env:
+          MODE: ${{ matrix.mode }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE"
+          SIM="$ROOT/src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"
+          BASE_CFG="$ROOT/tests/fixtures/backtest_m0/config.backtest-m0.json"
+          OUTCFG=$(mktemp)
+          # Ensure jq exists
+          if ! command -v jq >/dev/null 2>&1; then sudo apt-get update && sudo apt-get install -y jq; fi
+          # Base toggles: disable unrelated systems for isolation
+          jq '.featureFlags.sentiment="off" | .featureFlags.risk="off"' "$BASE_CFG" > "$OUTCFG"
+          # Apply penalty mode
+          case "$MODE" in
+            off)
+              jq '.featureFlags.penalty="off"' "$OUTCFG" > "$OUTCFG.tmp" && mv "$OUTCFG.tmp" "$OUTCFG"
+              ;;
+            shadow)
+              jq '.featureFlags.penalty="shadow"' "$OUTCFG" > "$OUTCFG.tmp" && mv "$OUTCFG.tmp" "$OUTCFG"
+              ;;
+            active)
+              jq '.featureFlags.penalty="active"' "$OUTCFG" > "$OUTCFG.tmp" && mv "$OUTCFG.tmp" "$OUTCFG"
+              ;;
+            penalty-active)
+              jq '.featureFlags.penalty="active" | .penaltyConfig = (.penaltyConfig // {}) | .penaltyConfig.forcePenalty=true' "$OUTCFG" > "$OUTCFG.tmp" && mv "$OUTCFG.tmp" "$OUTCFG"
+              ;;
+          esac
+          echo "Mutated config for mode=$MODE -> $OUTCFG"
+          rm -rf "$ROOT/journals" || true
+          RUN_ID=CANARY-$MODE-$RANDOM
+          dotnet exec "$SIM" --config "$OUTCFG" --quiet --run-id "$RUN_ID"
+          RUN_DIR=$(ls -d "$ROOT"/journals/*"$RUN_ID"* 2>/dev/null | head -n1)
+          echo "RUN_DIR=$RUN_DIR"; test -n "$RUN_DIR"
+          EV="$RUN_DIR/events.csv"; TR="$RUN_DIR/trades.csv"; test -f "$EV"; test -f "$TR"
+          mkdir -p artifacts/parity/$MODE
+          # Normalize events: skip meta + header
+          tail -n +3 "$EV" | sha256sum | awk '{print $1}' > artifacts/parity/$MODE/events.sha
+          # Normalize trades: remove header + strip config_hash column if present
+          awk -F, 'NR==1 {for (i=1;i<=NF;i++){if($i=="config_hash") c=i} next} {out=""; for(i=1;i<=NF;i++){ if(i==c) continue; if(out!="") out=out","; out=out $i;} print out}' "$TR" | sha256sum | awk '{print $1}' > artifacts/parity/$MODE/trades.sha
+          EVENTS_SHA=$(cat artifacts/parity/$MODE/events.sha)
+          TRADES_SHA=$(cat artifacts/parity/$MODE/trades.sha)
+          PEN_CNT=$(grep -c 'PENALTY_APPLIED_V1' "$EV" || true)
+          {
+            echo "events_sha=$EVENTS_SHA"
+            echo "trades_sha=$TRADES_SHA"
+            echo "penalty_count=$PEN_CNT"
+            echo "run_dir=$RUN_DIR"
+          } > artifacts/parity/$MODE/hashes.txt
+          cp artifacts/parity/$MODE/hashes.txt artifacts/parity/$MODE/hashes-$MODE.txt || true
+          echo "--- hashes ($MODE) ---"; cat artifacts/parity/$MODE/hashes.txt
+      - name: Upload parity artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-${{ matrix.mode }}
+          path: artifacts/parity/${{ matrix.mode }}
+
+  invariants:
+    needs: canary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download parity artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: parity-*
+          path: parity_all
+      - name: Evaluate invariants and publish summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'Collected parity hash files:' >&2
+          find parity_all -type f -name 'hashes*.txt' -print -exec cat {} \; || true
+          declare -A TSHAS PS COUNT
+          shopt -s nullglob globstar
+          files=(parity_all/parity-*/hashes.txt)
+          if [ ${#files[@]} -eq 0 ]; then
+            files=(parity_all/**/hashes-*.txt)
+          fi
+          for f in "${files[@]}"; do
+            base=$(basename "$f")
+            dir=$(basename "$(dirname "$f")")
+            mode=''
+            if [[ "$base" =~ ^hashes-([a-z_-]+)\.txt$ ]]; then
+              mode="${BASH_REMATCH[1]}"
+            elif [[ "$dir" =~ ^parity-(.*)$ ]]; then
+              mode="${BASH_REMATCH[1]}"
+            else
+              mode=$(grep -m1 '^mode=' "$f" | cut -d= -f2 || true)
+            fi
+            [ -n "$mode" ] || { echo "Could not determine mode for $f" >&2; continue; }
+            tsha=$(grep -m1 '^trades_sha=' "$f" | cut -d= -f2)
+            pcount=$(grep -m1 '^penalty_count=' "$f" | cut -d= -f2)
+            TSHAS[$mode]="$tsha"
+            COUNT[$mode]="$pcount"
+          done
+          # Required modes presence
+          for m in off shadow active penalty-active; do
+            [ -n "${TSHAS[$m]:-}" ] || { echo "Missing mode $m" >&2; exit 1; }
+          done
+          # Invariants: off vs shadow equal; shadow vs active equal
+          [ "${TSHAS[off]}" = "${TSHAS[shadow]}" ] || { echo 'off vs shadow trades hash mismatch' >&2; exit 1; }
+          [ "${TSHAS[shadow]}" = "${TSHAS[active]}" ] || { echo 'shadow vs active trades hash mismatch' >&2; exit 1; }
+          # penalty-active must have at least one penalty event (forced)
+          if [ "${COUNT[penalty-active]}" -lt 1 ]; then echo 'penalty-active produced no penalty events' >&2; exit 1; fi
+          # Write a human-readable summary
+          mkdir -p artifacts
+          {
+            echo "mode,trades_sha,penalty_count"
+            for m in off shadow active penalty-active; do
+              echo "$m,${TSHAS[$m]},${COUNT[$m]}"
+            done
+          } > artifacts/parity_summary.csv
+          echo 'Nightly canary invariants satisfied.'
+      - name: Job summary (parity table)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "# Nightly Canary Parity Summary" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f artifacts/parity_summary.csv ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "mode,trades_sha,penalty_count" >> "$GITHUB_STEP_SUMMARY"
+            tail -n +2 artifacts/parity_summary.csv >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "(parity_summary.csv not found)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-canary-summary
+          path: artifacts/parity_summary.csv

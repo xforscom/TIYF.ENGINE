@@ -167,3 +167,26 @@ Upgrade Notes:
 - Active divergence must be justified by a blocking alert; CI enforces this via parity artifacts (`applied_count` / `penalty_count` not used for risk but infrastructure reused).
 
 Status: Final.
+
+## v0.9.0-m5-penalty-verify (Penalty Activation & Deep Verify) – 2025-10-09
+
+Highlights:
+
+- Deep Verifier CLI: `verify deep --events <events.csv> --trades <trades.csv> [--json]` producing a structured JSON report.
+- Promotion `--verify deep`: optional deep verification pass on candidate A; reject with `reason="verify_failed"` and exit 2 if it fails.
+- Tools tests updated to read `TiYf.Engine.Core.Infrastructure.Schema.Version` instead of hardcoding schema strings; CRLF/LF tolerant reads; stdout-based journal path discovery retained.
+- CI workflow `verify-deep.yml`: runs on push/PR across Linux + Windows, uses Release build with Debug fallback, uploads JSON report; includes a clean-tree guard.
+- Nightly canary `nightly-canary.yml`: daily at 05:00 UTC and manual dispatch; matrix over off, shadow, active, penalty-active; publishes parity artifacts and a compact summary table; adds a job summary with the CSV.
+
+Quality Gates:
+
+- Build & Tests: PASS (Tools tests include promotion verify positive/negative cases).
+- Deep Verify: PASS on M0 fixture (exit 0; JSON artifact uploaded by CI).
+- Hygiene: Tests clean up generated run folders best-effort; docs updated.
+
+Upgrade Notes:
+
+- Consumers can adopt `verify deep` for stricter CI gates; `promote --verify deep` integrates this automatically for candidates.
+- Tests and scripts should avoid hardcoded schema strings; use `Schema.Version` from Core.
+
+Status: Final.
