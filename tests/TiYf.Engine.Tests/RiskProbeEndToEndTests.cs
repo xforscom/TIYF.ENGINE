@@ -1,5 +1,6 @@
 using TiYf.Engine.Sim;
 using TiYf.Engine.Core;
+using TiYf.Engine.Core.Infrastructure;
 using TiYf.Engine.Sidecar;
 using TiYf.Engine.Tools;
 
@@ -27,7 +28,7 @@ public class RiskProbeEndToEndTests
         sb.AppendLine($"{aligned.AddMinutes(1):O},101.2,1");
         File.WriteAllText(tickFile, sb.ToString());
         var journalRoot = Path.Combine(root, "out");
-    var cfg = new EngineConfig("1.2.0","RUN","inst.csv","ticks.csv",journalRoot,"BAR_V1","sequence",new[]{"I1"}, new[]{"1m"});
+    var cfg = new EngineConfig(Schema.Version,"RUN","inst.csv","ticks.csv",journalRoot,"BAR_V1","sequence",new[]{"I1"}, new[]{"1m"});
         var ticks = new CsvTickSource(tickFile, new InstrumentId("I1"));
         var clock = new DeterministicSequenceClock(ticks.Select(t=>t.UtcTimestamp));
         var tracker = new InMemoryBarKeyTracker();
