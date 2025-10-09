@@ -88,7 +88,8 @@ jobs:
           // Process ticks
           if (!cfg.data.ticks || typeof cfg.data.ticks !== 'object') throw new Error('config.data.ticks missing or not an object');
           const rewritten = {};
-          const removeN = kMode === 'overflow' ? 2 : 1;
+          // For overflow: create a genuine per-symbol hole: remove 2 from EURUSD only; others remove 0
+          const removeNFor = (sym) => (kMode === 'overflow' ? (sym === 'EURUSD' ? 2 : 0) : 1);
           for (const [sym, srcRaw] of Object.entries(cfg.data.ticks)) {
             if (typeof srcRaw !== 'string') continue;
             const src = path.resolve(srcRaw);
@@ -97,7 +98,7 @@ jobs:
             const lines = fs.readFileSync(src, 'utf8').split(/\r?\n/);
             const header = lines[0] ?? '';
             const data = lines.slice(1).filter(l => l.trim().length > 0);
-            const toRemove = Math.min(removeN, data.length);
+            const toRemove = Math.min(removeNFor(sym), data.length);
             const dataAfter = data.slice(toRemove);
             const out = [header, ...dataAfter].join('\n') + '\n';
             fs.writeFileSync(dst, out, 'utf8');
