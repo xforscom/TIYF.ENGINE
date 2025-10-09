@@ -407,6 +407,50 @@ public class DataQaTests
     }
 
     [Fact]
+    public void DataQa_Active_Tolerates_K_Then_Fails_On_Overflow()
+    {
+        var root = FindSolutionRoot();
+        var baseCfgPath = Path.Combine(root, "tests","fixtures","backtest_m0","config.backtest-m0.json");
+        var node = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(baseCfgPath))!.AsObject();
+        node["featureFlags"] = new System.Text.Json.Nodes.JsonObject{ ["dataQa"] = "active" };
+        node["dataQA"] = new System.Text.Json.Nodes.JsonObject{
+            ["enabled"] = true,
+            ["maxMissingBarsPerInstrument"] = 1,
+            ["allowDuplicates"] = false,
+            ["spikeZ"] = 5,
+            ["repair"] = new System.Text.Json.Nodes.JsonObject{ ["forwardFillBars"] = 0, ["dropSpikes"] = true }
+        };
+        var tmp = Path.Combine(Path.GetTempPath(), "dq-k1-over-"+Guid.NewGuid().ToString("N")); Directory.CreateDirectory(tmp);
+        // Copy ticks and remove two distinct minutes for EURUSD
+        var orig = Path.Combine(root, "tests","fixtures","backtest_m0");
+        foreach (var f in Directory.GetFiles(orig, "ticks_*.csv"))
+        {
+            var lines = File.ReadAllLines(f).ToList();
+            if (Path.GetFileName(f)=="ticks_EURUSD.csv")
+            {
+                lines = lines.Where(l=>!l.Contains("2025-01-02T00:30:") && !l.Contains("2025-01-02T00:31:")).ToList();
+            }
+            File.WriteAllLines(Path.Combine(tmp, Path.GetFileName(f)), lines);
+        }
+        var data = node["data"]!.AsObject();
+        var ticks = data["ticks"]!.AsObject();
+        foreach (var kv in ticks.ToList())
+            ticks[kv.Key] = Path.Combine(tmp, Path.GetFileName(kv.Value!.GetValue<string>())).Replace('\\','/');
+        data["instrumentsFile"] = Path.Combine(orig, "instruments.csv").Replace('\\','/');
+
+        var cfgPath = Path.Combine(tmp, "config.json");
+        File.WriteAllText(cfgPath, node.ToJsonString());
+        var runId = RunSim(root, cfgPath);
+        var (eventsPath, _) = LocateJournal(root, runId);
+        var linesOut = File.ReadAllLines(eventsPath);
+        var summary = linesOut.First(l=>l.Contains(",DATA_QA_SUMMARY_V1,"));
+        var payloadRaw = summary.Split(',',4)[3].Trim().Trim('"').Replace("\"\"","\"");
+        using var doc = System.Text.Json.JsonDocument.Parse(payloadRaw);
+        Assert.True(doc.RootElement.TryGetProperty("passed", out var pEl) && pEl.ValueKind==System.Text.Json.JsonValueKind.False, "Expected passed=false with 2 gaps and K=1");
+        // If active mode aborts on failure, the abort line is expected; if the gating logic changes to summary-only, this remains valid by the summary assertion.
+    }
+
+    [Fact]
     public void Active_HardFail_AbortTailDeterministic()
     {
         var root = FindSolutionRoot();

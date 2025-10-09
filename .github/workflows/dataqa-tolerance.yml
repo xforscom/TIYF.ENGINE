@@ -1,0 +1,86 @@
+name: dataqa-tolerance
+
+on:
+  push:
+    branches: [ fix/dataqa-tolerance-missing-bars ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  matrix:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build (Release)
+        run: dotnet build -c Release
+
+      - name: Prepare paths
+        id: prep
+        shell: bash
+        run: |
+          ROOT="$(pwd)"
+          echo "root=$ROOT" >> $GITHUB_OUTPUT
+          echo "sim=$ROOT/src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll" >> $GITHUB_OUTPUT
+          echo "tools=$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll" >> $GITHUB_OUTPUT
+          echo "cfg=$ROOT/tests/fixtures/backtest_m0/config.backtest-m0.json" >> $GITHUB_OUTPUT
+
+      - name: Run K=1 (pass)
+        shell: bash
+        run: |
+          root='${{ steps.prep.outputs.root }}'
+          sim='${{ steps.prep.outputs.sim }}'
+          tools='${{ steps.prep.outputs.tools }}'
+          cfg='${{ steps.prep.outputs.cfg }}'
+          tmp="$root/.tmp_k1"
+          rm -rf "$tmp" && mkdir -p "$tmp"
+          # Make a temp cfg with dataQa active and K=1
+          node -e "const fs=require('fs');let o=JSON.parse(fs.readFileSync(process.env.CFG,'utf8'));o.featureFlags={...(o.featureFlags||{}),dataQa:'active'};o.dataQA={enabled:true,maxMissingBarsPerInstrument:1,allowDuplicates:false,spikeZ:5,repair:{forwardFillBars:0,dropSpikes:true}};fs.writeFileSync(process.env.TOUT,JSON.stringify(o));" CFG="$cfg" TOUT="$tmp/cfg.json"
+          # Produce one missing minute (00:30) for EURUSD
+          for f in EURUSD USDJPY XAUUSD; do cp "$root/tests/fixtures/backtest_m0/ticks_${f}.csv" "$tmp/ticks_${f}.csv"; done
+          perl -ni -e 'print unless /2025-01-02T00:30:/' "$tmp/ticks_EURUSD.csv"
+          # Point cfg ticks to tmp
+          node -e "const fs=require('fs');let o=JSON.parse(fs.readFileSync(process.env.TIN,'utf8')); for(const k of Object.keys(o.data.ticks)){ o.data.ticks[k] = process.env.ROOT+'/ .tmp_k1/ticks_'+k+'.csv'.replace(' ',''); } o.data.instrumentsFile = process.env.ROOT+'/tests/fixtures/backtest_m0/instruments.csv'; fs.writeFileSync(process.env.TOUT,JSON.stringify(o));" TIN="$tmp/cfg.json" TOUT="$tmp/cfg2.json" ROOT="$root"
+          # Run sim
+          dotnet exec "$sim" --config "$tmp/cfg2.json" --run-id K1-PASS --verbosity quiet
+          events="$root/journals/M0/M0-RUN-K1-PASS/events.csv"
+          trades="$root/journals/M0/M0-RUN-K1-PASS/trades.csv"
+          test -f "$events"
+          # Assert summary passed=true and no abort
+          sum=$(grep ',DATA_QA_SUMMARY_V1,' "$events" | head -n1 | sed 's/^[^,]*,[^,]*,[^,]*,//' | sed 's/^"//;s/"$//' | sed 's/""/"/g')
+          echo "$sum" | jq -e '.passed==true and .aborted==false'
+          if grep -q ',DATA_QA_ABORT_V1,' "$events"; then echo 'Unexpected abort'; exit 1; fi
+          # Deep verify
+          dotnet exec "$tools" verify deep --events "$events" --trades "$trades" --json
+
+      - name: Run K=1 with overflow (fail)
+        shell: bash
+        run: |
+          root='${{ steps.prep.outputs.root }}'
+          sim='${{ steps.prep.outputs.sim }}'
+          tools='${{ steps.prep.outputs.tools }}'
+          cfg='${{ steps.prep.outputs.cfg }}'
+          tmp="$root/.tmp_k1_over"
+          rm -rf "$tmp" && mkdir -p "$tmp"
+          node -e "const fs=require('fs');let o=JSON.parse(fs.readFileSync(process.env.CFG,'utf8'));o.featureFlags={...(o.featureFlags||{}),dataQa:'active'};o.dataQA={enabled:true,maxMissingBarsPerInstrument:1,allowDuplicates:false,spikeZ:5,repair:{forwardFillBars:0,dropSpikes:true}};fs.writeFileSync(process.env.TOUT,JSON.stringify(o));" CFG="$cfg" TOUT="$tmp/cfg.json"
+          for f in EURUSD USDJPY XAUUSD; do cp "$root/tests/fixtures/backtest_m0/ticks_${f}.csv" "$tmp/ticks_${f}.csv"; done
+          perl -ni -e 'print unless /2025-01-02T00:30:/' "$tmp/ticks_EURUSD.csv"
+          perl -ni -e 'print unless /2025-01-02T00:31:/' "$tmp/ticks_EURUSD.csv"
+          node -e "const fs=require('fs');let o=JSON.parse(fs.readFileSync(process.env.TIN,'utf8')); for(const k of Object.keys(o.data.ticks)){ o.data.ticks[k] = process.env.ROOT+'/ .tmp_k1_over/ticks_'+k+'.csv'.replace(' ',''); } o.data.instrumentsFile = process.env.ROOT+'/tests/fixtures/backtest_m0/instruments.csv'; fs.writeFileSync(process.env.TOUT,JSON.stringify(o));" TIN="$tmp/cfg.json" TOUT="$tmp/cfg2.json" ROOT="$root"
+          dotnet exec "$sim" --config "$tmp/cfg2.json" --run-id K1-FAIL --verbosity quiet
+          events="$root/journals/M0/M0-RUN-K1-FAIL/events.csv"
+          test -f "$events"
+          sum=$(grep ',DATA_QA_SUMMARY_V1,' "$events" | head -n1 | sed 's/^[^,]*,[^,]*,[^,]*,//' | sed 's/^"//;s/"$//' | sed 's/""/"/g')
+          echo "$sum" | jq -e '.passed==false'
+          # Should still produce summary and possibly abort; we don't hard fail if abort is absent/present
+          # Deep verify (JSON may be ok or 2; we tolerate non-zero here as long as it runs)
+          tools_out=0; dotnet exec "$tools" verify deep --events "$events" --trades "$root/journals/M0/M0-RUN-K1-FAIL/trades.csv" --json || tools_out=$?; if [ "$tools_out" -ne 0 ] && [ "$tools_out" -ne 2 ]; then exit 1; fi
