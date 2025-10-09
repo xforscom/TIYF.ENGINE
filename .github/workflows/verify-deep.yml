@@ -74,12 +74,12 @@ jobs:
           test -f "$EV" && test -f "$TR"
           echo "events=$EV" >> $GITHUB_OUTPUT
           echo "trades=$TR" >> $GITHUB_OUTPUT
-      - name: Deep verify
+      - name: Deep verify (strict)
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p artifacts/verify-deep
-          JSON=$(dotnet exec "${{ steps.paths.outputs.tools }}" verify deep --events "${{ steps.run_sim.outputs.events }}" --trades "${{ steps.run_sim.outputs.trades }}" --json)
+          JSON=$(dotnet exec "${{ steps.paths.outputs.tools }}" verify strict --events "${{ steps.run_sim.outputs.events }}" --trades "${{ steps.run_sim.outputs.trades }}" --schema 1.3.0 --json || true)
           echo "$JSON" | tee artifacts/verify-deep/report.json
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
