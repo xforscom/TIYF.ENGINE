@@ -26,7 +26,7 @@ jobs:
           dotnet build "$SLN" -c Release --nologo
           echo "[Step] Create penalty-enabled config"
           if ! command -v jq >/dev/null; then sudo apt-get update && sudo apt-get install -y jq; fi
-          jq '.featureFlags.penalty="shadow" | .featureFlags.sentiment="off" | .penaltyConfig={"forcePenalty":true}' "$ROOT/tests/fixtures/backtest_m0/config.backtest-m0.json" > "$TMP"
+          jq '.featureFlags.penalty="shadow" | .featureFlags.sentiment="off" | .penaltyConfig={"forcePenalty":true} | .ciPenaltyScaffold=true' "$ROOT/tests/fixtures/backtest_m0/config.backtest-m0.json" > "$TMP"
           echo "[Step] Run sim with penalty"
           rm -rf "$ROOT/journals" || true
           dotnet exec "$SIM" --config "$TMP" --run-id PEN-CI --quiet || { echo 'Sim run failed'; exit 2; }
@@ -37,6 +37,9 @@ jobs:
           CNT=$(grep -c 'PENALTY_APPLIED_V1' "$EV" || true)
           echo "Penalty count=$CNT"
           echo "::group::Penalty lines (up to 10)"; grep 'PENALTY_APPLIED_V1' "$EV" | head || true; echo "::endgroup::"
+          echo "[Step] Locate parity artifact (if any)"
+          PARITY_HASH="$(find "$ROOT/artifacts/parity" -type f -name hashes.txt 2>/dev/null | sort | tail -n1 || true)"
+          if [ -f "$PARITY_HASH" ]; then echo "Found parity hashes: $PARITY_HASH"; cat "$PARITY_HASH"; else echo "No parity hashes.txt found (may be expected)"; fi
           mkdir -p artifacts/penalty && cp "$EV" "$TR" artifacts/penalty/ || true
           if [ "${CNT:-0}" -lt 1 ]; then echo 'ERROR: expected at least one PENALTY_APPLIED_V1'; exit 2; fi
       - name: Upload penalty artifacts (always)

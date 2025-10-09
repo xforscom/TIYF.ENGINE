@@ -99,3 +99,71 @@ Example promotion sentiment block:
 ```
 
 Status: Final.
+
+## v0.7.0-m4-parity (Strict Verifier, Penalty Scaffold, Parity Artifacts) – 2025-10-08
+
+Highlights:
+
+- Strict Verifier CLI (`verify strict`) with deterministic exit codes:
+  - `0` success (no violations)
+  - `2` validation failures (structured JSON detail)
+  - `1` reserved for runtime / internal errors
+- Penalty Scaffold (`PENALTY_APPLIED_V1`) behind feature flag + optional `forcePenalty` config. Emits observability events without altering trade economics (hash parity preserved unless penalty explicitly counted for invariants gating of active mode differences).
+- Parity Artifacts: post‑run artifact‐only parity hashes at `artifacts/parity/<run-id>/hashes.txt` containing:
+  - `events_sha`, `trades_sha` (normalized; `config_hash` column removed in trades)
+  - `applied_count` (sentiment active scaling occurrences)
+  - `penalty_count` (penalty scaffold occurrences)
+- CI Hardening:
+  - Matrix & invariants workflows glob artifact hashes (no hard‑coded run IDs)
+  - Invariants enforce: off vs shadow trade hash parity; active divergence only if `applied_count>0 || penalty_count>0`.
+  - Diagnostic printing of discovered run directories & parity hash files.
+
+Quality Gates:
+
+- Build & Tests: PASS (all engine + tools tests green; determinism tests unchanged)
+- Strict Verify: PASS on M0 fixture (exit 0) under Release build
+- Parity: PASS (off ↔ shadow equality; controlled active divergence scenarios only)
+- Penalty: PASS (≥1 `PENALTY_APPLIED_V1` when forced)
+
+Upgrade Notes:
+
+- Journals remain schema‑stable (no new parity event lines); tooling consuming event streams requires no change.
+- Promotion / invariants consumers should prefer artifact parity hashes over ad‑hoc recomputation for speed and uniformity.
+
+Status: Final.
+
+## v0.8.0-m4-risk (Deterministic Risk Guardrails & Promotion Gating) – 2025-10-08
+
+Highlights:
+
+- Risk guardrails (net exposure & run drawdown) with tri‑state mode: off | shadow | active.
+- Evaluation event `INFO_RISK_EVAL_V1` (per-symbol monotonic eval_index) always precedes any blocking alerts.
+- Alert events: `ALERT_BLOCK_NET_EXPOSURE`, `ALERT_BLOCK_DRAWDOWN` emitted in shadow (observability) and active (enforcement) modes.
+- Deterministic ordering: BAR / sentiment → risk evaluation → alerts → trade (or suppression in active).
+- Deterministic drawdown breach via `forceDrawdownAfterEvals` test hook (synthetic equity reduction pre-eval) enabling reproducible alert tests.
+- Exposure breach logic uses `>=` for deterministic zero-cap promotion gating scenarios.
+- Promotion CLI extended with risk parity block (baseline/candidate eval & alert counts, modes, parity flag, diff_hint).
+- Gating rules: reject downgrades (active→shadow/off), reject introduction of alerts in shadow→active upgrade, reject zero-cap introduction; accept benign shadow→active (no alerts) and parity off↔shadow.
+- New tests:
+  - Parity: off vs shadow trades hash identity.
+  - Active exposure blocking (alert + suppression) reproducibility.
+  - Deterministic forced drawdown alert.
+  - Event ordering (INFO_RISK_EVAL precedes alerts) invariant.
+  - Promotion gating scenarios (benign upgrade accept, downgrade reject, forced mismatch reject).
+- CI `m4-risk-matrix.yml` workflow (build once → matrix modes: off, shadow, active_no_breach, active_with_breach) + invariants job asserting hash parity and conditional divergence only when alerts present.
+
+Quality Gates:
+
+- Build & Tests: PASS (all new risk tests green).
+- Determinism: PASS (forced drawdown & exposure breach deterministic across runs).
+- Promotion Parity: PASS (benign upgrade accepted, mismatches rejected with informative diff_hint).
+- CI Matrix: Authored (pending first pipeline run outside local context).
+
+Upgrade Notes:
+
+- No breaking schema changes; risk events added to strict verifier allow‑list.
+- `forceDrawdownAfterEvals` is a non-production test facility and should not appear in production configs.
+- Off ↔ Shadow parity (trades) is a guarded invariant; any future change impacting economics in shadow will break CI invariants.
+- Active divergence must be justified by a blocking alert; CI enforces this via parity artifacts (`applied_count` / `penalty_count` not used for risk but infrastructure reused).
+
+Status: Final.

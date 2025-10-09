@@ -1,0 +1,1 @@
+{"SchemaVersion":"1.0.0","RunId":"RUN-PEN","InstrumentFile":"sample-instruments.csv","InputTicksFile":"sample-ticks.csv","JournalRoot":"journals","featureFlags":{"penalty":"shadow","sentiment":"off"},"penaltyConfig":{"forcePenalty":true}}

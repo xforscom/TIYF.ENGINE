@@ -332,6 +332,178 @@ Artifacts are uploaded on failure for triage.
 
 ---
 
+## Parity Diagnostics (Artifacts) (M4)
+
+Deterministic post‑run parity hashes are emitted (artifact‑only, no journal events) to enable CI and promotion invariant checks without polluting the event stream.
+
+Path pattern:
+
+```text
+artifacts/parity/<run-id>/hashes.txt
+```
+
+Fields:
+
+- `events_sha` – SHA‑256 of normalized `events.csv`
+- `trades_sha` – SHA‑256 of normalized `trades.csv` with the `config_hash` column removed
+- `applied_count` – Count of `INFO_SENTIMENT_APPLIED_V1` lines (active mode scaling occurrences)
+- `penalty_count` – Count of `PENALTY_APPLIED_V1` lines (penalty scaffold occurrences)
+
+Normalization rules (mirrors engine implementation exactly):
+
+1. Skip the meta line and header line (first two lines of `events.csv`; first line header only in `trades.csv`).
+2. Force LF line endings (CRLF stripped).
+3. Preserve original column ordering (stable deterministic ordering already enforced by writers).
+4. Remove only the `config_hash` column from `trades.csv` (other columns untouched).
+
+No additional whitespace trimming or JSON canonicalization is applied beyond what the engine already produces. Hashes are hex uppercase SHA‑256.
+
+Invariants enforced in CI (matrix + invariants job):
+
+- `off ↔ shadow`: `trades_sha` must be identical (no economic impact from shadow instrumentation).
+- `active` mode: `trades_sha` may diverge from off/shadow only when `applied_count > 0` OR `penalty_count > 0` (i.e., a genuine impactful clamp or forced penalty occurred). If both counts are zero, active must match shadow.
+
+Usage in CI:
+
+- Each sentiment matrix job uploads the parity artifact directory.
+- The invariants job globs for `hashes.txt` (does not assume a particular run id) and prints contents prior to assertions.
+
+Rationale:
+
+- Keeps journals pure (no `INFO_PARITY_*` events) maintaining backward compatibility for analytical tooling.
+- Enables fast promotion & regression gates without re‑reading large CSVs repeatedly (single canonical hash per file per run).
+- Provides explicit guardrails for feature evolution (any new economic impact in shadow/off surfaces as an unexpected hash divergence).
+
+Example `hashes.txt`:
+
+```text
+events_sha=F1F816308C601785DA7E42C9E0250E0C35CF84144131AB9C172838435F138EC8
+trades_sha=6B2DE3E5109B2562E4B3D30E93615614F6AD752311E1DFF46400E00565EE5FA1
+applied_count=0
+penalty_count=0
+```
+
+## Risk Guardrails (M4)
+
+Introduces deterministic risk guardrails with three modes: `off`, `shadow`, `active` governing whether evaluations and alerts are emitted and whether trades are blocked.
+
+### Modes
+
+| Config (`featureFlags.risk`) | Normalized Mode | Evaluations (`INFO_RISK_EVAL_V1`) | Alerts (`ALERT_BLOCK_*`) | Trade Blocking |
+|------------------------------|-----------------|-----------------------------------|--------------------------|----------------|
+| omitted / `off` / `disabled` | off             | No (suppressed)                   | No                       | No             |
+| `shadow`                     | shadow          | Yes                               | Yes (observability only) | No             |
+| `active`                     | active          | Yes                               | Yes                      | Yes (on breach)|
+
+Deterministic trade parity MUST hold between `off` and `shadow` modes (identical `trades_sha`). Divergence in `active` is allowed only when a guardrail would block (exposure or drawdown) producing an alert.
+
+### Event Ordering (Per Bar)
+
+```
+BAR_V1 → [Sentiment events (if enabled): INFO_SENTIMENT_Z_V1 → (INFO_SENTIMENT_CLAMP_V1) → (INFO_SENTIMENT_APPLIED_V1 in active sentiment)] → INFO_RISK_EVAL_V1 → [ALERT_BLOCK_NET_EXPOSURE] → [ALERT_BLOCK_DRAWDOWN] → (trade emitted OR suppressed)
+```
+
+Guarantee: Each alert for a given bar is always preceded by its evaluation line; multiple alerts (exposure + drawdown) maintain evaluation-first ordering.
+
+### Configuration (`riskConfig`)
+
+```jsonc
+{
+  "featureFlags": { "risk": "shadow" },
+  "riskConfig": {
+    "maxNetExposureBySymbol": { "EURUSD": 500000, "USDJPY": 250000 },
+    "maxRunDrawdownCCY": 1500,
+    "forceDrawdownAfterEvals": { "EURUSD": 3 }, // test hook: after N evaluations reduce equity to trigger synthetic drawdown
+    "blockOnBreach": true,   // ignored in off/shadow (always false effect there)
+    "emitEvaluations": true  // set false to suppress INFO_RISK_EVAL_V1 while still allowing blocking (active)
+  }
+}
+```
+
+Field Notes:
+
+- `maxNetExposureBySymbol`: Per-symbol absolute notional cap; breach condition is `projectedExposure >= cap` (>= chosen for deterministic zero‑cap promotion tests).
+- `maxRunDrawdownCCY`: Maximum peak-to-trough equity loss (currency units) since run start.
+- `forceDrawdownAfterEvals`: Deterministic test hook triggering a synthetic equity reduction *before* drawdown evaluation on the specified evaluation count (per symbol) – never use in production configs.
+- `blockOnBreach`: Master switch (defaults true) enabling suppression of trade emission when in `active` mode and a breach is detected.
+- `emitEvaluations`: When false (active only) blocking still occurs but the informational evaluation lines are omitted.
+
+### Evaluation Payload Schema (`INFO_RISK_EVAL_V1`)
+
+```jsonc
+{
+  "symbol": "EURUSD",
+  "eval_index": 12,            // per-symbol monotonically increasing
+  "net_exposure": 420000,      // absolute notional after projecting pending action
+  "net_exposure_cap": 500000,
+  "run_drawdown_ccy": 750,     // current realized + unrealized peak-to-trough
+  "run_drawdown_cap": 1500,
+  "will_block": false          // true only in active mode & imminent alert would suppress trade
+}
+```
+
+### Alert Types
+
+| Event | Condition | Primary Fields |
+|-------|-----------|----------------|
+| `ALERT_BLOCK_NET_EXPOSURE` | `projectedExposure >= cap` | `symbol, projected_exposure, cap` |
+| `ALERT_BLOCK_DRAWDOWN` | `run_drawdown_ccy >= maxRunDrawdownCCY` | `symbol, run_drawdown_ccy, cap` |
+
+Alerts are emitted in both `shadow` and `active`; only `active` suppresses the associated trade.
+
+### Promotion Gating (Risk Parity)
+
+Promotion decision JSON gains a `risk` block (conceptually analogous to `sentiment`). Scenarios:
+
+| Baseline Mode | Candidate Mode | Alerts Introduced? | Result | Reason |
+|---------------|----------------|--------------------|--------|--------|
+| off/shadow | shadow | No new alerts | accept | parity |
+| shadow | active | No alerts (benign) | accept | parity |
+| active | shadow/off | (downgrade) | reject | risk_mode_downgrade |
+| shadow | active | Alerts appear | reject | risk_mismatch |
+| off | shadow | Alerts appear (should be none) | reject | risk_mismatch |
+
+Zero-cap introduction heuristic: A candidate introducing a new per-symbol cap of `0` (not present in baseline) in a shadow→active upgrade is rejected (guarding against silent immediate blocking regression) even if runtime happened not to trigger an alert inside the limited test fixture window.
+
+### Sample Promotion Decision Snippet
+
+```jsonc
+"risk": {
+  "baseline_mode": "shadow",
+  "candidate_mode": "active",
+  "baseline": { "eval_count": 120, "alert_count": 0 },
+  "candidate": { "eval_count": 120, "alert_count": 0 },
+  "parity": true,
+  "reason": "parity",
+  "diff_hint": ""
+}
+```
+
+If a mismatch occurs `parity=false` and `diff_hint` provides the first divergent alert/eval line or a summary (e.g., `alert_count base=0 cand=2`).
+
+### Determinism & Parity Guarantees
+
+- Off ↔ Shadow: identical `trades_sha` (no economic impact). Evaluations & alerts only differ in presence.
+- Shadow ↔ Active (benign): identical trades when no breaches (alert_count = 0), proven by promotion/test invariants.
+- Active breach determinism: Forceable via `forceDrawdownAfterEvals` or by configuring a low exposure cap; resulting alerts precede suppressed trade deterministically.
+- All evaluation ordering & counts reproducible (per-symbol evaluation counter embedded in payload).
+
+### Sample Lines
+
+```text
+INFO_RISK_EVAL_V1,{"symbol":"EURUSD","eval_index":1,"net_exposure":100000,"net_exposure_cap":500000,"run_drawdown_ccy":0,"run_drawdown_cap":1500,"will_block":false}
+ALERT_BLOCK_NET_EXPOSURE,{"symbol":"EURUSD","projected_exposure":500000,"cap":500000,"ts":"2025-01-02T00:25:00Z"}
+ALERT_BLOCK_DRAWDOWN,{"symbol":"EURUSD","run_drawdown_ccy":1500,"cap":1500,"ts":"2025-01-02T00:30:00Z"}
+```
+
+### Upgrade Notes
+
+- No journal schema change required for existing consumers; risk events extend existing allow-list in strict verifier.
+- Test hooks (`forceDrawdownAfterEvals`) must be stripped in production promotion proposals.
+- Promotion gating leverages hash parity; risk mismatches are fast-fail before economic metrics comparison.
+
+---
+
 ## License
 
 Proprietary – All rights reserved. Internal evaluation and development only. No redistribution, sublicensing, or external publication without written authorization. See `LICENSE` for terms.

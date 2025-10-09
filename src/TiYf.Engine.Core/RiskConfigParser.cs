@@ -33,7 +33,11 @@ public static class RiskConfigParser
             InstrumentBuckets = buckets,
             EnableScaleToFit = Bool("enable_scale_to_fit", false),
             EnforcementEnabled = Bool("enforcement_enabled", true),
-            LotStep = Num("lot_step", 0.01m)
+            LotStep = Num("lot_step", 0.01m),
+            MaxRunDrawdownCCY = TryNumber(riskEl, "max_run_drawdown_ccy", out var dd) ? dd : null,
+            BlockOnBreach = Bool("block_on_breach", true),
+            EmitEvaluations = Bool("emit_evaluations", true),
+            MaxNetExposureBySymbol = ParseExposureCaps(riskEl)
         };
     }
 
@@ -68,5 +72,22 @@ public static class RiskConfigParser
     private static string SnakeToCamel(string snake)
     {
         return string.Concat(snake.Split('_', StringSplitOptions.RemoveEmptyEntries).Select((s,i)=> i==0? s: char.ToUpperInvariant(s[0])+s.Substring(1)));
+    }
+
+    private static Dictionary<string, decimal>? ParseExposureCaps(JsonElement parent)
+    {
+        if (TryObject(parent, "max_net_exposure_by_symbol", out var obj))
+        {
+            var dict = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in obj.EnumerateObject()) if (p.Value.ValueKind==JsonValueKind.Number) dict[p.Name] = p.Value.GetDecimal();
+            return dict.Count>0? dict : null;
+        }
+        if (TryObject(parent, "maxNetExposureBySymbol", out var camel))
+        {
+            var dict = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in camel.EnumerateObject()) if (p.Value.ValueKind==JsonValueKind.Number) dict[p.Name] = p.Value.GetDecimal();
+            return dict.Count>0? dict : null;
+        }
+        return null;
     }
 }

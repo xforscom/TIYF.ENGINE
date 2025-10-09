@@ -74,6 +74,14 @@ public sealed class RiskConfig
     public bool EnableScaleToFit { get; init; } = false;
     public bool EnforcementEnabled { get; init; } = true;
     public decimal LotStep { get; init; } = 0.01m; // minimal lot step (vol rounding)
+    // M4 risk guardrails additions (engine-level, outside enforcement sizing logic)
+    public Dictionary<string, decimal>? MaxNetExposureBySymbol { get; init; } = null; // symbol -> absolute exposure cap
+    public decimal? MaxRunDrawdownCCY { get; init; } = null; // run drawdown cap in account CCY
+    public bool BlockOnBreach { get; init; } = true; // if true active mode suppresses trades on breach
+    public bool EmitEvaluations { get; init; } = true; // control INFO_RISK_EVAL_V1 emission
+    // Test/diagnostic hook: per-symbol map of evaluation ordinal -> force drawdown on that evaluation (1-based).
+    // Example: { "EURUSD": 1 } => on first EURUSD risk eval, equity is dropped to exceed MaxRunDrawdownCCY.
+    public Dictionary<string,int>? ForceDrawdownAfterEvals { get; init; } = null;
 }
 
 public static class AlertTypes

@@ -93,9 +93,9 @@ public sealed class EngineLoop
 
 	private string? ExtractDataVersion() => _dataVersion;
 
-	public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action? onBarEmitted = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true, SentimentGuardConfig? sentimentConfig = null, string? penaltyConfig = null, bool forcePenalty = false, string riskMode = "off")
+	public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action? onBarEmitted = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true, SentimentGuardConfig? sentimentConfig = null, string? penaltyConfig = null, bool forcePenalty = false, bool ciPenaltyScaffold = false, string riskMode = "off")
 	{
-		_clock = clock; _builders = builders; _barKeyTracker = tracker; _journal = journal; _ticks = ticks; _barEventType = barEventType; _seq = (journal is FileJournalWriter fj ? fj.NextSequence : 1UL) - 1UL; _onBarEmitted = onBarEmitted; _riskFormulas = riskFormulas; _basketAggregator = basketAggregator; _configHash = configHash; _schemaVersion = schemaVersion; _riskEnforcer = riskEnforcer; _riskConfig = riskConfig; _equityOverride = equityOverride; _deterministicStrategy = deterministicStrategy; _execution = execution; _positions = positions; _tradesWriter = tradesWriter; _dataVersion = dataVersion; _riskProbeEnabled = riskProbeEnabled; _sentimentConfig = sentimentConfig; _penaltyMode = penaltyConfig ?? "off"; _forcePenalty = forcePenalty; _riskMode = string.IsNullOrWhiteSpace(riskMode)?"off":riskMode.ToLowerInvariant();
+		_clock = clock; _builders = builders; _barKeyTracker = tracker; _journal = journal; _ticks = ticks; _barEventType = barEventType; _seq = (journal is FileJournalWriter fj ? fj.NextSequence : 1UL) - 1UL; _onBarEmitted = onBarEmitted; _riskFormulas = riskFormulas; _basketAggregator = basketAggregator; _configHash = configHash; _schemaVersion = schemaVersion; _riskEnforcer = riskEnforcer; _riskConfig = riskConfig; _equityOverride = equityOverride; _deterministicStrategy = deterministicStrategy; _execution = execution; _positions = positions; _tradesWriter = tradesWriter; _dataVersion = dataVersion; _riskProbeEnabled = riskProbeEnabled; _sentimentConfig = sentimentConfig; _penaltyMode = penaltyConfig ?? "off"; _forcePenalty = forcePenalty; _ciPenaltyScaffold = ciPenaltyScaffold; _riskMode = string.IsNullOrWhiteSpace(riskMode)?"off":riskMode.ToLowerInvariant();
 		_sizeUnitsFx = sizeUnitsFx; _sizeUnitsXau = sizeUnitsXau;
 #if DEBUG
 		if (_riskMode=="off" && riskConfig is not null && (riskConfig.EmitEvaluations || (riskConfig.MaxNetExposureBySymbol!=null || riskConfig.MaxRunDrawdownCCY!=null)))
@@ -105,7 +105,7 @@ public sealed class EngineLoop
 #endif
 	}
 	private readonly long _sizeUnitsFx; private readonly long _sizeUnitsXau;
-	private readonly string _penaltyMode; private readonly bool _forcePenalty;
+	private readonly string _penaltyMode; private readonly bool _forcePenalty; private readonly bool _ciPenaltyScaffold;
 	private bool _penaltyEmitted = false; // ensure single forced emission
 	// Risk tracking (net exposure by symbol & run drawdown). Simplified placeholders until full logic filled in.
 	private readonly Dictionary<string, decimal> _netExposureBySymbol = new(StringComparer.Ordinal);
@@ -166,18 +166,19 @@ public sealed class EngineLoop
 					var json = JsonSerializer.SerializeToElement(enriched);
 					await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, _barEventType, json), ct);
 
-					// Forced penalty scaffold emission: emit exactly once on first BAR prior to any risk/sentiment evaluations when configured
-					if (!_penaltyEmitted && _forcePenalty && (_penaltyMode=="shadow" || _penaltyMode=="active"))
+					// CI penalty scaffold emission: Only when ci scaffold enabled AND penalty feature flags set AND forcePenalty true.
+					// Additionally: if sentiment is enabled (shadow/active) we defer penalty until after sentiment chain to preserve ordering expectations.
+					bool sentimentEnabled = _sentimentConfig is { Enabled: true, Mode: var sm } && (sm.Equals("shadow", StringComparison.OrdinalIgnoreCase) || sm.Equals("active", StringComparison.OrdinalIgnoreCase));
+					if (!_penaltyEmitted && _ciPenaltyScaffold && _forcePenalty && (_penaltyMode=="shadow" || _penaltyMode=="active") && !sentimentEnabled)
 					{
 						_penaltyEmitted = true;
 						var penSymbol = bar.InstrumentId.Value;
-						decimal orig = 200m;
-						decimal adj = Math.Max(1, Math.Floor(orig * 0.5m));
-						var penaltyPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { symbol = penSymbol, ts = bar.EndUtc, reason = "drawdown_guard", original_units = orig, adjusted_units = adj, penalty_scalar = (orig==0?0m: (adj/orig)) });
+						decimal orig = 200m; decimal adj = Math.Max(1, Math.Floor(orig * 0.5m));
+						var penaltyPayload = JsonSerializer.SerializeToElement(new { symbol = penSymbol, ts = bar.EndUtc, reason = "drawdown_guard", original_units = orig, adjusted_units = adj, penalty_scalar = (orig==0?0m: (adj/orig)) });
 						await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "PENALTY_APPLIED_V1", penaltyPayload), ct);
 					}
 
-						// Sentiment volatility guard (shadow or active) after bar emission, before strategy trade execution
+							// Sentiment volatility guard (shadow or active) after bar emission, before strategy trade execution
 						bool barClamp = false; decimal? lastOriginalUnits = null; long? lastAdjustedUnits = null; string? lastAppliedSymbol = null; DateTime? lastAppliedTs = null;
 						if (_sentimentConfig is { Enabled: true, Mode: var modeVal } sg && (modeVal.Equals("shadow", StringComparison.OrdinalIgnoreCase) || modeVal.Equals("active", StringComparison.OrdinalIgnoreCase)))
 					{
@@ -194,7 +195,7 @@ public sealed class EngineLoop
 						}
 					}
 
-							// === Risk evaluation & alerts (always before strategy scheduling) ===
+								// === Risk evaluation & alerts (always before strategy scheduling) ===
 							_riskBlockCurrentBar = false; // reset
 							List<DeterministicScriptStrategy.ScheduledAction>? pendingActions = null;
 							// Pre-fetch pending actions once per minute for projection & later execution
@@ -336,7 +337,15 @@ public sealed class EngineLoop
 
 						}
 
-						// (Moved emission earlier) – placeholder remain (see earlier section after BAR)
+							// Deferred penalty emission path: if sentiment was enabled we emit penalty AFTER sentiment chain but before probe/trades (once only)
+							if (!_penaltyEmitted && _ciPenaltyScaffold && _forcePenalty && (_penaltyMode=="shadow" || _penaltyMode=="active") && sentimentEnabled)
+							{
+								_penaltyEmitted = true;
+								var penSymbol = bar.InstrumentId.Value;
+								decimal orig = 200m; decimal adj = Math.Max(1, Math.Floor(orig * 0.5m));
+								var penaltyPayload = JsonSerializer.SerializeToElement(new { symbol = penSymbol, ts = bar.EndUtc, reason = "drawdown_guard", original_units = orig, adjusted_units = adj, penalty_scalar = (orig==0?0m: (adj/orig)) });
+								await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "PENALTY_APPLIED_V1", penaltyPayload), ct);
+							}
 					// Emit risk probe (synthetic) if services configured
 					if (_riskFormulas is not null && _basketAggregator is not null && _riskProbeEnabled)
 					{

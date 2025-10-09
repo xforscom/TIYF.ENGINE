@@ -1,0 +1,150 @@
+name: M4 Risk Matrix
+
+on:
+  push:
+    branches: [ feat/m4-seed ]
+  pull_request:
+    branches: [ feat/m4-seed ]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore & Build (Release)
+        run: |
+          dotnet restore
+          dotnet build -c Release --no-restore
+      - name: Package build (sources for reflection/tests not needed here but include src/tests for consistency)
+        run: |
+          tar -czf engine-build.tar.gz src tests
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-build
+          path: engine-build.tar.gz
+
+  run-matrix:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [ off, shadow, active_no_breach, active_with_breach ]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: engine-build
+      - name: Extract build
+        run: tar -xzf engine-build.tar.gz
+      - name: Setup .NET (runtime)
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Run simulation (mode=${{ matrix.mode }})
+        env:
+          MODE: ${{ matrix.mode }}
+        run: |
+          set -euo pipefail
+          OUTCFG=$(mktemp)
+          python3 - <<'PY'
+import json, os
+mode=os.environ['MODE']
+outcfg=os.environ['OUTCFG']
+with open('tests/fixtures/backtest_m0/config.backtest-m0.json') as f:
+    data=json.load(f)
+ff=data.setdefault('featureFlags',{})
+if mode=='off':
+    ff['risk']='off'
+elif mode=='shadow':
+    ff['risk']='shadow'
+else:
+    ff['risk']='active'
+rc=data.setdefault('riskConfig',{})
+rc.setdefault('emitEvaluations', True)
+rc.setdefault('blockOnBreach', True)
+rc.setdefault('maxRunDrawdownCCY', 9999999)
+rc.setdefault('maxNetExposureBySymbol', {'EURUSD': 10000000})
+if mode=='active_with_breach':
+    rc['maxNetExposureBySymbol']={'EURUSD':0}
+with open(outcfg,'w') as f:
+    json.dump(data,f)
+PY
+          echo "Mutated config for mode=$MODE -> $OUTCFG"
+          RUN_ID=MATRIX-$MODE-$RANDOM
+          SIM=src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll
+          dotnet exec "$SIM" --config "$OUTCFG" --quiet --run-id $RUN_ID
+          RUN_DIR=journals/M0/M0-RUN-$RUN_ID
+          test -f "$RUN_DIR/events.csv"
+          test -f "$RUN_DIR/trades.csv"
+          mkdir -p artifacts/parity/$MODE
+          # Normalize events: skip meta + header
+          tail -n +3 "$RUN_DIR/events.csv" | sha256sum | awk '{print $1}' > artifacts/parity/$MODE/events.sha
+          # Normalize trades: remove header + strip config_hash column (assume column named config_hash)
+          awk -F, 'NR==1 {for (i=1;i<=NF;i++){if($i=="config_hash") c=i} next} {out=""; for(i=1;i<=NF;i++){ if(i==c) continue; if(out!="") out=out","; out=out $i;} print out}' "$RUN_DIR/trades.csv" | sha256sum | awk '{print $1}' > artifacts/parity/$MODE/trades.sha
+          EVENTS_SHA=$(cat artifacts/parity/$MODE/events.sha)
+          TRADES_SHA=$(cat artifacts/parity/$MODE/trades.sha)
+          ALERTS=$(grep -c 'ALERT_BLOCK_' "$RUN_DIR/events.csv" || true)
+          {
+            echo "events_sha=$EVENTS_SHA"
+            echo "trades_sha=$TRADES_SHA"
+            echo "alert_count=$ALERTS"
+            [ "$MODE" = "active_with_breach" ] && echo "gated_zero_cap=true" || true
+            echo "run_dir=$RUN_DIR"
+          } > artifacts/parity/$MODE/hashes.txt
+          echo "--- hashes ($MODE) ---"; cat artifacts/parity/$MODE/hashes.txt
+      - name: Upload parity artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-${{ matrix.mode }}
+          path: artifacts/parity/${{ matrix.mode }}
+
+  invariants:
+    needs: run-matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download parity artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: parity-*
+          merge-multiple: true
+          path: parity_all
+      - name: Evaluate invariants
+        run: |
+          set -euo pipefail
+          echo 'Collected parity hash files:' >&2
+          find parity_all -name hashes.txt -print -exec cat {} \;
+          declare -A TSHAS ALERTS ZERO
+          for f in parity_all/parity-*/hashes.txt; do
+            mode=$(basename $(dirname "$f"))
+            mode=${mode#parity-}
+            tsha=$(grep '^trades_sha=' "$f" | cut -d= -f2)
+            alerts=$(grep '^alert_count=' "$f" | cut -d= -f2)
+            zero=$(grep '^gated_zero_cap=' "$f" | cut -d= -f2 || echo 'false')
+            TSHAS[$mode]=$tsha
+            ALERTS[$mode]=$alerts
+            ZERO[$mode]=$zero
+          done
+          # Required modes presence
+          for m in off shadow active_no_breach active_with_breach; do
+            [ -n "${TSHAS[$m]:-}" ] || { echo "Missing mode $m" >&2; exit 1; }
+          done
+          # Invariants
+          [ "${TSHAS[off]}" = "${TSHAS[shadow]}" ] || { echo 'off vs shadow trades hash mismatch' >&2; exit 1; }
+          [ "${TSHAS[shadow]}" = "${TSHAS[active_no_breach]}" ] || { echo 'shadow vs active_no_breach mismatch' >&2; exit 1; }
+          if [ "${TSHAS[shadow]}" = "${TSHAS[active_with_breach]}" ]; then
+            if [ "${ALERTS[active_with_breach]}" -eq 0 ] && [ "${ZERO[active_with_breach]}" != 'true' ]; then
+              echo 'active_with_breach did not diverge and no alerts/zero_cap flag' >&2; exit 1; fi
+          else
+            if [ "${ALERTS[active_with_breach]}" -eq 0 ] && [ "${ZERO[active_with_breach]}" != 'true' ]; then
+              echo 'active_with_breach diverged without alerts or zero_cap flag' >&2; exit 1; fi
+          fi
+          echo 'Risk matrix invariants satisfied.'
