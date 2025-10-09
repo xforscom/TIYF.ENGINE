@@ -401,15 +401,24 @@ static TiYf.Engine.Core.DataQaResult ApplyTolerance(TiYf.Engine.Core.DataQaResul
         if (removed > 0)
             Console.WriteLine($"QA_TOLERATE_MISSING removed={removed} threshold={cfg.MaxMissingBarsPerInstrument}");
     }
-    else
+    else if (cfg.MaxMissingBarsPerInstrument > 0)
     {
-        // Otherwise enforce per-symbol threshold by truncating up to allowed count and retaining overflow (fail logic below will capture)
-        var perSymMissing = filtered.Where(i=>i.Kind=="missing_bar").GroupBy(i=>i.Symbol).ToDictionary(g=>g.Key,g=>g.ToList());
-        foreach (var kv in perSymMissing)
+        // Drop up to K missing_bar issues per symbol, deterministically by timestamp
+        var bySym = filtered
+            .Where(i => i.Kind == "missing_bar")
+            .GroupBy(i => i.Symbol);
+
+        foreach (var g in bySym)
         {
-            if (kv.Value.Count <= cfg.MaxMissingBarsPerInstrument) continue; // keep all (will fail gate) – we do not partially drop to keep determinism of failure diagnostics
+            var items = g.OrderBy(i => i.Ts).ToList();
+            int drop = Math.Min(cfg.MaxMissingBarsPerInstrument, items.Count);
+            for (int k = 0; k < drop; k++)
+            {
+                filtered.Remove(items[k]);
+            }
         }
     }
+    // else K == 0 -> no tolerance; keep all missing_bar issues
 
     // Spikes: if spikeZ very large OR dropSpikes==false treat spike issues as tolerated (removed)
     if (cfg.SpikeZ >= 50m || !cfg.DropSpikes)

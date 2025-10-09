@@ -288,6 +288,56 @@ public class DataQaTests
     }
 
     [Fact]
+    public void DataQa_Active_Tolerates_K_MissingBars_NoAbort()
+    {
+        var root = FindSolutionRoot();
+        var baseCfgPath = Path.Combine(root, "tests","fixtures","backtest_m0","config.backtest-m0.json");
+        Assert.True(File.Exists(baseCfgPath));
+        var cfgNode = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(baseCfgPath))!.AsObject();
+        cfgNode["featureFlags"] = new System.Text.Json.Nodes.JsonObject{ ["dataQa"] = "active" };
+        cfgNode["dataQA"] = new System.Text.Json.Nodes.JsonObject{
+            ["enabled"] = true,
+            ["maxMissingBarsPerInstrument"] = 1,
+            ["allowDuplicates"] = false,
+            ["spikeZ"] = 5,
+            ["repair"] = new System.Text.Json.Nodes.JsonObject{ ["forwardFillBars"] = 0, ["dropSpikes"] = true }
+        };
+
+        // Create a temp ticks root with exactly one missing minute for EURUSD
+        var tmpRoot = Path.Combine(Path.GetTempPath(), "dq-k1-"+Guid.NewGuid().ToString("N")); Directory.CreateDirectory(tmpRoot);
+        var origRoot = Path.Combine(root, "tests","fixtures","backtest_m0");
+        foreach (var f in Directory.GetFiles(origRoot, "ticks_*.csv").OrderBy(p=>p, StringComparer.Ordinal))
+        {
+            var linesF = File.ReadAllLines(f).ToList();
+            if (Path.GetFileName(f) == "ticks_EURUSD.csv")
+            {
+                var removed = linesF.RemoveAll(l => l.Contains("2025-01-02T00:30:"));
+                Assert.True(removed > 0, "Expected to remove at least one tick to create one missing bar for EURUSD");
+            }
+            File.WriteAllLines(Path.Combine(tmpRoot, Path.GetFileName(f)), linesF);
+        }
+        // Point config to temp ticks
+        var dataObj = cfgNode["data"]!.AsObject();
+        var ticks = dataObj["ticks"]!.AsObject();
+        foreach (var kv in ticks.ToList())
+            ticks[kv.Key] = Path.Combine(tmpRoot, Path.GetFileName(kv.Value!.GetValue<string>())).Replace('\\','/');
+        dataObj["instrumentsFile"] = Path.Combine(origRoot, "instruments.csv").Replace('\\','/');
+
+        var tmpCfg = Path.Combine(tmpRoot, "config.json");
+        File.WriteAllText(tmpCfg, cfgNode.ToJsonString());
+        var runId = RunSim(root, tmpCfg);
+        var (eventsPath, _) = LocateJournal(root, runId);
+        var lines = File.ReadAllLines(eventsPath);
+        var summary = lines.First(l=>l.Contains(",DATA_QA_SUMMARY_V1,"));
+        var payload = summary.Split(',',4)[3].Trim().Trim('"').Replace("\"\"","\"");
+        using var doc = System.Text.Json.JsonDocument.Parse(payload);
+        var el = doc.RootElement;
+        Assert.True(el.TryGetProperty("passed", out var pEl) && pEl.ValueKind==System.Text.Json.JsonValueKind.True, "Expected passed=true with K=1 tolerance");
+        Assert.True(el.TryGetProperty("aborted", out var aEl) && aEl.ValueKind==System.Text.Json.JsonValueKind.False, "Expected aborted=false with K=1 tolerance");
+        Assert.DoesNotContain(lines, l=>l.Contains(",DATA_QA_ABORT_V1,"));
+    }
+
+    [Fact]
     public void Active_HardFail_Aborts()
     {
         var root = FindSolutionRoot();
