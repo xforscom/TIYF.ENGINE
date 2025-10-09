@@ -73,6 +73,9 @@ jobs:
             RUN_DIR=$(ls -d "$ROOT"/journals/*"$RUN_ID"* 2>/dev/null | head -n1 || true)
             echo "RUN_DIR=$RUN_DIR"; test -n "$RUN_DIR"
             EV="$RUN_DIR/events.csv"; TR="$RUN_DIR/trades.csv"
+          else
+            # Derive run directory from the resolved events path
+            RUN_DIR=$(dirname "$EV")
           fi
           test -f "$EV"; test -f "$TR"
           mkdir -p artifacts/parity/$MODE
