@@ -54,29 +54,28 @@ jobs:
         run: |
           set -euo pipefail
           OUTCFG=$(mktemp)
-          python3 - <<'PY'
-import json, os
-mode=os.environ['MODE']
-outcfg=os.environ['OUTCFG']
-with open('tests/fixtures/backtest_m0/config.backtest-m0.json') as f:
-    data=json.load(f)
-ff=data.setdefault('featureFlags',{})
-if mode=='off':
-    ff['risk']='off'
-elif mode=='shadow':
-    ff['risk']='shadow'
-else:
-    ff['risk']='active'
-rc=data.setdefault('riskConfig',{})
-rc.setdefault('emitEvaluations', True)
-rc.setdefault('blockOnBreach', True)
-rc.setdefault('maxRunDrawdownCCY', 9999999)
-rc.setdefault('maxNetExposureBySymbol', {'EURUSD': 10000000})
-if mode=='active_with_breach':
-    rc['maxNetExposureBySymbol']={'EURUSD':0}
-with open(outcfg,'w') as f:
-    json.dump(data,f)
-PY
+          CFG='tests/fixtures/backtest_m0/config.backtest-m0.json'
+          if ! command -v jq >/dev/null 2>&1; then sudo apt-get update && sudo apt-get install -y jq; fi
+          # Resolve risk mode mapping
+          case "$MODE" in
+            off) RISK=off ;;
+            shadow) RISK=shadow ;;
+            *) RISK=active ;;
+          esac
+          # Seed config with guardrail defaults and ensure map existence
+          jq --arg risk "$RISK" '
+            .featureFlags.risk = $risk
+            | .riskConfig.emitEvaluations = true
+            | .riskConfig.blockOnBreach = true
+            | .riskConfig.maxRunDrawdownCCY = 9999999
+            | (.riskConfig.maxNetExposureBySymbol |= (. // {}))
+          ' "$CFG" > "$OUTCFG"
+          # Per-mode exposure cap
+          if [ "$MODE" = "active_with_breach" ]; then
+            jq '.riskConfig.maxNetExposureBySymbol["EURUSD"]=0' "$OUTCFG" > "$OUTCFG.tmp" && mv "$OUTCFG.tmp" "$OUTCFG"
+          else
+            jq '.riskConfig.maxNetExposureBySymbol["EURUSD"]=10000000' "$OUTCFG" > "$OUTCFG.tmp" && mv "$OUTCFG.tmp" "$OUTCFG"
+          fi
           echo "Mutated config for mode=$MODE -> $OUTCFG"
           RUN_ID=MATRIX-$MODE-$RANDOM
           SIM=src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll
