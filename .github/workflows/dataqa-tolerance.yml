@@ -21,6 +21,11 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Build (Release)
         run: dotnet build -c Release
 
@@ -47,7 +52,8 @@ jobs:
           node -e "const fs=require('fs');let o=JSON.parse(fs.readFileSync(process.env.CFG,'utf8'));o.featureFlags={...(o.featureFlags||{}),dataQa:'active'};o.dataQA={enabled:true,maxMissingBarsPerInstrument:1,allowDuplicates:false,spikeZ:5,repair:{forwardFillBars:0,dropSpikes:true}};fs.writeFileSync(process.env.TOUT,JSON.stringify(o));" CFG="$cfg" TOUT="$tmp/cfg.json"
           # Produce one missing minute (00:30) for EURUSD
           for f in EURUSD USDJPY XAUUSD; do cp "$root/tests/fixtures/backtest_m0/ticks_${f}.csv" "$tmp/ticks_${f}.csv"; done
-          perl -ni -e 'print unless /2025-01-02T00:30:/' "$tmp/ticks_EURUSD.csv"
+          mv "$tmp/ticks_EURUSD.csv" "$tmp/ticks_EURUSD.orig.csv"
+          grep -v '2025-01-02T00:30:' "$tmp/ticks_EURUSD.orig.csv" > "$tmp/ticks_EURUSD.csv"
           # Point cfg ticks to tmp
           node -e "const fs=require('fs');let o=JSON.parse(fs.readFileSync(process.env.TIN,'utf8')); for(const k of Object.keys(o.data.ticks)){ o.data.ticks[k] = process.env.ROOT+'/ .tmp_k1/ticks_'+k+'.csv'.replace(' ',''); } o.data.instrumentsFile = process.env.ROOT+'/tests/fixtures/backtest_m0/instruments.csv'; fs.writeFileSync(process.env.TOUT,JSON.stringify(o));" TIN="$tmp/cfg.json" TOUT="$tmp/cfg2.json" ROOT="$root"
           # Run sim
@@ -57,7 +63,7 @@ jobs:
           test -f "$events"
           # Assert summary passed=true and no abort
           sum=$(grep ',DATA_QA_SUMMARY_V1,' "$events" | head -n1 | sed 's/^[^,]*,[^,]*,[^,]*,//' | sed 's/^"//;s/"$//' | sed 's/""/"/g')
-          echo "$sum" | jq -e '.passed==true and .aborted==false'
+          node -e "const j=JSON.parse(process.env.SUM); if(!(j.passed===true && j.aborted===false)){ console.error('Unexpected DATA_QA_SUMMARY_V1', j); process.exit(1); }" SUM="$sum"
           if grep -q ',DATA_QA_ABORT_V1,' "$events"; then echo 'Unexpected abort'; exit 1; fi
           # Deep verify
           dotnet exec "$tools" verify deep --events "$events" --trades "$trades" --json
@@ -73,14 +79,14 @@ jobs:
           rm -rf "$tmp" && mkdir -p "$tmp"
           node -e "const fs=require('fs');let o=JSON.parse(fs.readFileSync(process.env.CFG,'utf8'));o.featureFlags={...(o.featureFlags||{}),dataQa:'active'};o.dataQA={enabled:true,maxMissingBarsPerInstrument:1,allowDuplicates:false,spikeZ:5,repair:{forwardFillBars:0,dropSpikes:true}};fs.writeFileSync(process.env.TOUT,JSON.stringify(o));" CFG="$cfg" TOUT="$tmp/cfg.json"
           for f in EURUSD USDJPY XAUUSD; do cp "$root/tests/fixtures/backtest_m0/ticks_${f}.csv" "$tmp/ticks_${f}.csv"; done
-          perl -ni -e 'print unless /2025-01-02T00:30:/' "$tmp/ticks_EURUSD.csv"
-          perl -ni -e 'print unless /2025-01-02T00:31:/' "$tmp/ticks_EURUSD.csv"
+          mv "$tmp/ticks_EURUSD.csv" "$tmp/ticks_EURUSD.orig.csv"
+          grep -v '2025-01-02T00:30:' "$tmp/ticks_EURUSD.orig.csv" | grep -v '2025-01-02T00:31:' > "$tmp/ticks_EURUSD.csv"
           node -e "const fs=require('fs');let o=JSON.parse(fs.readFileSync(process.env.TIN,'utf8')); for(const k of Object.keys(o.data.ticks)){ o.data.ticks[k] = process.env.ROOT+'/ .tmp_k1_over/ticks_'+k+'.csv'.replace(' ',''); } o.data.instrumentsFile = process.env.ROOT+'/tests/fixtures/backtest_m0/instruments.csv'; fs.writeFileSync(process.env.TOUT,JSON.stringify(o));" TIN="$tmp/cfg.json" TOUT="$tmp/cfg2.json" ROOT="$root"
           dotnet exec "$sim" --config "$tmp/cfg2.json" --run-id K1-FAIL --verbosity quiet
           events="$root/journals/M0/M0-RUN-K1-FAIL/events.csv"
           test -f "$events"
           sum=$(grep ',DATA_QA_SUMMARY_V1,' "$events" | head -n1 | sed 's/^[^,]*,[^,]*,[^,]*,//' | sed 's/^"//;s/"$//' | sed 's/""/"/g')
-          echo "$sum" | jq -e '.passed==false'
+          node -e "const j=JSON.parse(process.env.SUM); if(j.passed!==false){ console.error('Expected passed=false in DATA_QA_SUMMARY_V1', j); process.exit(1); }" SUM="$sum"
           # Should still produce summary and possibly abort; we don't hard fail if abort is absent/present
           # Deep verify (JSON may be ok or 2; we tolerate non-zero here as long as it runs)
           tools_out=0; dotnet exec "$tools" verify deep --events "$events" --trades "$root/journals/M0/M0-RUN-K1-FAIL/trades.csv" --json || tools_out=$?; if [ "$tools_out" -ne 0 ] && [ "$tools_out" -ne 2 ]; then exit 1; fi
