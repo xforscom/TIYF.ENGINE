@@ -75,14 +75,24 @@ jobs:
           echo "events=$EV" >> $GITHUB_OUTPUT
           echo "trades=$TR" >> $GITHUB_OUTPUT
       - name: Deep verify
+        id: deep
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p artifacts/verify-deep
+          set +e
           JSON=$(dotnet exec "${{ steps.paths.outputs.tools }}" verify deep --events "${{ steps.run_sim.outputs.events }}" --trades "${{ steps.run_sim.outputs.trades }}" --json)
+          EC=$?
+          set -e
           echo "$JSON" | tee artifacts/verify-deep/report.json
+          echo "ec=$EC" >> $GITHUB_OUTPUT
       - name: Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: verify-deep-${{ matrix.os }}
           path: artifacts/verify-deep
+      - name: Fail if deep verify failed
+        if: steps.deep.outputs.ec != '0'
+        shell: bash
+        run: exit 1
