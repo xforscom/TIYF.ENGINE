@@ -153,7 +153,11 @@ jobs:
             console.error("Failed to parse payload as JSON:", payload); process.exit(1);
           }
           JS
-          if grep -q ',DATA_QA_ABORT_V1,' "$J_EVENTS"; then echo 'Unexpected abort'; exit 1; fi
+          EVENTS="$J_EVENTS" node - <<'JS'
+          const fs=require('fs');
+          const text=fs.readFileSync(process.env.EVENTS,'utf8');
+          if (text.includes(',DATA_QA_ABORT_V1,')) { console.error('Unexpected abort event found'); process.exit(1); }
+          JS
           # Deep verify
           dotnet exec "$tools" verify deep --events "$J_EVENTS" --trades "$J_TRADES" --json
 
