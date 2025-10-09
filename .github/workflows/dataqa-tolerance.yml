@@ -36,7 +36,19 @@ jobs:
           ROOT="$(pwd)"
           echo "root=$ROOT" >> $GITHUB_OUTPUT
           echo "sim=$ROOT/src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll" >> $GITHUB_OUTPUT
-          echo "tools=$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll" >> $GITHUB_OUTPUT
+          TOOLS_REL="$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
+          TOOLS_DBG="$ROOT/src/TiYf.Engine.Tools/bin/Debug/net8.0/TiYf.Engine.Tools.dll"
+          if [ -f "$TOOLS_REL" ]; then
+            echo "tools=$TOOLS_REL" >> $GITHUB_OUTPUT
+          elif [ -f "$TOOLS_DBG" ]; then
+            echo "tools=$TOOLS_DBG" >> $GITHUB_OUTPUT
+          else
+            echo "Tools DLL not found in Release or Debug. Listing candidates:" >&2
+            ls -la "$ROOT/src/TiYf.Engine.Tools/bin" || true
+            ls -la "$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0" || true
+            ls -la "$ROOT/src/TiYf.Engine.Tools/bin/Debug/net8.0" || true
+            exit 1
+          fi
           echo "cfg=$ROOT/tests/fixtures/backtest_m0/config.backtest-m0.json" >> $GITHUB_OUTPUT
 
       - name: Run K=1 (pass)
