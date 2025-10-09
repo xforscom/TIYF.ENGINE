@@ -103,20 +103,36 @@ if (isM0)
     {
         var tickObj = raw.RootElement.GetProperty("data").GetProperty("ticks");
         var allTs = new HashSet<DateTime>();
+        // Optional diagnostics: track per-file stats for guardrail
+        var diag = new List<(string Sym,string Path,bool Exists,int DataRows)>();
         foreach (var entry in tickObj.EnumerateObject())
         {
             var path = entry.Value.GetString();
-            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) continue;
-            foreach (var line in SafeReadLines(path).Skip(1))
+            bool exists = !string.IsNullOrWhiteSpace(path) && File.Exists(path);
+            int dataRows = 0;
+            if (exists)
             {
-                if (string.IsNullOrWhiteSpace(line)) continue;
-                var parts = line.Split(',');
-                if (parts.Length < 4) continue;
-                var ts = DateTime.Parse(parts[0], null, System.Globalization.DateTimeStyles.AssumeUniversal|System.Globalization.DateTimeStyles.AdjustToUniversal);
-                allTs.Add(ts);
+                foreach (var line in SafeReadLines(path).Skip(1))
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    var parts = line.Split(',');
+                    if (parts.Length < 4) continue;
+                    dataRows++;
+                    var ts = DateTime.Parse(parts[0], null, System.Globalization.DateTimeStyles.AssumeUniversal|System.Globalization.DateTimeStyles.AdjustToUniversal);
+                    allTs.Add(ts);
+                }
             }
+            diag.Add((entry.Name, path ?? string.Empty, exists, dataRows));
         }
         sequence = allTs.OrderBy(t=>t).ToList();
+        if (sequence.Count == 0)
+        {
+            Console.Error.WriteLine("No timestamps found when building M0 tick sequence. Diagnostics:");
+            foreach (var d in diag)
+                Console.Error.WriteLine($"  symbol={d.Sym} path={d.Path} exists={d.Exists.ToString().ToLowerInvariant()} data_rows={d.DataRows}");
+            // Exit gracefully so CI shows actionable info
+            return;
+        }
     }
     catch (Exception ex) { Console.Error.WriteLine($"M0 tick aggregation failed: {ex.Message}"); }
 }

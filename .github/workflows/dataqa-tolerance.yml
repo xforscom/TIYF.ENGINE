@@ -42,27 +42,89 @@ jobs:
       - name: Run K=1 (pass)
         shell: bash
         run: |
+          set -euo pipefail
           root='${{ steps.prep.outputs.root }}'
           sim='${{ steps.prep.outputs.sim }}'
           tools='${{ steps.prep.outputs.tools }}'
           cfg='${{ steps.prep.outputs.cfg }}'
-          tmp="$root/.tmp_k1"
+          tmp="$root/.tmp_k1_pass"
           rm -rf "$tmp" && mkdir -p "$tmp"
-          # Make a temp cfg with dataQa active and K=1
-          CFG="$cfg" TOUT="$tmp/cfg.json" node -e "const fs=require('fs');let o=JSON.parse(fs.readFileSync(process.env.CFG,'utf8'));o.featureFlags={...(o.featureFlags||{}),dataQa:'active'};o.dataQA={enabled:true,maxMissingBarsPerInstrument:1,allowDuplicates:false,spikeZ:5,repair:{forwardFillBars:0,dropSpikes:true}};fs.writeFileSync(process.env.TOUT,JSON.stringify(o));"
-          # Produce one missing minute (00:30) for EURUSD
-          for f in EURUSD USDJPY XAUUSD; do cp "$root/tests/fixtures/backtest_m0/ticks_${f}.csv" "$tmp/ticks_${f}.csv"; done
-          mv "$tmp/ticks_EURUSD.csv" "$tmp/ticks_EURUSD.orig.csv"
-          grep -v '2025-01-02T00:30:' "$tmp/ticks_EURUSD.orig.csv" > "$tmp/ticks_EURUSD.csv"
-          # Point cfg ticks to tmp
-          TIN="$tmp/cfg.json" TOUT="$tmp/cfg2.json" ROOT="$root" node -e "const fs=require('fs');let o=JSON.parse(fs.readFileSync(process.env.TIN,'utf8')); for(const k of Object.keys(o.data.ticks)){ o.data.ticks[k] = process.env.ROOT+'/ .tmp_k1/ticks_'+k+'.csv'.replace(' ',''); } o.data.instrumentsFile = process.env.ROOT+'/tests/fixtures/backtest_m0/instruments.csv'; fs.writeFileSync(process.env.TOUT,JSON.stringify(o));"
-          # Run sim
-          dotnet exec "$sim" --config "$tmp/cfg2.json" --run-id K1-PASS --verbosity quiet
-          events="$root/journals/M0/M0-RUN-K1-PASS/events.csv"
-          trades="$root/journals/M0/M0-RUN-K1-PASS/trades.csv"
-          test -f "$events"
+          export CONFIG_IN="$cfg"
+          export CONFIG_OUT="$tmp/config.k1pass.json"
+          export TMP_DIR="$tmp"
+          export K_MODE="pass"
+          export INSTR_FILE="$root/tests/fixtures/backtest_m0/instruments.csv"
+          # Node-based preparation: copy ticks, remove 1 data row from each, rewrite config with absolute paths and temp journalDir, force dataQa active
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const configIn = process.env.CONFIG_IN;
+          const configOut = process.env.CONFIG_OUT;
+          const tmpDir = process.env.TMP_DIR;
+          const kMode = process.env.K_MODE || 'pass';
+          const instrumentsFile = process.env.INSTR_FILE;
+          if (!configIn || !configOut || !tmpDir || !instrumentsFile) throw new Error('Missing env CONFIG_IN/CONFIG_OUT/TMP_DIR/INSTR_FILE');
+          fs.mkdirSync(tmpDir, { recursive: true });
+          const cfg = JSON.parse(fs.readFileSync(configIn, 'utf8'));
+          // Ensure dataQa active and K=1
+          cfg.featureFlags = { ...(cfg.featureFlags||{}), dataQa: 'active' };
+          cfg.dataQA = { enabled: true, maxMissingBarsPerInstrument: 1, allowDuplicates: false, spikeZ: 5, repair: { forwardFillBars: 0, dropSpikes: true } };
+          // Rewrite instrumentsFile absolute
+          cfg.data = cfg.data || {};
+          cfg.data.instrumentsFile = path.resolve(instrumentsFile);
+          // Process ticks
+          if (!cfg.data.ticks || typeof cfg.data.ticks !== 'object') throw new Error('config.data.ticks missing or not an object');
+          const rewritten = {};
+          const removeN = kMode === 'overflow' ? 2 : 1;
+          for (const [sym, srcRaw] of Object.entries(cfg.data.ticks)) {
+            if (typeof srcRaw !== 'string') continue;
+            const src = path.resolve(srcRaw);
+            if (!fs.existsSync(src)) throw new Error(`Tick file not found: ${src}`);
+            const dst = path.join(tmpDir, `ticks_${sym}.csv`);
+            const lines = fs.readFileSync(src, 'utf8').split(/\r?\n/);
+            const header = lines[0] ?? '';
+            const data = lines.slice(1).filter(l => l.trim().length > 0);
+            const toRemove = Math.min(removeN, data.length);
+            const dataAfter = data.slice(toRemove);
+            const out = [header, ...dataAfter].join('\n') + '\n';
+            fs.writeFileSync(dst, out, 'utf8');
+            // Verify file exists and has >=2 lines (header + at least 1 data row)
+            const verify = fs.readFileSync(dst, 'utf8').trim().split(/\r?\n/);
+            if (verify.length < 2) {
+              console.error(`After K edit, ${dst} has no data rows (lines=${verify.length}).`);
+              process.exit(1);
+            }
+            rewritten[sym] = path.resolve(dst);
+          }
+          cfg.data.ticks = rewritten;
+          // Set temp journalDir
+          cfg.output = cfg.output || {};
+          cfg.output.journalDir = path.resolve(path.join(tmpDir, 'journals'));
+          // Ensure name is backtest-m0 for engine heuristics
+          cfg.name = cfg.name || 'backtest-m0';
+          fs.writeFileSync(configOut, JSON.stringify(cfg, null, 2), 'utf8');
+          // Export CONFIG_OUT for subsequent steps
+          fs.appendFileSync(process.env.GITHUB_ENV, `\nCONFIG_OUT=${configOut}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `TMP_DIR=${tmpDir}\n`);
+          NODE
+          # Debug: list temp dir and first 3 lines of each rewritten CSV
+          echo "Temp dir listing:" && ls -la "$TMP_DIR"
+          for f in "$TMP_DIR"/ticks_*.csv; do echo "== $f =="; head -n 3 "$f"; done
+          # Run sim with prepared config
+          dotnet exec "$sim" --config "$CONFIG_OUT" --run-id K1-PASS --verbosity quiet
+          # Resolve journal paths using config
+          node -e '
+            const fs=require("fs"); const path=require("path");
+            const cfgPath=process.env.CONFIG_OUT; const runId="M0-RUN-K1-PASS";
+            const j=JSON.parse(fs.readFileSync(cfgPath,"utf8"));
+            const jdir=(j.output && j.output.journalDir) ? j.output.journalDir : path.resolve("journals","M0");
+            const events=path.join(jdir, runId, "events.csv");
+            const trades=path.join(jdir, runId, "trades.csv");
+            fs.appendFileSync(process.env.GITHUB_ENV, `J_EVENTS=${events}\nJ_TRADES=${trades}\n`);
+          '
+          test -f "$J_EVENTS"
           # Assert summary passed=true and no abort (pure Node)
-          EVENTS="$events" node -e '
+          EVENTS="$J_EVENTS" node -e '
             const fs=require("fs");
             const lines=fs.readFileSync(process.env.EVENTS,"utf8").split(/\r?\n/).filter(Boolean);
             const line=lines.find(l=>l.includes(",DATA_QA_SUMMARY_V1,"));
@@ -73,29 +135,88 @@ jobs:
             const j=JSON.parse(payload);
             if(!(j.passed===true && j.aborted===false)){ console.error("Unexpected DATA_QA_SUMMARY_V1", j); process.exit(1); }
           '
-          if grep -q ',DATA_QA_ABORT_V1,' "$events"; then echo 'Unexpected abort'; exit 1; fi
+          if grep -q ',DATA_QA_ABORT_V1,' "$J_EVENTS"; then echo 'Unexpected abort'; exit 1; fi
           # Deep verify
-          dotnet exec "$tools" verify deep --events "$events" --trades "$trades" --json
+          dotnet exec "$tools" verify deep --events "$J_EVENTS" --trades "$J_TRADES" --json
 
       - name: Run K=1 with overflow (fail)
         shell: bash
         run: |
+          set -euo pipefail
           root='${{ steps.prep.outputs.root }}'
           sim='${{ steps.prep.outputs.sim }}'
           tools='${{ steps.prep.outputs.tools }}'
           cfg='${{ steps.prep.outputs.cfg }}'
           tmp="$root/.tmp_k1_over"
           rm -rf "$tmp" && mkdir -p "$tmp"
-          CFG="$cfg" TOUT="$tmp/cfg.json" node -e "const fs=require('fs');let o=JSON.parse(fs.readFileSync(process.env.CFG,'utf8'));o.featureFlags={...(o.featureFlags||{}),dataQa:'active'};o.dataQA={enabled:true,maxMissingBarsPerInstrument:1,allowDuplicates:false,spikeZ:5,repair:{forwardFillBars:0,dropSpikes:true}};fs.writeFileSync(process.env.TOUT,JSON.stringify(o));"
-          for f in EURUSD USDJPY XAUUSD; do cp "$root/tests/fixtures/backtest_m0/ticks_${f}.csv" "$tmp/ticks_${f}.csv"; done
-          mv "$tmp/ticks_EURUSD.csv" "$tmp/ticks_EURUSD.orig.csv"
-          grep -v '2025-01-02T00:30:' "$tmp/ticks_EURUSD.orig.csv" | grep -v '2025-01-02T00:31:' > "$tmp/ticks_EURUSD.csv"
-          TIN="$tmp/cfg.json" TOUT="$tmp/cfg2.json" ROOT="$root" node -e "const fs=require('fs');let o=JSON.parse(fs.readFileSync(process.env.TIN,'utf8')); for(const k of Object.keys(o.data.ticks)){ o.data.ticks[k] = process.env.ROOT+'/ .tmp_k1_over/ticks_'+k+'.csv'.replace(' ',''); } o.data.instrumentsFile = process.env.ROOT+'/tests/fixtures/backtest_m0/instruments.csv'; fs.writeFileSync(process.env.TOUT,JSON.stringify(o));"
-          dotnet exec "$sim" --config "$tmp/cfg2.json" --run-id K1-FAIL --verbosity quiet
-          events="$root/journals/M0/M0-RUN-K1-FAIL/events.csv"
-          test -f "$events"
+          export CONFIG_IN="$cfg"
+          export CONFIG_OUT="$tmp/config.k1over.json"
+          export TMP_DIR="$tmp"
+          export K_MODE="overflow"
+          export INSTR_FILE="$root/tests/fixtures/backtest_m0/instruments.csv"
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const configIn = process.env.CONFIG_IN;
+          const configOut = process.env.CONFIG_OUT;
+          const tmpDir = process.env.TMP_DIR;
+          const kMode = process.env.K_MODE || 'overflow';
+          const instrumentsFile = process.env.INSTR_FILE;
+          if (!configIn || !configOut || !tmpDir || !instrumentsFile) throw new Error('Missing env CONFIG_IN/CONFIG_OUT/TMP_DIR/INSTR_FILE');
+          fs.mkdirSync(tmpDir, { recursive: true });
+          const cfg = JSON.parse(fs.readFileSync(configIn, 'utf8'));
+          cfg.featureFlags = { ...(cfg.featureFlags||{}), dataQa: 'active' };
+          cfg.dataQA = { enabled: true, maxMissingBarsPerInstrument: 1, allowDuplicates: false, spikeZ: 5, repair: { forwardFillBars: 0, dropSpikes: true } };
+          cfg.data = cfg.data || {};
+          cfg.data.instrumentsFile = path.resolve(instrumentsFile);
+          if (!cfg.data.ticks || typeof cfg.data.ticks !== 'object') throw new Error('config.data.ticks missing or not an object');
+          const rewritten = {};
+          const removeN = kMode === 'overflow' ? 2 : 1;
+          for (const [sym, srcRaw] of Object.entries(cfg.data.ticks)) {
+            if (typeof srcRaw !== 'string') continue;
+            const src = path.resolve(srcRaw);
+            if (!fs.existsSync(src)) throw new Error(`Tick file not found: ${src}`);
+            const dst = path.join(tmpDir, `ticks_${sym}.csv`);
+            const lines = fs.readFileSync(src, 'utf8').split(/\r?\n/);
+            const header = lines[0] ?? '';
+            const data = lines.slice(1).filter(l => l.trim().length > 0);
+            const toRemove = Math.min(removeN, data.length);
+            const dataAfter = data.slice(toRemove);
+            const out = [header, ...dataAfter].join('\n') + '\n';
+            fs.writeFileSync(dst, out, 'utf8');
+            const verify = fs.readFileSync(dst, 'utf8').trim().split(/\r?\n/);
+            if (verify.length < 2) {
+              console.error(`After K edit, ${dst} has no data rows (lines=${verify.length}).`);
+              process.exit(1);
+            }
+            rewritten[sym] = path.resolve(dst);
+          }
+          cfg.data.ticks = rewritten;
+          cfg.output = cfg.output || {};
+          cfg.output.journalDir = path.resolve(path.join(tmpDir, 'journals'));
+          cfg.name = cfg.name || 'backtest-m0';
+          fs.writeFileSync(configOut, JSON.stringify(cfg, null, 2), 'utf8');
+          fs.appendFileSync(process.env.GITHUB_ENV, `\nCONFIG_OUT=${configOut}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `TMP_DIR=${tmpDir}\n`);
+          NODE
+          # Debug: list temp dir and first 3 lines of each rewritten CSV
+          echo "Temp dir listing:" && ls -la "$TMP_DIR"
+          for f in "$TMP_DIR"/ticks_*.csv; do echo "== $f =="; head -n 3 "$f"; done
+          # Run sim with prepared config
+          dotnet exec "$sim" --config "$CONFIG_OUT" --run-id K1-FAIL --verbosity quiet
+          # Resolve journal paths using config
+          node -e '
+            const fs=require("fs"); const path=require("path");
+            const cfgPath=process.env.CONFIG_OUT; const runId="M0-RUN-K1-FAIL";
+            const j=JSON.parse(fs.readFileSync(cfgPath,"utf8"));
+            const jdir=(j.output && j.output.journalDir) ? j.output.journalDir : path.resolve("journals","M0");
+            const events=path.join(jdir, runId, "events.csv");
+            const trades=path.join(jdir, runId, "trades.csv");
+            fs.appendFileSync(process.env.GITHUB_ENV, `J_EVENTS=${events}\nJ_TRADES=${trades}\n`);
+          '
+          test -f "$J_EVENTS"
           # Assert summary passed=false (pure Node)
-          EVENTS="$events" node -e '
+          EVENTS="$J_EVENTS" node -e '
             const fs=require("fs");
             const lines=fs.readFileSync(process.env.EVENTS,"utf8").split(/\r?\n/).filter(Boolean);
             const line=lines.find(l=>l.includes(",DATA_QA_SUMMARY_V1,"));
@@ -106,6 +227,5 @@ jobs:
             const j=JSON.parse(payload);
             if(j.passed!==false){ console.error("Expected passed=false in DATA_QA_SUMMARY_V1", j); process.exit(1); }
           '
-          # Should still produce summary and possibly abort; we don't hard fail if abort is absent/present
           # Deep verify (JSON may be ok or 2; we tolerate non-zero here as long as it runs)
-          tools_out=0; dotnet exec "$tools" verify deep --events "$events" --trades "$root/journals/M0/M0-RUN-K1-FAIL/trades.csv" --json || tools_out=$?; if [ "$tools_out" -ne 0 ] && [ "$tools_out" -ne 2 ]; then exit 1; fi
+          tools_out=0; dotnet exec "$tools" verify deep --events "$J_EVENTS" --trades "$J_TRADES" --json || tools_out=$?; if [ "$tools_out" -ne 0 ] && [ "$tools_out" -ne 2 ]; then exit 1; fi
