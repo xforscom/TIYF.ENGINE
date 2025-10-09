@@ -62,10 +62,19 @@ jobs:
           echo "Mutated config for mode=$MODE -> $OUTCFG"
           rm -rf "$ROOT/journals" || true
           RUN_ID=CANARY-$MODE-$RANDOM
-          dotnet exec "$SIM" --config "$OUTCFG" --quiet --run-id "$RUN_ID"
-          RUN_DIR=$(ls -d "$ROOT"/journals/*"$RUN_ID"* 2>/dev/null | head -n1)
-          echo "RUN_DIR=$RUN_DIR"; test -n "$RUN_DIR"
-          EV="$RUN_DIR/events.csv"; TR="$RUN_DIR/trades.csv"; test -f "$EV"; test -f "$TR"
+          OUT=$(mktemp)
+          set +e
+          dotnet exec "$SIM" --config "$OUTCFG" --quiet --run-id "$RUN_ID" | tee "$OUT"
+          CODE=$?
+          set -e
+          EV=$(grep -m1 '^JOURNAL_DIR_EVENTS=' "$OUT" | cut -d= -f2 || true)
+          TR=$(grep -m1 '^JOURNAL_DIR_TRADES=' "$OUT" | cut -d= -f2 || true)
+          if [ -z "$EV" ] || [ -z "$TR" ]; then
+            RUN_DIR=$(ls -d "$ROOT"/journals/*"$RUN_ID"* 2>/dev/null | head -n1 || true)
+            echo "RUN_DIR=$RUN_DIR"; test -n "$RUN_DIR"
+            EV="$RUN_DIR/events.csv"; TR="$RUN_DIR/trades.csv"
+          fi
+          test -f "$EV"; test -f "$TR"
           mkdir -p artifacts/parity/$MODE
           # Normalize events: skip meta + header
           tail -n +3 "$EV" | sha256sum | awk '{print $1}' > artifacts/parity/$MODE/events.sha
