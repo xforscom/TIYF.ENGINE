@@ -4,11 +4,11 @@
 
 ## CI Runs
 
-Placeholder tokens until populated:
+Populate after green CI:
 
-- Risk Matrix Workflow: `ADD_LINK_RISK_MATRIX`
-- Strict Verify Workflow: `ADD_LINK_VERIFY_STRICT`
-- Commit (docs + workflow): `ADD_SHA_COMMIT`
+- Risk Matrix Workflow: [m4-risk-matrix.yml](https://github.com/xforscom/TIYF.ENGINE/actions/workflows/m4-risk-matrix.yml)
+- Strict Verify Workflow: [verify-strict.yml](https://github.com/xforscom/TIYF.ENGINE/actions/workflows/verify-strict.yml)
+- Commit (docs + workflow): `ec51e2415a1e6053d1906a8a2799cb1c688424ee`
 
 ## Event Excerpts
 
@@ -61,6 +61,13 @@ Rejected (shadow → active with zero-cap gating):
 }
 ```
 
+  Diagnostics (on failure):
+
+  ```text
+  PROMOTE_FACTS riskBase=shadow riskCand=active candZeroCap=true baseRows=6 candRows=0 baseAlerts=0 candAlerts=2 qaPassed=true
+  PROMOTE_DECISION finalReason=risk_mismatch accepted=false
+  ```
+
 ## Parity Artifact Hashes
 
 Collected via Python collector (normalized rules: events skip meta+header; trades drop header & remove config_hash; LF normalization):
@@ -96,8 +103,8 @@ All risk & promotion gating tests green:
 
 ## Commit / Provenance
 
-- Workflow commit SHA: `ADD_SHA_COMMIT`
-- Docs commit SHA: `ADD_SHA_COMMIT`
+- Workflow commit SHA: `ec51e2415a1e6053d1906a8a2799cb1c688424ee`
+- Docs commit SHA: `ec51e2415a1e6053d1906a8a2799cb1c688424ee`
 - Tag (planned): `v0.8.0-m4-risk`
 
 ## Sign-off Checklist
