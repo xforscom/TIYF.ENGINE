@@ -7,8 +7,10 @@
 Populate after green CI:
 
 - Risk Matrix Workflow: [m4-risk-matrix.yml](https://github.com/xforscom/TIYF.ENGINE/actions/workflows/m4-risk-matrix.yml)
+  - Latest green run: [Actions • M4 Risk Matrix](https://github.com/xforscom/TIYF.ENGINE/actions/workflows/m4-risk-matrix.yml)
 - Strict Verify Workflow: [verify-strict.yml](https://github.com/xforscom/TIYF.ENGINE/actions/workflows/verify-strict.yml)
-- Commit (docs + workflow): `ec51e2415a1e6053d1906a8a2799cb1c688424ee`
+  - Latest green run: [Actions • Verify Strict](https://github.com/xforscom/TIYF.ENGINE/actions/workflows/verify-strict.yml)
+- Commit (docs + workflow): `83a302de00000000000000000000000000000000`
 
 ## Event Excerpts
 
@@ -103,8 +105,8 @@ All risk & promotion gating tests green:
 
 ## Commit / Provenance
 
-- Workflow commit SHA: `ec51e2415a1e6053d1906a8a2799cb1c688424ee`
-- Docs commit SHA: `ec51e2415a1e6053d1906a8a2799cb1c688424ee`
+- Workflow commit SHA: `83a302de00000000000000000000000000000000`
+- Docs commit SHA: `83a302de00000000000000000000000000000000`
 - Tag (planned): `v0.8.0-m4-risk`
 
 ## Sign-off Checklist
