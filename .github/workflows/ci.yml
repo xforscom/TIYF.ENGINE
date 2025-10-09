@@ -1,9 +1,9 @@
 name: CI
 on:
   push:
-    branches: [ main ]
+    branches: [ main, feat/m4-seed ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, feat/m4-seed ]
 
 jobs:
   build-test:
