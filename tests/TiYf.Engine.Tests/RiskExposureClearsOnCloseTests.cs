@@ -25,9 +25,10 @@ public class RiskExposureClearsOnCloseTests
             .Where(l => l.Contains(",INFO_RISK_EVAL_V1,"))
             .Select(l =>
             {
-                var payload = l.Split(',').Last();
-                var unwrapped = UnwrapCsv(payload);
-                return JsonDocument.Parse(unwrapped).RootElement;
+                var cols = SplitCsvQuoted(l);
+                // Payload is column index 3 in events.csv (ts,event,meta,payload)
+                var payload = cols.Count > 3 ? cols[3] : cols.Last();
+                return JsonDocument.Parse(payload).RootElement;
             })
             .ToList();
 
@@ -50,6 +51,35 @@ public class RiskExposureClearsOnCloseTests
             return inner.Replace("\"\"", "\"");
         }
         return raw;
+    }
+
+    private static List<string> SplitCsvQuoted(string line)
+    {
+        var result = new List<string>();
+        var sb = new System.Text.StringBuilder();
+        bool inQuotes = false;
+        for (int i = 0; i < line.Length; i++)
+        {
+            char c = line[i];
+            if (inQuotes)
+            {
+                if (c == '"')
+                {
+                    // Escaped quote
+                    if (i + 1 < line.Length && line[i + 1] == '"') { sb.Append('"'); i++; }
+                    else { inQuotes = false; }
+                }
+                else { sb.Append(c); }
+            }
+            else
+            {
+                if (c == ',') { result.Add(sb.ToString()); sb.Clear(); }
+                else if (c == '"') { inQuotes = true; }
+                else { sb.Append(c); }
+            }
+        }
+        result.Add(sb.ToString());
+        return result;
     }
 
     private static (string events, string trades) RunSimWithOutputs(string cfg)
