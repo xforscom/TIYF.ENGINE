@@ -20,11 +20,15 @@ jobs:
           set -euo pipefail
           ROOT="$GITHUB_WORKSPACE"
           SLN="$ROOT/TiYf.Engine.sln"
-          TOOLS="$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
+          # Prefer Release Tools dll; fall back to Debug if some project-specific setting produced Debug
+          TOOLS_R="$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
+          TOOLS_D="$ROOT/src/TiYf.Engine.Tools/bin/Debug/net8.0/TiYf.Engine.Tools.dll"
           SIM="$ROOT/src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"
           CFG="$ROOT/tests/fixtures/backtest_m0/config.backtest-m0.json"
           echo "[Step] Build solution"
           dotnet build "$SLN" -c Release --nologo
+          # Resolve Tools path after build
+          if [ -f "$TOOLS_R" ]; then TOOLS="$TOOLS_R"; elif [ -f "$TOOLS_D" ]; then TOOLS="$TOOLS_D"; else echo "Tools dll not found in Release or Debug"; find "$ROOT/src/TiYf.Engine.Tools/bin" -maxdepth 3 -type f -name 'TiYf.Engine.Tools.dll' -print || true; exit 2; fi
           echo "[Step] Run Sim (fixture)"
           rm -rf "$ROOT/journals" || true
           dotnet exec "$SIM" --config "$CFG" --run-id STRICT-CI --quiet || { echo 'Sim run failed'; exit 2; }

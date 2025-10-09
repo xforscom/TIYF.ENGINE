@@ -1,0 +1,187 @@
+﻿2025-10-09T10:26:38.2402972Z Current runner version: '2.328.0'
+2025-10-09T10:26:38.2478823Z ##[group]Runner Image Provisioner
+2025-10-09T10:26:38.2480096Z Hosted Compute Agent
+2025-10-09T10:26:38.2481021Z Version: 20250912.392
+2025-10-09T10:26:38.2482102Z Commit: d921fda672a98b64f4f82364647e2f10b2267d0b
+2025-10-09T10:26:38.2483247Z Build Date: 2025-09-12T15:23:14Z
+2025-10-09T10:26:38.2484221Z ##[endgroup]
+2025-10-09T10:26:38.2505766Z ##[group]Operating System
+2025-10-09T10:26:38.2506767Z Ubuntu
+2025-10-09T10:26:38.2507555Z 24.04.3
+2025-10-09T10:26:38.2508559Z LTS
+2025-10-09T10:26:38.2509306Z ##[endgroup]
+2025-10-09T10:26:38.2510134Z ##[group]Runner Image
+2025-10-09T10:26:38.2511040Z Image: ubuntu-24.04
+2025-10-09T10:26:38.2511883Z Version: 20250929.60.1
+2025-10-09T10:26:38.2513528Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20250929.60/images/ubuntu/Ubuntu2404-Readme.md
+2025-10-09T10:26:38.2516690Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20250929.60
+2025-10-09T10:26:38.2518401Z ##[endgroup]
+2025-10-09T10:26:38.2520248Z ##[group]GITHUB_TOKEN Permissions
+2025-10-09T10:26:38.2523223Z Contents: read
+2025-10-09T10:26:38.2524235Z Metadata: read
+2025-10-09T10:26:38.2555610Z Packages: read
+2025-10-09T10:26:38.2556469Z ##[endgroup]
+2025-10-09T10:26:38.2559129Z Secret source: Actions
+2025-10-09T10:26:38.2560527Z Prepare workflow directory
+2025-10-09T10:26:38.3607545Z Prepare all required actions
+2025-10-09T10:26:38.3666523Z Getting action download info
+2025-10-09T10:26:38.7778148Z Download action repository 'actions/checkout@v4' (SHA:08eba0b27e820071cde6df949e0beb9ba4906955)
+2025-10-09T10:26:38.9634419Z Download action repository 'actions/download-artifact@v4' (SHA:d3f86a106a0bac45b974a628896c90dbdf5c8093)
+2025-10-09T10:26:39.7238223Z Complete job name: invariants
+2025-10-09T10:26:39.7991787Z ##[group]Run actions/checkout@v4
+2025-10-09T10:26:39.7992694Z with:
+2025-10-09T10:26:39.7993130Z   repository: xforscom/TIYF.ENGINE
+2025-10-09T10:26:39.7993831Z   token: ***
+2025-10-09T10:26:39.7994271Z   ssh-strict: true
+2025-10-09T10:26:39.7994898Z   ssh-user: git
+2025-10-09T10:26:39.7995343Z   persist-credentials: true
+2025-10-09T10:26:39.7995815Z   clean: true
+2025-10-09T10:26:39.7996240Z   sparse-checkout-cone-mode: true
+2025-10-09T10:26:39.7996745Z   fetch-depth: 1
+2025-10-09T10:26:39.7997158Z   fetch-tags: false
+2025-10-09T10:26:39.7997591Z   show-progress: true
+2025-10-09T10:26:39.7998021Z   lfs: false
+2025-10-09T10:26:39.7998420Z   submodules: false
+2025-10-09T10:26:39.7998869Z   set-safe-directory: true
+2025-10-09T10:26:39.7999616Z ##[endgroup]
+2025-10-09T10:26:39.9169176Z Syncing repository: xforscom/TIYF.ENGINE
+2025-10-09T10:26:39.9171687Z ##[group]Getting Git version info
+2025-10-09T10:26:39.9172473Z Working directory is '/home/runner/work/TIYF.ENGINE/TIYF.ENGINE'
+2025-10-09T10:26:39.9175966Z [command]/usr/bin/git version
+2025-10-09T10:26:39.9215685Z git version 2.51.0
+2025-10-09T10:26:39.9244863Z ##[endgroup]
+2025-10-09T10:26:39.9260401Z Temporarily overriding HOME='/home/runner/work/_temp/90698322-5b2d-48f1-8d16-ad0442d2a086' before making global git config changes
+2025-10-09T10:26:39.9264980Z Adding repository directory to the temporary git global config as a safe directory
+2025-10-09T10:26:39.9277262Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/TIYF.ENGINE/TIYF.ENGINE
+2025-10-09T10:26:39.9317045Z Deleting the contents of '/home/runner/work/TIYF.ENGINE/TIYF.ENGINE'
+2025-10-09T10:26:39.9321566Z ##[group]Initializing the repository
+2025-10-09T10:26:39.9326971Z [command]/usr/bin/git init /home/runner/work/TIYF.ENGINE/TIYF.ENGINE
+2025-10-09T10:26:39.9424951Z hint: Using 'master' as the name for the initial branch. This default branch name
+2025-10-09T10:26:39.9431288Z hint: is subject to change. To configure the initial branch name to use in all
+2025-10-09T10:26:39.9433471Z hint: of your new repositories, which will suppress this warning, call:
+2025-10-09T10:26:39.9435362Z hint:
+2025-10-09T10:26:39.9437394Z hint: 	git config --global init.defaultBranch <name>
+2025-10-09T10:26:39.9440546Z hint:
+2025-10-09T10:26:39.9441645Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2025-10-09T10:26:39.9443477Z hint: 'development'. The just-created branch can be renamed via this command:
+2025-10-09T10:26:39.9445921Z hint:
+2025-10-09T10:26:39.9446798Z hint: 	git branch -m <name>
+2025-10-09T10:26:39.9447680Z hint:
+2025-10-09T10:26:39.9448888Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2025-10-09T10:26:39.9450750Z Initialized empty Git repository in /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/.git/
+2025-10-09T10:26:39.9454416Z [command]/usr/bin/git remote add origin https://github.com/xforscom/TIYF.ENGINE
+2025-10-09T10:26:39.9488969Z ##[endgroup]
+2025-10-09T10:26:39.9490362Z ##[group]Disabling automatic garbage collection
+2025-10-09T10:26:39.9493525Z [command]/usr/bin/git config --local gc.auto 0
+2025-10-09T10:26:39.9527792Z ##[endgroup]
+2025-10-09T10:26:39.9530497Z ##[group]Setting up auth
+2025-10-09T10:26:39.9534302Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2025-10-09T10:26:39.9568066Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2025-10-09T10:26:39.9922663Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2025-10-09T10:26:39.9934002Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2025-10-09T10:26:40.0166660Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2025-10-09T10:26:40.0204047Z ##[endgroup]
+2025-10-09T10:26:40.0206347Z ##[group]Fetching the repository
+2025-10-09T10:26:40.0227112Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +c1c9bc7c30e844d7aeb836475292d9d60e603762:refs/remotes/origin/feat/m4-seed
+2025-10-09T10:26:40.6595511Z From https://github.com/xforscom/TIYF.ENGINE
+2025-10-09T10:26:40.6599042Z  * [new ref]         c1c9bc7c30e844d7aeb836475292d9d60e603762 -> origin/feat/m4-seed
+2025-10-09T10:26:40.6632149Z ##[endgroup]
+2025-10-09T10:26:40.6633859Z ##[group]Determining the checkout info
+2025-10-09T10:26:40.6640780Z ##[endgroup]
+2025-10-09T10:26:40.6641898Z [command]/usr/bin/git sparse-checkout disable
+2025-10-09T10:26:40.6683037Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2025-10-09T10:26:40.6718758Z ##[group]Checking out the ref
+2025-10-09T10:26:40.6721831Z [command]/usr/bin/git checkout --progress --force -B feat/m4-seed refs/remotes/origin/feat/m4-seed
+2025-10-09T10:26:40.6833689Z Switched to a new branch 'feat/m4-seed'
+2025-10-09T10:26:40.6839330Z branch 'feat/m4-seed' set up to track 'origin/feat/m4-seed'.
+2025-10-09T10:26:40.6847092Z ##[endgroup]
+2025-10-09T10:26:40.6897815Z [command]/usr/bin/git log -1 --format=%H
+2025-10-09T10:26:40.6926205Z c1c9bc7c30e844d7aeb836475292d9d60e603762
+2025-10-09T10:26:40.7195200Z ##[group]Run actions/download-artifact@v4
+2025-10-09T10:26:40.7196451Z with:
+2025-10-09T10:26:40.7197258Z   pattern: parity-*
+2025-10-09T10:26:40.7198154Z   merge-multiple: true
+2025-10-09T10:26:40.7199083Z   path: parity_all
+2025-10-09T10:26:40.7200018Z   repository: xforscom/TIYF.ENGINE
+2025-10-09T10:26:40.7201085Z   run-id: 18373307862
+2025-10-09T10:26:40.7201965Z ##[endgroup]
+2025-10-09T10:26:41.2113662Z Found 5 artifact(s)
+2025-10-09T10:26:41.2120615Z Filtering artifacts by pattern 'parity-*'
+2025-10-09T10:26:41.2137728Z Preparing to download the following artifacts:
+2025-10-09T10:26:41.2144328Z - parity-active_with_breach (ID: 4225063840, Size: 658, Expected Digest: sha256:724e672c89e4f970b5b6f26f63d92bebe3242af1a8cd93f7bc28732ea3b38368)
+2025-10-09T10:26:41.2152450Z - parity-off (ID: 4225063122, Size: 635, Expected Digest: sha256:e09824159dc2a8fcd119e4f7ec54cfd8d6319b374006e75f15eb3f62231889df)
+2025-10-09T10:26:41.2159234Z - parity-shadow (ID: 4225063100, Size: 634, Expected Digest: sha256:9e407580e8a5181517b08cdccc5b8b88096c76a0bb081cacab7702463659ec64)
+2025-10-09T10:26:41.2165554Z - parity-active_no_breach (ID: 4225062978, Size: 642, Expected Digest: sha256:8eb431a2e9133174c7dd9f349296f4ed700b65052b8855f1e20ec96725c9dc8a)
+2025-10-09T10:26:41.3914920Z Redirecting to blob download url: https://productionresultssa1.blob.core.windows.net/actions-results/ddf6d0f2-a800-4674-950f-4ce2d481be55/workflow-job-run-69a24f13-d8a1-5712-848c-fd8b07048689/artifacts/743e2c7e4e85a054c48dfffcc50c775286c8a8c13df94e9151ab0cf2969c723b.zip
+2025-10-09T10:26:41.3920487Z Starting download of artifact to: /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/parity_all
+2025-10-09T10:26:41.4869081Z Redirecting to blob download url: https://productionresultssa1.blob.core.windows.net/actions-results/ddf6d0f2-a800-4674-950f-4ce2d481be55/workflow-job-run-f53160fe-02e2-5fcf-9c3b-c1d530046bbf/artifacts/b462ee2e098d22a42d555313de1daf52cacd3ca6eb5e98ae2d0bc238cc329690.zip
+2025-10-09T10:26:41.4884266Z Starting download of artifact to: /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/parity_all
+2025-10-09T10:26:41.4902446Z Redirecting to blob download url: https://productionresultssa1.blob.core.windows.net/actions-results/ddf6d0f2-a800-4674-950f-4ce2d481be55/workflow-job-run-5f66cd5a-cee0-5427-b936-c0cec440f9c4/artifacts/ba2b1692c7a5f60c705e1ee521962afa0fc89647e6aa6177d4401a1a7090d9a9.zip
+2025-10-09T10:26:41.4908143Z Starting download of artifact to: /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/parity_all
+2025-10-09T10:26:41.5472698Z Redirecting to blob download url: https://productionresultssa1.blob.core.windows.net/actions-results/ddf6d0f2-a800-4674-950f-4ce2d481be55/workflow-job-run-34d4ab55-934e-5e47-9322-cc978532a524/artifacts/f85ed77d4a1a7e605b0c8d691485bcb02b400bec5c91ae9aa138ede5bf02bf59.zip
+2025-10-09T10:26:41.5480254Z Starting download of artifact to: /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/parity_all
+2025-10-09T10:26:41.6529810Z (node:1913) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
+2025-10-09T10:26:41.6557087Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2025-10-09T10:26:41.6692961Z SHA256 digest of downloaded artifact is 724e672c89e4f970b5b6f26f63d92bebe3242af1a8cd93f7bc28732ea3b38368
+2025-10-09T10:26:41.6715406Z Artifact download completed successfully.
+2025-10-09T10:26:41.7241987Z SHA256 digest of downloaded artifact is e09824159dc2a8fcd119e4f7ec54cfd8d6319b374006e75f15eb3f62231889df
+2025-10-09T10:26:41.7249846Z Artifact download completed successfully.
+2025-10-09T10:26:41.7808761Z SHA256 digest of downloaded artifact is 8eb431a2e9133174c7dd9f349296f4ed700b65052b8855f1e20ec96725c9dc8a
+2025-10-09T10:26:41.7811876Z Artifact download completed successfully.
+2025-10-09T10:26:41.8056871Z SHA256 digest of downloaded artifact is 9e407580e8a5181517b08cdccc5b8b88096c76a0bb081cacab7702463659ec64
+2025-10-09T10:26:41.8061199Z Artifact download completed successfully.
+2025-10-09T10:26:41.8063961Z Total of 4 artifact(s) downloaded
+2025-10-09T10:26:41.8066267Z Download artifact has finished successfully
+2025-10-09T10:26:41.8223417Z ##[group]Run set -euo pipefail
+2025-10-09T10:26:41.8224929Z [36;1mset -euo pipefail[0m
+2025-10-09T10:26:41.8226130Z [36;1mecho 'Collected parity hash files:' >&2[0m
+2025-10-09T10:26:41.8227702Z [36;1mfind parity_all -name hashes.txt -print -exec cat {} \;[0m
+2025-10-09T10:26:41.8229197Z [36;1mdeclare -A TSHAS ALERTS ZERO[0m
+2025-10-09T10:26:41.8230488Z [36;1mfor f in parity_all/parity-*/hashes.txt; do[0m
+2025-10-09T10:26:41.8231813Z [36;1m  mode=$(basename $(dirname "$f"))[0m
+2025-10-09T10:26:41.8233022Z [36;1m  mode=${mode#parity-}[0m
+2025-10-09T10:26:41.8234241Z [36;1m  tsha=$(grep '^trades_sha=' "$f" | cut -d= -f2)[0m
+2025-10-09T10:26:41.8236057Z [36;1m  alerts=$(grep '^alert_count=' "$f" | cut -d= -f2)[0m
+2025-10-09T10:26:41.8237914Z [36;1m  zero=$(grep '^gated_zero_cap=' "$f" | cut -d= -f2 || echo 'false')[0m
+2025-10-09T10:26:41.8239358Z [36;1m  TSHAS[$mode]=$tsha[0m
+2025-10-09T10:26:41.8240399Z [36;1m  ALERTS[$mode]=$alerts[0m
+2025-10-09T10:26:41.8241509Z [36;1m  ZERO[$mode]=$zero[0m
+2025-10-09T10:26:41.8242484Z [36;1mdone[0m
+2025-10-09T10:26:41.8243357Z [36;1m# Required modes presence[0m
+2025-10-09T10:26:41.8244982Z [36;1mfor m in off shadow active_no_breach active_with_breach; do[0m
+2025-10-09T10:26:41.8246624Z [36;1m  [ -n "${TSHAS[$m]:-}" ] || { echo "Missing mode $m" >&2; exit 1; }[0m
+2025-10-09T10:26:41.8247953Z [36;1mdone[0m
+2025-10-09T10:26:41.8248777Z [36;1m# Invariants[0m
+2025-10-09T10:26:41.8250261Z [36;1m[ "${TSHAS[off]}" = "${TSHAS[shadow]}" ] || { echo 'off vs shadow trades hash mismatch' >&2; exit 1; }[0m
+2025-10-09T10:26:41.8252652Z [36;1m[ "${TSHAS[shadow]}" = "${TSHAS[active_no_breach]}" ] || { echo 'shadow vs active_no_breach mismatch' >&2; exit 1; }[0m
+2025-10-09T10:26:41.8254895Z [36;1mif [ "${TSHAS[shadow]}" = "${TSHAS[active_with_breach]}" ]; then[0m
+2025-10-09T10:26:41.8256813Z [36;1m  if [ "${ALERTS[active_with_breach]}" -eq 0 ] && [ "${ZERO[active_with_breach]}" != 'true' ]; then[0m
+2025-10-09T10:26:41.8259071Z [36;1m    echo 'active_with_breach did not diverge and no alerts/zero_cap flag' >&2; exit 1; fi[0m
+2025-10-09T10:26:41.8260729Z [36;1melse[0m
+2025-10-09T10:26:41.8262092Z [36;1m  if [ "${ALERTS[active_with_breach]}" -eq 0 ] && [ "${ZERO[active_with_breach]}" != 'true' ]; then[0m
+2025-10-09T10:26:41.8264301Z [36;1m    echo 'active_with_breach diverged without alerts or zero_cap flag' >&2; exit 1; fi[0m
+2025-10-09T10:26:41.8266032Z [36;1mfi[0m
+2025-10-09T10:26:41.8266964Z [36;1mecho 'Risk matrix invariants satisfied.'[0m
+2025-10-09T10:26:41.8306192Z shell: /usr/bin/bash -e {0}
+2025-10-09T10:26:41.8307194Z ##[endgroup]
+2025-10-09T10:26:41.8394696Z Collected parity hash files:
+2025-10-09T10:26:41.8410578Z parity_all/hashes.txt
+2025-10-09T10:26:41.8420226Z events_sha=690d393384ccb2a300ed9d381a928e92655d5b2d88b4858939c85fe3332ee419
+2025-10-09T10:26:41.8427204Z trades_sha=c963d3e1073a0dc352cbd9df67a8f895958a30fdeea67bb46ccca554327f3a87
+2025-10-09T10:26:41.8429838Z alert_count=0
+2025-10-09T10:26:41.8431446Z run_dir=journals/M0/M0-RUN-MATRIX-shadow-2887
+2025-10-09T10:26:41.8470652Z grep: parity_all/parity-*/hashes.txt: No such file or directory
+2025-10-09T10:26:41.8488994Z ##[error]Process completed with exit code 2.
+2025-10-09T10:26:41.8670819Z Post job cleanup.
+2025-10-09T10:26:41.9639704Z [command]/usr/bin/git version
+2025-10-09T10:26:41.9679758Z git version 2.51.0
+2025-10-09T10:26:41.9731115Z Temporarily overriding HOME='/home/runner/work/_temp/e48ad66c-9f19-42c0-bea3-207db35c4bd2' before making global git config changes
+2025-10-09T10:26:41.9737509Z Adding repository directory to the temporary git global config as a safe directory
+2025-10-09T10:26:41.9741569Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/TIYF.ENGINE/TIYF.ENGINE
+2025-10-09T10:26:41.9867699Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2025-10-09T10:26:41.9875980Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2025-10-09T10:26:42.0099150Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2025-10-09T10:26:42.0122799Z http.https://github.com/.extraheader
+2025-10-09T10:26:42.0139005Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2025-10-09T10:26:42.0176125Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2025-10-09T10:26:42.0532972Z Cleaning up orphan processes

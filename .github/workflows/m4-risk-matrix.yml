@@ -99,6 +99,16 @@ jobs:
             echo "run_dir=$RUN_DIR"
           } > artifacts/parity/$MODE/hashes.txt
           echo "--- hashes ($MODE) ---"; cat artifacts/parity/$MODE/hashes.txt
+          # Also maintain a flattened index for debugging/backup (in case of artifact merge flattening)
+          mkdir -p artifacts/parity
+          {
+            echo "mode=$MODE"
+            echo "events_sha=$EVENTS_SHA"
+            echo "trades_sha=$TRADES_SHA"
+            echo "alert_count=$ALERTS"
+            [ "$MODE" = "active_with_breach" ] && echo "gated_zero_cap=true" || true
+            echo "run_dir=$RUN_DIR"
+          } > artifacts/parity/hashes.txt
       - name: Upload parity artifacts
         uses: actions/upload-artifact@v4
         with:
