@@ -2,9 +2,10 @@ name: verify-deep
 
 on:
   push:
-    branches: [ main, feat/m4-seed ]
+    branches: [ main, feat/m4-seed, feat/m5-seed ]
   pull_request:
-    branches: [ main, feat/m4-seed ]
+    branches: [ main, feat/m4-seed, feat/m5-seed ]
+  workflow_dispatch: {}
 
 jobs:
   verify-deep:

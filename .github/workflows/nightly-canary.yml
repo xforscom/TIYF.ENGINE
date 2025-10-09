@@ -4,6 +4,8 @@ on:
   schedule:
     - cron: '0 5 * * *' # daily at 05:00 UTC
   workflow_dispatch: {}
+  push:
+    branches: [ feat/m5-seed ]
 
 concurrency:
   group: nightly-canary
