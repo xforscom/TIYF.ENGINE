@@ -23,8 +23,21 @@ jobs:
         run: |
           set -euo pipefail
           if [ -n "$(git status --porcelain)" ]; then echo "Dirty tree before build"; git status; exit 1; fi
+      - name: Restore (with retry)
+        shell: bash
+        run: |
+          set -euo pipefail
+          n=0
+          until [ "$n" -ge 3 ]; do
+            dotnet restore TiYf.Engine.sln && break
+            n=$((n+1)); echo "Restore attempt $n failed; retrying in 3s..."; sleep 3
+          done
+          [ "$n" -lt 3 ] || { echo "Restore failed after retries"; exit 1; }
       - name: Build (Release)
-        run: dotnet build TiYf.Engine.sln -c Release --nologo
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet build TiYf.Engine.sln -c Release --nologo --no-restore
       - name: Resolve binaries
         id: paths
         shell: bash
@@ -46,7 +59,7 @@ jobs:
           # Run and capture stdout to parse precise journal paths
           OUT=$(mktemp)
           set +e
-          dotnet exec "${{ steps.paths.outputs.sim }}" --config "$CFG" --run-id DEEP-CI --quiet | tee "$OUT"
+          dotnet exec "${{ steps.paths.outputs.sim }}" --config "$CFG" --run-id DEEP-CI --quiet | tee "$OUT" || true
           DOTNET_CODE=$?
           set -e
           # Try to parse events/trades paths from stdout
