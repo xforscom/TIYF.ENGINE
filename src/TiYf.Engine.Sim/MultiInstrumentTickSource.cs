@@ -10,10 +10,13 @@ public sealed class MultiInstrumentTickSource : ITickSource
     {
         var data = raw.RootElement.GetProperty("data");
         var ticksNode = data.GetProperty("ticks");
-        foreach (var kv in ticksNode.EnumerateObject())
+        // Enumerate symbols deterministically (JSON object property order is not guaranteed)
+        var symbolPaths = new List<(string Sym,string? Path)>();
+        foreach (var kv in ticksNode.EnumerateObject()) symbolPaths.Add((kv.Name, kv.Value.GetString()));
+        foreach (var kv in symbolPaths.OrderBy(s=>s.Sym, StringComparer.Ordinal))
         {
-            var sym = kv.Name;
-            var path = kv.Value.GetString();
+            var sym = kv.Sym;
+            var path = kv.Path;
             if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) continue;
             var instId = new InstrumentId(sym);
             foreach (var line in File.ReadLines(path).Skip(1))

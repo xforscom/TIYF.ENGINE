@@ -1,0 +1,224 @@
+﻿2025-10-09T10:25:39.1490383Z Current runner version: '2.328.0'
+2025-10-09T10:25:39.1524486Z ##[group]Runner Image Provisioner
+2025-10-09T10:25:39.1525893Z Hosted Compute Agent
+2025-10-09T10:25:39.1526806Z Version: 20250912.392
+2025-10-09T10:25:39.1527831Z Commit: d921fda672a98b64f4f82364647e2f10b2267d0b
+2025-10-09T10:25:39.1529357Z Build Date: 2025-09-12T15:23:14Z
+2025-10-09T10:25:39.1530389Z ##[endgroup]
+2025-10-09T10:25:39.1531235Z ##[group]Operating System
+2025-10-09T10:25:39.1532328Z Ubuntu
+2025-10-09T10:25:39.1533118Z 24.04.3
+2025-10-09T10:25:39.1533939Z LTS
+2025-10-09T10:25:39.1534728Z ##[endgroup]
+2025-10-09T10:25:39.1535568Z ##[group]Runner Image
+2025-10-09T10:25:39.1536509Z Image: ubuntu-24.04
+2025-10-09T10:25:39.1537361Z Version: 20250929.60.1
+2025-10-09T10:25:39.1539516Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20250929.60/images/ubuntu/Ubuntu2404-Readme.md
+2025-10-09T10:25:39.1542256Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20250929.60
+2025-10-09T10:25:39.1544144Z ##[endgroup]
+2025-10-09T10:25:39.1546041Z ##[group]GITHUB_TOKEN Permissions
+2025-10-09T10:25:39.1548687Z Contents: read
+2025-10-09T10:25:39.1550059Z Metadata: read
+2025-10-09T10:25:39.1550832Z Packages: read
+2025-10-09T10:25:39.1551759Z ##[endgroup]
+2025-10-09T10:25:39.1554902Z Secret source: Actions
+2025-10-09T10:25:39.1556067Z Prepare workflow directory
+2025-10-09T10:25:39.2435358Z Prepare all required actions
+2025-10-09T10:25:39.2542452Z Getting action download info
+2025-10-09T10:25:39.6420543Z Download action repository 'actions/checkout@v4' (SHA:08eba0b27e820071cde6df949e0beb9ba4906955)
+2025-10-09T10:25:39.7242877Z Download action repository 'actions/setup-dotnet@v4' (SHA:67a3573c9a986a3f9c594539f4ab511d57bb3ce9)
+2025-10-09T10:25:40.0288357Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+2025-10-09T10:25:40.2263612Z Complete job name: verify-strict
+2025-10-09T10:25:40.2897460Z ##[group]Run actions/checkout@v4
+2025-10-09T10:25:40.2898316Z with:
+2025-10-09T10:25:40.2898739Z   repository: xforscom/TIYF.ENGINE
+2025-10-09T10:25:40.2899544Z   token: ***
+2025-10-09T10:25:40.2899927Z   ssh-strict: true
+2025-10-09T10:25:40.2900336Z   ssh-user: git
+2025-10-09T10:25:40.2900748Z   persist-credentials: true
+2025-10-09T10:25:40.2901203Z   clean: true
+2025-10-09T10:25:40.2901612Z   sparse-checkout-cone-mode: true
+2025-10-09T10:25:40.2902091Z   fetch-depth: 1
+2025-10-09T10:25:40.2902491Z   fetch-tags: false
+2025-10-09T10:25:40.2902893Z   show-progress: true
+2025-10-09T10:25:40.2903301Z   lfs: false
+2025-10-09T10:25:40.2903670Z   submodules: false
+2025-10-09T10:25:40.2904080Z   set-safe-directory: true
+2025-10-09T10:25:40.2904765Z ##[endgroup]
+2025-10-09T10:25:40.4024217Z Syncing repository: xforscom/TIYF.ENGINE
+2025-10-09T10:25:40.4026833Z ##[group]Getting Git version info
+2025-10-09T10:25:40.4028074Z Working directory is '/home/runner/work/TIYF.ENGINE/TIYF.ENGINE'
+2025-10-09T10:25:40.4030105Z [command]/usr/bin/git version
+2025-10-09T10:25:40.4078616Z git version 2.51.0
+2025-10-09T10:25:40.4106415Z ##[endgroup]
+2025-10-09T10:25:40.4123364Z Temporarily overriding HOME='/home/runner/work/_temp/b950d9a2-d1b2-489e-b4ab-cf5d2411f751' before making global git config changes
+2025-10-09T10:25:40.4127184Z Adding repository directory to the temporary git global config as a safe directory
+2025-10-09T10:25:40.4135263Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/TIYF.ENGINE/TIYF.ENGINE
+2025-10-09T10:25:40.4183362Z Deleting the contents of '/home/runner/work/TIYF.ENGINE/TIYF.ENGINE'
+2025-10-09T10:25:40.4186920Z ##[group]Initializing the repository
+2025-10-09T10:25:40.4188161Z [command]/usr/bin/git init /home/runner/work/TIYF.ENGINE/TIYF.ENGINE
+2025-10-09T10:25:40.4257591Z hint: Using 'master' as the name for the initial branch. This default branch name
+2025-10-09T10:25:40.4259721Z hint: is subject to change. To configure the initial branch name to use in all
+2025-10-09T10:25:40.4262542Z hint: of your new repositories, which will suppress this warning, call:
+2025-10-09T10:25:40.4264095Z hint:
+2025-10-09T10:25:40.4265116Z hint: 	git config --global init.defaultBranch <name>
+2025-10-09T10:25:40.4267588Z hint:
+2025-10-09T10:25:40.4268557Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2025-10-09T10:25:40.4270236Z hint: 'development'. The just-created branch can be renamed via this command:
+2025-10-09T10:25:40.4271501Z hint:
+2025-10-09T10:25:40.4272163Z hint: 	git branch -m <name>
+2025-10-09T10:25:40.4274658Z hint:
+2025-10-09T10:25:40.4275788Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2025-10-09T10:25:40.4277414Z Initialized empty Git repository in /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/.git/
+2025-10-09T10:25:40.4280190Z [command]/usr/bin/git remote add origin https://github.com/xforscom/TIYF.ENGINE
+2025-10-09T10:25:40.4314428Z ##[endgroup]
+2025-10-09T10:25:40.4315706Z ##[group]Disabling automatic garbage collection
+2025-10-09T10:25:40.4317456Z [command]/usr/bin/git config --local gc.auto 0
+2025-10-09T10:25:40.4349717Z ##[endgroup]
+2025-10-09T10:25:40.4351377Z ##[group]Setting up auth
+2025-10-09T10:25:40.4357461Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2025-10-09T10:25:40.4390453Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2025-10-09T10:25:40.4685749Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2025-10-09T10:25:40.4718467Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2025-10-09T10:25:40.4949990Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2025-10-09T10:25:40.4985916Z ##[endgroup]
+2025-10-09T10:25:40.4987584Z ##[group]Fetching the repository
+2025-10-09T10:25:40.4996712Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +c1c9bc7c30e844d7aeb836475292d9d60e603762:refs/remotes/origin/feat/m4-seed
+2025-10-09T10:25:40.8973707Z From https://github.com/xforscom/TIYF.ENGINE
+2025-10-09T10:25:40.8977254Z  * [new ref]         c1c9bc7c30e844d7aeb836475292d9d60e603762 -> origin/feat/m4-seed
+2025-10-09T10:25:40.9007384Z ##[endgroup]
+2025-10-09T10:25:40.9009469Z ##[group]Determining the checkout info
+2025-10-09T10:25:40.9011657Z ##[endgroup]
+2025-10-09T10:25:40.9014643Z [command]/usr/bin/git sparse-checkout disable
+2025-10-09T10:25:40.9054932Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2025-10-09T10:25:40.9087944Z ##[group]Checking out the ref
+2025-10-09T10:25:40.9092094Z [command]/usr/bin/git checkout --progress --force -B feat/m4-seed refs/remotes/origin/feat/m4-seed
+2025-10-09T10:25:40.9201752Z Switched to a new branch 'feat/m4-seed'
+2025-10-09T10:25:40.9206154Z branch 'feat/m4-seed' set up to track 'origin/feat/m4-seed'.
+2025-10-09T10:25:40.9213456Z ##[endgroup]
+2025-10-09T10:25:40.9250774Z [command]/usr/bin/git log -1 --format=%H
+2025-10-09T10:25:40.9271207Z c1c9bc7c30e844d7aeb836475292d9d60e603762
+2025-10-09T10:25:40.9545070Z ##[group]Run actions/setup-dotnet@v4
+2025-10-09T10:25:40.9546264Z with:
+2025-10-09T10:25:40.9547076Z   dotnet-version: 8.0.x
+2025-10-09T10:25:40.9548217Z   cache: false
+2025-10-09T10:25:40.9549298Z ##[endgroup]
+2025-10-09T10:25:41.1326314Z [command]/home/runner/work/_actions/actions/setup-dotnet/v4/externals/install-dotnet.sh --skip-non-versioned-files --runtime dotnet --channel LTS
+2025-10-09T10:25:41.7036581Z dotnet-install: .NET Core Runtime with version '8.0.20' is already installed.
+2025-10-09T10:25:41.7047464Z [command]/home/runner/work/_actions/actions/setup-dotnet/v4/externals/install-dotnet.sh --skip-non-versioned-files --channel 8.0
+2025-10-09T10:25:41.9560079Z dotnet-install: .NET Core SDK with version '8.0.414' is already installed.
+2025-10-09T10:25:41.9675504Z ##[group]Run set -euo pipefail
+2025-10-09T10:25:41.9675925Z [36;1mset -euo pipefail[0m
+2025-10-09T10:25:41.9676207Z [36;1mROOT="$GITHUB_WORKSPACE"[0m
+2025-10-09T10:25:41.9676494Z [36;1mSLN="$ROOT/TiYf.Engine.sln"[0m
+2025-10-09T10:25:41.9676921Z [36;1mTOOLS="$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"[0m
+2025-10-09T10:25:41.9677453Z [36;1mSIM="$ROOT/src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"[0m
+2025-10-09T10:25:41.9677958Z [36;1mCFG="$ROOT/tests/fixtures/backtest_m0/config.backtest-m0.json"[0m
+2025-10-09T10:25:41.9678366Z [36;1mecho "[Step] Build solution"[0m
+2025-10-09T10:25:41.9678676Z [36;1mdotnet build "$SLN" -c Release --nologo[0m
+2025-10-09T10:25:41.9679339Z [36;1mecho "[Step] Run Sim (fixture)"[0m
+2025-10-09T10:25:41.9679653Z [36;1mrm -rf "$ROOT/journals" || true[0m
+2025-10-09T10:25:41.9680126Z [36;1mdotnet exec "$SIM" --config "$CFG" --run-id STRICT-CI --quiet || { echo 'Sim run failed'; exit 2; }[0m
+2025-10-09T10:25:41.9680793Z [36;1mRUN_DIR="$(find "$ROOT/journals" -type d -name '*STRICT-CI*' | sort | tail -n1)"[0m
+2025-10-09T10:25:41.9681206Z [36;1mecho "RUN_DIR=$RUN_DIR"[0m
+2025-10-09T10:25:41.9681633Z [36;1mtest -n "$RUN_DIR" || { echo 'No run directory found'; ls -R "$ROOT/journals" || true; exit 2; }[0m
+2025-10-09T10:25:41.9682106Z [36;1mEV="$RUN_DIR/events.csv"; TR="$RUN_DIR/trades.csv"[0m
+2025-10-09T10:25:41.9682555Z [36;1mtest -f "$EV" && test -f "$TR" || { echo 'Missing events/trades'; ls -R "$RUN_DIR"; exit 2; }[0m
+2025-10-09T10:25:41.9683073Z [36;1mecho "Events size: $(wc -l < "$EV") lines"; echo "Trades size: $(wc -l < "$TR") lines"[0m
+2025-10-09T10:25:41.9683513Z [36;1mecho "[Step] Locate parity artifact (if any)"[0m
+2025-10-09T10:25:41.9684052Z [36;1mPARITY_HASH="$(find "$ROOT/artifacts/parity" -type f -name hashes.txt 2>/dev/null | sort | tail -n1 || true)"[0m
+2025-10-09T10:25:41.9684918Z [36;1mif [ -f "$PARITY_HASH" ]; then echo "Found parity hashes: $PARITY_HASH"; cat "$PARITY_HASH"; else echo "No parity hashes.txt found (expected if parity feature not triggered)"; fi[0m
+2025-10-09T10:25:41.9685596Z [36;1mecho "[Step] Strict verify"[0m
+2025-10-09T10:25:41.9685868Z [36;1mset +e[0m
+2025-10-09T10:25:41.9686265Z [36;1mVERIFY_JSON=$(dotnet exec "$TOOLS" verify strict --events "$EV" --trades "$TR" --schema 1.2.0 --json)[0m
+2025-10-09T10:25:41.9686713Z [36;1mEC=$?[0m
+2025-10-09T10:25:41.9686917Z [36;1mset -e[0m
+2025-10-09T10:25:41.9687249Z [36;1mecho "::group::STRICT VERIFY JSON"; echo "$VERIFY_JSON"; echo "::endgroup::"[0m
+2025-10-09T10:25:41.9687660Z [36;1mmkdir -p artifacts/verify-strict[0m
+2025-10-09T10:25:41.9687981Z [36;1mcp "$EV" "$TR" artifacts/verify-strict/[0m
+2025-10-09T10:25:41.9688283Z [36;1mif [ $EC -ne 0 ]; then[0m
+2025-10-09T10:25:41.9688565Z [36;1m  echo "Verifier exit code=$EC"; exit $EC[0m
+2025-10-09T10:25:41.9689029Z [36;1mfi[0m
+2025-10-09T10:25:41.9728393Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2025-10-09T10:25:41.9729313Z env:
+2025-10-09T10:25:41.9729681Z   DOTNET_ROOT: /usr/share/dotnet
+2025-10-09T10:25:41.9730116Z ##[endgroup]
+2025-10-09T10:25:41.9834871Z [Step] Build solution
+2025-10-09T10:25:44.3585761Z   Determining projects to restore...
+2025-10-09T10:25:45.3248982Z   Restored /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sidecar/TiYf.Engine.Sidecar.csproj (in 222 ms).
+2025-10-09T10:25:45.3323979Z   Restored /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Core/TiYf.Engine.Core.csproj (in 2 ms).
+2025-10-09T10:25:45.3420830Z   Restored /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Tools/TiYf.Engine.Tools.csproj (in 4 ms).
+2025-10-09T10:25:45.3498403Z   Restored /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj (in 4 ms).
+2025-10-09T10:25:49.0550576Z   Restored /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/tests/TiYf.Engine.Tests/TiYf.Engine.Tests.csproj (in 3.97 sec).
+2025-10-09T10:25:55.3731438Z   TiYf.Engine.Core -> /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Core/bin/Release/net8.0/TiYf.Engine.Core.dll
+2025-10-09T10:25:55.9725021Z   TiYf.Engine.Sidecar -> /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sidecar/bin/Release/net8.0/TiYf.Engine.Sidecar.dll
+2025-10-09T10:25:57.5630147Z   TiYf.Engine.Sim -> /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll
+2025-10-09T10:25:58.7376769Z   TiYf.Engine.Tools -> /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Tools/bin/Debug/net8.0/TiYf.Engine.Tools.dll
+2025-10-09T10:26:00.3287138Z   TiYf.Engine.Tests -> /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/tests/TiYf.Engine.Tests/bin/Release/net8.0/TiYf.Engine.Tests.dll
+2025-10-09T10:26:00.3442375Z 
+2025-10-09T10:26:00.3452688Z Build succeeded.
+2025-10-09T10:26:00.3455377Z     0 Warning(s)
+2025-10-09T10:26:00.3457222Z     0 Error(s)
+2025-10-09T10:26:00.3469368Z 
+2025-10-09T10:26:00.3470925Z Time Elapsed 00:00:17.47
+2025-10-09T10:26:00.3914420Z [Step] Run Sim (fixture)
+2025-10-09T10:26:01.9902284Z Loaded config RunId= hash=0F3E279460381A76F61A45F60117A238858BFD9DA5D1653198A68E25CE426B0F
+2025-10-09T10:26:02.0795578Z RUN_ID_RESOLVED=M0-RUN-STRICT-CI
+2025-10-09T10:26:02.0829762Z JOURNAL_DIR_EVENTS=journals/M0/M0-RUN-STRICT-CI/events.csv
+2025-10-09T10:26:02.0831002Z JOURNAL_DIR_TRADES=journals/M0/M0-RUN-STRICT-CI/trades.csv
+2025-10-09T10:26:02.1034210Z RUN_ID=M0-RUN-STRICT-CI
+2025-10-09T10:26:02.4801919Z Engine run complete.
+2025-10-09T10:26:02.5097803Z Parity artifacts written: artifacts/parity/STRICT-CI/hashes.txt
+2025-10-09T10:26:02.5272453Z RUN_DIR=/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/journals/M0/M0-RUN-STRICT-CI
+2025-10-09T10:26:02.5310828Z Events size: 359 lines
+2025-10-09T10:26:02.5362816Z Trades size: 7 lines
+2025-10-09T10:26:02.5363715Z [Step] Locate parity artifact (if any)
+2025-10-09T10:26:02.5420016Z Found parity hashes: /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/artifacts/parity/STRICT-CI/hashes.txt
+2025-10-09T10:26:02.5452653Z events_sha=F1F816308C601785DA7E42C9E0250E0C35CF84144131AB9C172838435F138EC8
+2025-10-09T10:26:02.5456080Z trades_sha=6B2DE3E5109B2562E4B3D30E93615614F6AD752311E1DFF46400E00565EE5FA1
+2025-10-09T10:26:02.5457246Z applied_count=0
+2025-10-09T10:26:02.5457706Z penalty_count=0
+2025-10-09T10:26:02.5473768Z [Step] Strict verify
+2025-10-09T10:26:02.5536416Z The application to execute does not exist: '/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll'
+2025-10-09T10:26:02.5540181Z ##[group]STRICT VERIFY JSON
+2025-10-09T10:26:02.5541209Z 
+2025-10-09T10:26:02.5542606Z ##[endgroup]
+2025-10-09T10:26:02.5613162Z Verifier exit code=129
+2025-10-09T10:26:02.5647711Z ##[error]Process completed with exit code 129.
+2025-10-09T10:26:02.5886752Z ##[group]Run actions/upload-artifact@v4
+2025-10-09T10:26:02.5887230Z with:
+2025-10-09T10:26:02.5887568Z   name: verify-strict-artifacts
+2025-10-09T10:26:02.6026579Z   path: artifacts/verify-strict
+2025-10-09T10:26:02.6027027Z   if-no-files-found: warn
+2025-10-09T10:26:02.6027400Z   compression-level: 6
+2025-10-09T10:26:02.6027759Z   overwrite: false
+2025-10-09T10:26:02.6028102Z   include-hidden-files: false
+2025-10-09T10:26:02.6028470Z env:
+2025-10-09T10:26:02.6028957Z   DOTNET_ROOT: /usr/share/dotnet
+2025-10-09T10:26:02.6029348Z ##[endgroup]
+2025-10-09T10:26:03.0798168Z With the provided path, there will be 2 files uploaded
+2025-10-09T10:26:03.0804639Z Artifact name is valid!
+2025-10-09T10:26:03.0806569Z Root directory input is valid!
+2025-10-09T10:26:03.3109292Z Beginning upload of artifact content to blob storage
+2025-10-09T10:26:03.4070785Z Uploaded bytes 8608
+2025-10-09T10:26:03.4330400Z Finished uploading artifact content to blob storage!
+2025-10-09T10:26:03.4332073Z SHA256 digest of uploaded artifact zip is f8ac28cec48075552fd94a3880190b9171af98970f7db6f806c67c4abdb5fbaa
+2025-10-09T10:26:03.4333269Z Finalizing artifact upload
+2025-10-09T10:26:03.5632155Z Artifact verify-strict-artifacts.zip successfully finalized. Artifact ID 4225059781
+2025-10-09T10:26:03.5635715Z Artifact verify-strict-artifacts has been successfully uploaded! Final size is 8608 bytes. Artifact ID is 4225059781
+2025-10-09T10:26:03.5656935Z Artifact download URL: https://github.com/xforscom/TIYF.ENGINE/actions/runs/18373307849/artifacts/4225059781
+2025-10-09T10:26:03.5883968Z Post job cleanup.
+2025-10-09T10:26:03.7427545Z [command]/usr/bin/git version
+2025-10-09T10:26:03.7495107Z git version 2.51.0
+2025-10-09T10:26:03.7559265Z Temporarily overriding HOME='/home/runner/work/_temp/6df56740-8f2f-4c06-8393-b7c1bdc0dbc4' before making global git config changes
+2025-10-09T10:26:03.7564682Z Adding repository directory to the temporary git global config as a safe directory
+2025-10-09T10:26:03.7569592Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/TIYF.ENGINE/TIYF.ENGINE
+2025-10-09T10:26:03.7619395Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2025-10-09T10:26:03.7697553Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2025-10-09T10:26:03.8057437Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2025-10-09T10:26:03.8103615Z http.https://github.com/.extraheader
+2025-10-09T10:26:03.8132017Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2025-10-09T10:26:03.8190108Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2025-10-09T10:26:03.8711733Z Cleaning up orphan processes
+2025-10-09T10:26:03.9141274Z Terminate orphan process: pid (2144) (dotnet)
+2025-10-09T10:26:03.9171770Z Terminate orphan process: pid (2183) (dotnet)

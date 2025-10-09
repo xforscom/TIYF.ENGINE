@@ -1,0 +1,100 @@
+name: m3-sentiment-matrix
+
+on:
+  push:
+    branches: [ feat/m3-active ]
+  pull_request:
+    branches: [ feat/m3-active ]
+
+jobs:
+  sentiment:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [off, shadow, active]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore
+      - name: Build Release
+        run: dotnet build -c Release --no-restore
+      - name: Prepare Config & Run (${{ matrix.mode }})
+        env:
+          MODE: ${{ matrix.mode }}
+        run: |
+          set -euo pipefail
+          CFG=tests/fixtures/backtest_m0/config.backtest-m0.candidate.json
+          TEMP_CFG=$(mktemp /tmp/sentiment-XXXX.json)
+          if ! command -v jq >/dev/null; then sudo apt-get update && sudo apt-get install -y jq; fi
+          if [ "$MODE" = "active" ]; then
+            jq '.featureFlags.sentiment="active" | .featureFlags.riskProbe="disabled" | .sentimentConfig={"window":5,"volGuardSigma":1e-7}' "$CFG" > "$TEMP_CFG"
+          elif [ "$MODE" = "shadow" ]; then
+            jq '.featureFlags.sentiment="shadow" | .featureFlags.riskProbe="disabled" | .sentimentConfig={"window":5,"volGuardSigma":1e-7}' "$CFG" > "$TEMP_CFG"
+          else
+            jq '.featureFlags.sentiment="off" | .featureFlags.riskProbe="disabled"' "$CFG" > "$TEMP_CFG"
+          fi
+          dotnet exec src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll --config "$TEMP_CFG" --run-id CI-$MODE --quiet
+          mkdir -p artifacts/$MODE
+          cp -r journals/M0/*CI-$MODE* artifacts/$MODE/ || true
+          # copy parity artifacts
+          if [ -d artifacts/parity ]; then cp -r artifacts/parity artifacts/$MODE/ || true; fi
+      - name: Upload journals (${{ matrix.mode }})
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: journals-${{ matrix.mode }}
+          path: artifacts/${{ matrix.mode }}
+
+  invariants:
+    runs-on: ubuntu-latest
+    needs: sentiment
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build Release
+        run: dotnet build -c Release --no-restore
+      - name: Validate Cross-Mode Invariants
+        run: |
+          set -euo pipefail
+          ROOT=journals/M0
+          OFF_EVENTS=$(ls $ROOT/*CI-off*/events.csv)
+          SHADOW_EVENTS=$(ls $ROOT/*CI-shadow*/events.csv)
+          ACTIVE_EVENTS=$(ls $ROOT/*CI-active*/events.csv)
+          OFF_TRADES=$(ls $ROOT/*CI-off*/trades.csv)
+          SHADOW_TRADES=$(ls $ROOT/*CI-shadow*/trades.csv)
+          ACTIVE_TRADES=$(ls $ROOT/*CI-active*/trades.csv)
+          # Parity hash files (fail if missing)
+          find artifacts/parity -maxdepth 2 -name hashes.txt -print || echo "No parity artifacts found"
+          if [ ! -d artifacts/parity ]; then echo "ERROR: parity artifacts directory missing"; exit 1; fi
+          # Off vs shadow trades hash equality (using parity hashes)
+          OFF_HASH_FILE=$(grep -rl "CI-off" artifacts/parity || true)
+          SHADOW_HASH_FILE=$(grep -rl "CI-shadow" artifacts/parity || true)
+          ACTIVE_HASH_FILE=$(grep -rl "CI-active" artifacts/parity || true)
+          if [ -z "$OFF_HASH_FILE" ] || [ -z "$SHADOW_HASH_FILE" ] || [ -z "$ACTIVE_HASH_FILE" ]; then echo "ERROR: missing one or more parity hash files"; ls -R artifacts/parity; exit 1; fi
+          get_val(){ grep "^$1=" "$2" | head -n1 | cut -d'=' -f2; }
+          OFF_TR_SHA=$(get_val trades_sha "$OFF_HASH_FILE")
+          SHADOW_TR_SHA=$(get_val trades_sha "$SHADOW_HASH_FILE")
+          ACTIVE_TR_SHA=$(get_val trades_sha "$ACTIVE_HASH_FILE")
+          ACTIVE_APPLIED=$(get_val applied_count "$ACTIVE_HASH_FILE")
+          ACTIVE_PENALTY=$(get_val penalty_count "$ACTIVE_HASH_FILE")
+          hash_skip_meta(){ tail -n +2 "$1" | sha256sum | cut -d' ' -f1; }
+          if [ "$(hash_skip_meta "$OFF_TRADES")" != "$(hash_skip_meta "$SHADOW_TRADES")" ]; then echo 'ERROR: off vs shadow trades mismatch'; exit 1; fi
+          if grep -q INFO_SENTIMENT_Z_V1 "$OFF_EVENTS"; then echo 'ERROR: off mode has Z events'; exit 1; fi
+          if ! grep -q INFO_SENTIMENT_Z_V1 "$SHADOW_EVENTS"; then echo 'ERROR: shadow missing Z events'; exit 1; fi
+          if grep -q INFO_SENTIMENT_APPLIED_V1 "$ACTIVE_EVENTS"; then
+            if diff <(tail -n +3 "$ACTIVE_EVENTS") <(tail -n +3 "$SHADOW_EVENTS") >/dev/null; then echo 'ERROR: expected divergence after clamp'; exit 1; fi
+          fi
+          if [ "$OFF_TR_SHA" != "$SHADOW_TR_SHA" ]; then echo "ERROR: parity trades_sha mismatch off vs shadow ($OFF_TR_SHA vs $SHADOW_TR_SHA)"; exit 1; fi
+          if [ "$ACTIVE_TR_SHA" != "$OFF_TR_SHA" ] && [ "${ACTIVE_APPLIED:-0}" -eq 0 ] && [ "${ACTIVE_PENALTY:-0}" -eq 0 ]; then echo "ERROR: active trades_sha diverged without applied or penalty counts"; exit 1; fi
+      - name: Upload All Journals (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: journals-all
+          path: journals/M0

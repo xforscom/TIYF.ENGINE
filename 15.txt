@@ -1,0 +1,233 @@
+2025-10-08T22:42:30.7923848Z Current runner version: '2.328.0'
+2025-10-08T22:42:30.7978561Z ##[group]Runner Image Provisioner
+2025-10-08T22:42:30.7979919Z Hosted Compute Agent
+2025-10-08T22:42:30.7980852Z Version: 20250912.392
+2025-10-08T22:42:30.8002204Z Commit: d921fda672a98b64f4f82364647e2f10b2267d0b
+2025-10-08T22:42:30.8003509Z Build Date: 2025-09-12T15:23:14Z
+2025-10-08T22:42:30.8004452Z ##[endgroup]
+2025-10-08T22:42:30.8005373Z ##[group]Operating System
+2025-10-08T22:42:30.8006277Z Ubuntu
+2025-10-08T22:42:30.8007056Z 24.04.3
+2025-10-08T22:42:30.8007741Z LTS
+2025-10-08T22:42:30.8008731Z ##[endgroup]
+2025-10-08T22:42:30.8009547Z ##[group]Runner Image
+2025-10-08T22:42:30.8010511Z Image: ubuntu-24.04
+2025-10-08T22:42:30.8011611Z Version: 20250929.60.1
+2025-10-08T22:42:30.8013641Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20250929.60/images/ubuntu/Ubuntu2404-Readme.md
+2025-10-08T22:42:30.8016606Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20250929.60
+2025-10-08T22:42:30.8018353Z ##[endgroup]
+2025-10-08T22:42:30.8020239Z ##[group]GITHUB_TOKEN Permissions
+2025-10-08T22:42:30.8043130Z Contents: read
+2025-10-08T22:42:30.8044079Z Metadata: read
+2025-10-08T22:42:30.8044868Z Packages: read
+2025-10-08T22:42:30.8045595Z ##[endgroup]
+2025-10-08T22:42:30.8048815Z Secret source: Actions
+2025-10-08T22:42:30.8049830Z Prepare workflow directory
+2025-10-08T22:42:30.8987527Z Prepare all required actions
+2025-10-08T22:42:30.9064382Z Getting action download info
+2025-10-08T22:42:31.2505898Z Download action repository 'actions/checkout@v4' (SHA:08eba0b27e820071cde6df949e0beb9ba4906955)
+2025-10-08T22:42:31.3575567Z Download action repository 'actions/setup-dotnet@v4' (SHA:67a3573c9a986a3f9c594539f4ab511d57bb3ce9)
+2025-10-08T22:42:31.6740316Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+2025-10-08T22:42:31.8756475Z Complete job name: verify-strict
+2025-10-08T22:42:31.9401562Z ##[group]Run actions/checkout@v4
+2025-10-08T22:42:31.9402597Z with:
+2025-10-08T22:42:31.9403026Z   repository: xforscom/TIYF.ENGINE
+2025-10-08T22:42:31.9403723Z   token: ***
+2025-10-08T22:42:31.9404151Z   ssh-strict: true
+2025-10-08T22:42:31.9404552Z   ssh-user: git
+2025-10-08T22:42:31.9404943Z   persist-credentials: true
+2025-10-08T22:42:31.9405397Z   clean: true
+2025-10-08T22:42:31.9405786Z   sparse-checkout-cone-mode: true
+2025-10-08T22:42:31.9406250Z   fetch-depth: 1
+2025-10-08T22:42:31.9406632Z   fetch-tags: false
+2025-10-08T22:42:31.9407017Z   show-progress: true
+2025-10-08T22:42:31.9407412Z   lfs: false
+2025-10-08T22:42:31.9407765Z   submodules: false
+2025-10-08T22:42:31.9408156Z   set-safe-directory: true
+2025-10-08T22:42:31.9408793Z ##[endgroup]
+2025-10-08T22:42:32.0527656Z Syncing repository: xforscom/TIYF.ENGINE
+2025-10-08T22:42:32.0530276Z ##[group]Getting Git version info
+2025-10-08T22:42:32.0532034Z Working directory is '/home/runner/work/TIYF.ENGINE/TIYF.ENGINE'
+2025-10-08T22:42:32.0535148Z [command]/usr/bin/git version
+2025-10-08T22:42:32.0600960Z git version 2.51.0
+2025-10-08T22:42:32.0628911Z ##[endgroup]
+2025-10-08T22:42:32.0644753Z Temporarily overriding HOME='/home/runner/work/_temp/44ba7415-6b35-4e87-96b3-70cb14e361b0' before making global git config changes
+2025-10-08T22:42:32.0648134Z Adding repository directory to the temporary git global config as a safe directory
+2025-10-08T22:42:32.0661667Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/TIYF.ENGINE/TIYF.ENGINE
+2025-10-08T22:42:32.0701627Z Deleting the contents of '/home/runner/work/TIYF.ENGINE/TIYF.ENGINE'
+2025-10-08T22:42:32.0704809Z ##[group]Initializing the repository
+2025-10-08T22:42:32.0709720Z [command]/usr/bin/git init /home/runner/work/TIYF.ENGINE/TIYF.ENGINE
+2025-10-08T22:42:32.0833243Z hint: Using 'master' as the name for the initial branch. This default branch name
+2025-10-08T22:42:32.0834963Z hint: is subject to change. To configure the initial branch name to use in all
+2025-10-08T22:42:32.0836579Z hint: of your new repositories, which will suppress this warning, call:
+2025-10-08T22:42:32.0838657Z hint:
+2025-10-08T22:42:32.0839705Z hint: 	git config --global init.defaultBranch <name>
+2025-10-08T22:42:32.0840652Z hint:
+2025-10-08T22:42:32.0841556Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2025-10-08T22:42:32.0843943Z hint: 'development'. The just-created branch can be renamed via this command:
+2025-10-08T22:42:32.0845224Z hint:
+2025-10-08T22:42:32.0845912Z hint: 	git branch -m <name>
+2025-10-08T22:42:32.0846662Z hint:
+2025-10-08T22:42:32.0847686Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2025-10-08T22:42:32.0849319Z Initialized empty Git repository in /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/.git/
+2025-10-08T22:42:32.0859845Z [command]/usr/bin/git remote add origin https://github.com/xforscom/TIYF.ENGINE
+2025-10-08T22:42:32.0889949Z ##[endgroup]
+2025-10-08T22:42:32.0891161Z ##[group]Disabling automatic garbage collection
+2025-10-08T22:42:32.0893928Z [command]/usr/bin/git config --local gc.auto 0
+2025-10-08T22:42:32.0926434Z ##[endgroup]
+2025-10-08T22:42:32.0927640Z ##[group]Setting up auth
+2025-10-08T22:42:32.0933653Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2025-10-08T22:42:32.0966053Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2025-10-08T22:42:32.1348620Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2025-10-08T22:42:32.1381490Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2025-10-08T22:42:32.1610161Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2025-10-08T22:42:32.1646334Z ##[endgroup]
+2025-10-08T22:42:32.1649056Z ##[group]Fetching the repository
+2025-10-08T22:42:32.1666651Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +85360478dac3dc62ef2128fae0f96066f31bb630:refs/remotes/origin/feat/m4-seed
+2025-10-08T22:42:32.5104763Z From https://github.com/xforscom/TIYF.ENGINE
+2025-10-08T22:42:32.5127609Z  * [new ref]         85360478dac3dc62ef2128fae0f96066f31bb630 -> origin/feat/m4-seed
+2025-10-08T22:42:32.5184001Z ##[endgroup]
+2025-10-08T22:42:32.5186539Z ##[group]Determining the checkout info
+2025-10-08T22:42:32.5187800Z ##[endgroup]
+2025-10-08T22:42:32.5188541Z [command]/usr/bin/git sparse-checkout disable
+2025-10-08T22:42:32.5236433Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2025-10-08T22:42:32.5289116Z ##[group]Checking out the ref
+2025-10-08T22:42:32.5293860Z [command]/usr/bin/git checkout --progress --force -B feat/m4-seed refs/remotes/origin/feat/m4-seed
+2025-10-08T22:42:32.5421616Z Switched to a new branch 'feat/m4-seed'
+2025-10-08T22:42:32.5426434Z branch 'feat/m4-seed' set up to track 'origin/feat/m4-seed'.
+2025-10-08T22:42:32.5438710Z ##[endgroup]
+2025-10-08T22:42:32.5472669Z [command]/usr/bin/git log -1 --format=%H
+2025-10-08T22:42:32.5496834Z 85360478dac3dc62ef2128fae0f96066f31bb630
+2025-10-08T22:42:32.5764563Z ##[group]Run actions/setup-dotnet@v4
+2025-10-08T22:42:32.5765615Z with:
+2025-10-08T22:42:32.5766308Z   dotnet-version: 8.0.x
+2025-10-08T22:42:32.5767120Z   cache: false
+2025-10-08T22:42:32.5767833Z ##[endgroup]
+2025-10-08T22:42:32.7817390Z [command]/home/runner/work/_actions/actions/setup-dotnet/v4/externals/install-dotnet.sh --skip-non-versioned-files --runtime dotnet --channel LTS
+2025-10-08T22:42:33.1762498Z dotnet-install: .NET Core Runtime with version '8.0.20' is already installed.
+2025-10-08T22:42:33.1798430Z [command]/home/runner/work/_actions/actions/setup-dotnet/v4/externals/install-dotnet.sh --skip-non-versioned-files --channel 8.0
+2025-10-08T22:42:33.4515156Z dotnet-install: .NET Core SDK with version '8.0.414' is already installed.
+2025-10-08T22:42:33.4665241Z ##[group]Run set -euo pipefail
+2025-10-08T22:42:33.4666032Z [36;1mset -euo pipefail[0m
+2025-10-08T22:42:33.4666626Z [36;1mROOT="$GITHUB_WORKSPACE"[0m
+2025-10-08T22:42:33.4667240Z [36;1mSLN="$ROOT/TiYf.Engine.sln"[0m
+2025-10-08T22:42:33.4668042Z [36;1mTOOLS="$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"[0m
+2025-10-08T22:42:33.4669036Z [36;1mSIM="$ROOT/src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"[0m
+2025-10-08T22:42:33.4669962Z [36;1mCFG="$ROOT/tests/fixtures/backtest_m0/config.backtest-m0.json"[0m
+2025-10-08T22:42:33.4670733Z [36;1mecho "[Step] Build solution"[0m
+2025-10-08T22:42:33.4671373Z [36;1mdotnet build "$SLN" -c Release --nologo[0m
+2025-10-08T22:42:33.4672326Z [36;1mecho "[Step] Run Sim (fixture)"[0m
+2025-10-08T22:42:33.4672960Z [36;1mrm -rf "$ROOT/journals" || true[0m
+2025-10-08T22:42:33.4673820Z [36;1mdotnet exec "$SIM" --config "$CFG" --run-id STRICT-CI --quiet || { echo 'Sim run failed'; exit 2; }[0m
+2025-10-08T22:42:33.4674938Z [36;1mRUN_DIR="$(find "$ROOT/journals" -type d -name '*STRICT-CI*' | sort | tail -n1)"[0m
+2025-10-08T22:42:33.4675734Z [36;1mecho "RUN_DIR=$RUN_DIR"[0m
+2025-10-08T22:42:33.4676542Z [36;1mtest -n "$RUN_DIR" || { echo 'No run directory found'; ls -R "$ROOT/journals" || true; exit 2; }[0m
+2025-10-08T22:42:33.4677461Z [36;1mEV="$RUN_DIR/events.csv"; TR="$RUN_DIR/trades.csv"[0m
+2025-10-08T22:42:33.4678308Z [36;1mtest -f "$EV" && test -f "$TR" || { echo 'Missing events/trades'; ls -R "$RUN_DIR"; exit 2; }[0m
+2025-10-08T22:42:33.4679300Z [36;1mecho "Events size: $(wc -l < "$EV") lines"; echo "Trades size: $(wc -l < "$TR") lines"[0m
+2025-10-08T22:42:33.4680101Z [36;1mecho "[Step] Strict verify"[0m
+2025-10-08T22:42:33.4680738Z [36;1mset +e[0m
+2025-10-08T22:42:33.4681522Z [36;1mVERIFY_JSON=$(dotnet exec "$TOOLS" verify strict --events "$EV" --trades "$TR" --schema 1.2.0 --json)[0m
+2025-10-08T22:42:33.4682470Z [36;1mEC=$?[0m
+2025-10-08T22:42:33.4682942Z [36;1mset -e[0m
+2025-10-08T22:42:33.4683597Z [36;1mecho "::group::STRICT VERIFY JSON"; echo "$VERIFY_JSON"; echo "::endgroup::"[0m
+2025-10-08T22:42:33.4684349Z [36;1mmkdir -p artifacts/verify-strict[0m
+2025-10-08T22:42:33.4684969Z [36;1mcp "$EV" "$TR" artifacts/verify-strict/[0m
+2025-10-08T22:42:33.4685580Z [36;1mif [ $EC -ne 0 ]; then[0m
+2025-10-08T22:42:33.4686158Z [36;1m  echo "Verifier exit code=$EC"; exit $EC[0m
+2025-10-08T22:42:33.4686750Z [36;1mfi[0m
+2025-10-08T22:42:33.4726542Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2025-10-08T22:42:33.4727224Z env:
+2025-10-08T22:42:33.4727704Z   DOTNET_ROOT: /usr/share/dotnet
+2025-10-08T22:42:33.4728246Z ##[endgroup]
+2025-10-08T22:42:33.4810830Z [Step] Build solution
+2025-10-08T22:42:37.4050404Z   Determining projects to restore...
+2025-10-08T22:42:38.3446031Z   Restored /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj (in 129 ms).
+2025-10-08T22:42:38.3447847Z   Restored /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Tools/TiYf.Engine.Tools.csproj (in 130 ms).
+2025-10-08T22:42:38.3513068Z   Restored /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sidecar/TiYf.Engine.Sidecar.csproj (in 2 ms).
+2025-10-08T22:42:38.3527582Z   Restored /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Core/TiYf.Engine.Core.csproj (in 1 ms).
+2025-10-08T22:42:42.7029966Z   Restored /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/tests/TiYf.Engine.Tests/TiYf.Engine.Tests.csproj (in 4.34 sec).
+2025-10-08T22:42:49.0462162Z   TiYf.Engine.Core -> /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Core/bin/Release/net8.0/TiYf.Engine.Core.dll
+2025-10-08T22:42:49.6529703Z   TiYf.Engine.Sidecar -> /home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sidecar/bin/Release/net8.0/TiYf.Engine.Sidecar.dll
+2025-10-08T22:42:50.9232275Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(231,25): error CS1061: 'RiskConfig' does not contain a definition for 'ForceDrawdownAfterEvals' and no accessible extension method 'ForceDrawdownAfterEvals' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9274566Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(231,73): error CS1061: 'RiskConfig' does not contain a definition for 'MaxRunDrawdownCCY' and no accessible extension method 'MaxRunDrawdownCCY' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9293527Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(233,37): error CS1061: 'RiskConfig' does not contain a definition for 'ForceDrawdownAfterEvals' and no accessible extension method 'ForceDrawdownAfterEvals' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9301924Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(237,45): error CS1061: 'RiskConfig' does not contain a definition for 'MaxRunDrawdownCCY' and no accessible extension method 'MaxRunDrawdownCCY' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9311280Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(243,25): error CS1061: 'RiskConfig' does not contain a definition for 'EmitEvaluations' and no accessible extension method 'EmitEvaluations' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9319670Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(251,25): error CS1061: 'RiskConfig' does not contain a definition for 'MaxNetExposureBySymbol' and no accessible extension method 'MaxNetExposureBySymbol' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9328106Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(251,72): error CS1061: 'RiskConfig' does not contain a definition for 'MaxNetExposureBySymbol' and no accessible extension method 'MaxNetExposureBySymbol' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9336570Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(262,43): error CS1061: 'RiskConfig' does not contain a definition for 'MaxRunDrawdownCCY' and no accessible extension method 'MaxRunDrawdownCCY' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9344688Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(262,108): error CS1061: 'RiskConfig' does not contain a definition for 'MaxRunDrawdownCCY' and no accessible extension method 'MaxRunDrawdownCCY' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9352849Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(267,52): error CS1061: 'RiskConfig' does not contain a definition for 'BlockOnBreach' and no accessible extension method 'BlockOnBreach' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9360725Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(271,128): error CS1061: 'RiskConfig' does not contain a definition for 'MaxRunDrawdownCCY' and no accessible extension method 'MaxRunDrawdownCCY' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9368862Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(273,52): error CS1061: 'RiskConfig' does not contain a definition for 'BlockOnBreach' and no accessible extension method 'BlockOnBreach' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9376442Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(212,26): error CS0234: The type or namespace name 'RiskParsing' does not exist in the namespace 'TiYf.Engine.Sim' (are you missing an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9382336Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(213,45): error CS0234: The type or namespace name 'RiskMode' does not exist in the namespace 'TiYf.Engine.Sim' (are you missing an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9388191Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(213,82): error CS0234: The type or namespace name 'RiskMode' does not exist in the namespace 'TiYf.Engine.Sim' (are you missing an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9394726Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(213,122): error CS0234: The type or namespace name 'RiskMode' does not exist in the namespace 'TiYf.Engine.Sim' (are you missing an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9399630Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(563,13): error CS0117: 'RiskConfig' does not contain a definition for 'EmitEvaluations' [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9404579Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(564,13): error CS0117: 'RiskConfig' does not contain a definition for 'BlockOnBreach' [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9409247Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(565,13): error CS0117: 'RiskConfig' does not contain a definition for 'MaxRunDrawdownCCY' [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9414192Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(566,13): error CS0117: 'RiskConfig' does not contain a definition for 'MaxNetExposureBySymbol' [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9419331Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(567,13): error CS0117: 'RiskConfig' does not contain a definition for 'ForceDrawdownAfterEvals' [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9425410Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(579,26): error CS0234: The type or namespace name 'RiskParsing' does not exist in the namespace 'TiYf.Engine.Sim' (are you missing an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9431185Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(580,50): error CS0234: The type or namespace name 'RiskMode' does not exist in the namespace 'TiYf.Engine.Sim' (are you missing an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9436994Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(580,95): error CS0234: The type or namespace name 'RiskMode' does not exist in the namespace 'TiYf.Engine.Sim' (are you missing an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9462268Z 
+2025-10-08T22:42:50.9462507Z Build FAILED.
+2025-10-08T22:42:50.9462871Z 
+2025-10-08T22:42:50.9467958Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(231,25): error CS1061: 'RiskConfig' does not contain a definition for 'ForceDrawdownAfterEvals' and no accessible extension method 'ForceDrawdownAfterEvals' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9476590Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(231,73): error CS1061: 'RiskConfig' does not contain a definition for 'MaxRunDrawdownCCY' and no accessible extension method 'MaxRunDrawdownCCY' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9485247Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(233,37): error CS1061: 'RiskConfig' does not contain a definition for 'ForceDrawdownAfterEvals' and no accessible extension method 'ForceDrawdownAfterEvals' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9493755Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(237,45): error CS1061: 'RiskConfig' does not contain a definition for 'MaxRunDrawdownCCY' and no accessible extension method 'MaxRunDrawdownCCY' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9501657Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(243,25): error CS1061: 'RiskConfig' does not contain a definition for 'EmitEvaluations' and no accessible extension method 'EmitEvaluations' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9510730Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(251,25): error CS1061: 'RiskConfig' does not contain a definition for 'MaxNetExposureBySymbol' and no accessible extension method 'MaxNetExposureBySymbol' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9519734Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(251,72): error CS1061: 'RiskConfig' does not contain a definition for 'MaxNetExposureBySymbol' and no accessible extension method 'MaxNetExposureBySymbol' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9528161Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(262,43): error CS1061: 'RiskConfig' does not contain a definition for 'MaxRunDrawdownCCY' and no accessible extension method 'MaxRunDrawdownCCY' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9536281Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(262,108): error CS1061: 'RiskConfig' does not contain a definition for 'MaxRunDrawdownCCY' and no accessible extension method 'MaxRunDrawdownCCY' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9544583Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(267,52): error CS1061: 'RiskConfig' does not contain a definition for 'BlockOnBreach' and no accessible extension method 'BlockOnBreach' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9552447Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(271,128): error CS1061: 'RiskConfig' does not contain a definition for 'MaxRunDrawdownCCY' and no accessible extension method 'MaxRunDrawdownCCY' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9560253Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Class1.cs(273,52): error CS1061: 'RiskConfig' does not contain a definition for 'BlockOnBreach' and no accessible extension method 'BlockOnBreach' accepting a first argument of type 'RiskConfig' could be found (are you missing a using directive or an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9566178Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(212,26): error CS0234: The type or namespace name 'RiskParsing' does not exist in the namespace 'TiYf.Engine.Sim' (are you missing an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9572086Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(213,45): error CS0234: The type or namespace name 'RiskMode' does not exist in the namespace 'TiYf.Engine.Sim' (are you missing an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9577820Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(213,82): error CS0234: The type or namespace name 'RiskMode' does not exist in the namespace 'TiYf.Engine.Sim' (are you missing an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9583804Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(213,122): error CS0234: The type or namespace name 'RiskMode' does not exist in the namespace 'TiYf.Engine.Sim' (are you missing an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9588714Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(563,13): error CS0117: 'RiskConfig' does not contain a definition for 'EmitEvaluations' [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9680160Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(564,13): error CS0117: 'RiskConfig' does not contain a definition for 'BlockOnBreach' [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9684975Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(565,13): error CS0117: 'RiskConfig' does not contain a definition for 'MaxRunDrawdownCCY' [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9690027Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(566,13): error CS0117: 'RiskConfig' does not contain a definition for 'MaxNetExposureBySymbol' [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9699799Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(567,13): error CS0117: 'RiskConfig' does not contain a definition for 'ForceDrawdownAfterEvals' [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9707612Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(579,26): error CS0234: The type or namespace name 'RiskParsing' does not exist in the namespace 'TiYf.Engine.Sim' (are you missing an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9713512Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(580,50): error CS0234: The type or namespace name 'RiskMode' does not exist in the namespace 'TiYf.Engine.Sim' (are you missing an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9721575Z ##[error]/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/Program.cs(580,95): error CS0234: The type or namespace name 'RiskMode' does not exist in the namespace 'TiYf.Engine.Sim' (are you missing an assembly reference?) [/home/runner/work/TIYF.ENGINE/TIYF.ENGINE/src/TiYf.Engine.Sim/TiYf.Engine.Sim.csproj]
+2025-10-08T22:42:50.9724720Z     0 Warning(s)
+2025-10-08T22:42:50.9725055Z     24 Error(s)
+2025-10-08T22:42:50.9725255Z 
+2025-10-08T22:42:50.9725497Z Time Elapsed 00:00:14.91
+2025-10-08T22:42:51.0098150Z ##[error]Process completed with exit code 1.
+2025-10-08T22:42:51.0175849Z ##[group]Run actions/upload-artifact@v4
+2025-10-08T22:42:51.0176133Z with:
+2025-10-08T22:42:51.0176313Z   name: verify-strict-artifacts
+2025-10-08T22:42:51.0176550Z   path: artifacts/verify-strict
+2025-10-08T22:42:51.0176767Z   if-no-files-found: warn
+2025-10-08T22:42:51.0176989Z   compression-level: 6
+2025-10-08T22:42:51.0177187Z   overwrite: false
+2025-10-08T22:42:51.0177373Z   include-hidden-files: false
+2025-10-08T22:42:51.0177579Z env:
+2025-10-08T22:42:51.0177752Z   DOTNET_ROOT: /usr/share/dotnet
+2025-10-08T22:42:51.0177968Z ##[endgroup]
+2025-10-08T22:42:51.3386637Z ##[warning]No files were found with the provided path: artifacts/verify-strict. No artifacts will be uploaded.
+2025-10-08T22:42:51.3677586Z Post job cleanup.
+2025-10-08T22:42:51.5240454Z [command]/usr/bin/git version
+2025-10-08T22:42:51.5313014Z git version 2.51.0
+2025-10-08T22:42:51.5448463Z Temporarily overriding HOME='/home/runner/work/_temp/1cf413ae-956a-491d-a6e5-fd95f96d186c' before making global git config changes
+2025-10-08T22:42:51.5453949Z Adding repository directory to the temporary git global config as a safe directory
+2025-10-08T22:42:51.5484848Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/TIYF.ENGINE/TIYF.ENGINE
+2025-10-08T22:42:51.5607802Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2025-10-08T22:42:51.5767531Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2025-10-08T22:42:51.6416318Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2025-10-08T22:42:51.6481137Z http.https://github.com/.extraheader
+2025-10-08T22:42:51.6507149Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2025-10-08T22:42:51.6596863Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2025-10-08T22:42:51.7468813Z Cleaning up orphan processes
+2025-10-08T22:42:51.7859327Z Terminate orphan process: pid (2172) (dotnet)

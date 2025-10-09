@@ -1,0 +1,60 @@
+name: verify-strict
+
+on:
+  push:
+    branches: [ main, feat/m4-seed ]
+  pull_request:
+    branches: [ main, feat/m4-seed ]
+
+jobs:
+  verify-strict:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build + Generate + Verify (strict)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE"
+          SLN="$ROOT/TiYf.Engine.sln"
+          # Prefer Release Tools dll; fall back to Debug if some project-specific setting produced Debug
+          TOOLS_R="$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
+          TOOLS_D="$ROOT/src/TiYf.Engine.Tools/bin/Debug/net8.0/TiYf.Engine.Tools.dll"
+          SIM="$ROOT/src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"
+          CFG="$ROOT/tests/fixtures/backtest_m0/config.backtest-m0.json"
+          echo "[Step] Build solution"
+          dotnet build "$SLN" -c Release --nologo
+          # Resolve Tools path after build
+          if [ -f "$TOOLS_R" ]; then TOOLS="$TOOLS_R"; elif [ -f "$TOOLS_D" ]; then TOOLS="$TOOLS_D"; else echo "Tools dll not found in Release or Debug"; find "$ROOT/src/TiYf.Engine.Tools/bin" -maxdepth 3 -type f -name 'TiYf.Engine.Tools.dll' -print || true; exit 2; fi
+          echo "[Step] Run Sim (fixture)"
+          rm -rf "$ROOT/journals" || true
+          dotnet exec "$SIM" --config "$CFG" --run-id STRICT-CI --quiet || { echo 'Sim run failed'; exit 2; }
+          RUN_DIR="$(find "$ROOT/journals" -type d -name '*STRICT-CI*' | sort | tail -n1)"
+          echo "RUN_DIR=$RUN_DIR"
+          test -n "$RUN_DIR" || { echo 'No run directory found'; ls -R "$ROOT/journals" || true; exit 2; }
+          EV="$RUN_DIR/events.csv"; TR="$RUN_DIR/trades.csv"
+          test -f "$EV" && test -f "$TR" || { echo 'Missing events/trades'; ls -R "$RUN_DIR"; exit 2; }
+          echo "Events size: $(wc -l < "$EV") lines"; echo "Trades size: $(wc -l < "$TR") lines"
+          echo "[Step] Locate parity artifact (if any)"
+          PARITY_HASH="$(find "$ROOT/artifacts/parity" -type f -name hashes.txt 2>/dev/null | sort | tail -n1 || true)"
+          if [ -f "$PARITY_HASH" ]; then echo "Found parity hashes: $PARITY_HASH"; cat "$PARITY_HASH"; else echo "No parity hashes.txt found (expected if parity feature not triggered)"; fi
+          echo "[Step] Strict verify"
+          set +e
+          VERIFY_JSON=$(dotnet exec "$TOOLS" verify strict --events "$EV" --trades "$TR" --schema 1.3.0 --json)
+          EC=$?
+          set -e
+          echo "::group::STRICT VERIFY JSON"; echo "$VERIFY_JSON"; echo "::endgroup::"
+          mkdir -p artifacts/verify-strict
+          cp "$EV" "$TR" artifacts/verify-strict/
+          if [ $EC -ne 0 ]; then
+            echo "Verifier exit code=$EC"; exit $EC
+          fi
+      - name: Upload artifacts (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-strict-artifacts
+          path: artifacts/verify-strict

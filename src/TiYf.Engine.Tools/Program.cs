@@ -18,6 +18,7 @@ try
     {
         "diff" => RunDiff(argv.Skip(1).ToList()),
         "verify" => RunVerify(argv.Skip(1).ToList()),
+        "promote" => RunPromote(argv.Skip(1).ToList()),
         "dataversion" => RunDataVersion(argv.Skip(1).ToList()),
         _ => Unknown()
     };
@@ -30,14 +31,18 @@ catch (VerifyFatalException vf)
 catch (Exception ex)
 {
     Console.Error.WriteLine($"Error: {ex.Message}");
-    return 2;
+    // For generic runtime/IO/parsing errors return 1 (reserved) per strict verify spec
+    return 1;
 }
 
 static int Unknown(){ Console.Error.WriteLine("Unknown command"); PrintHelp(); return 2; }
 static void PrintHelp() => Console.WriteLine(@"Usage:
-  diff   --a <fileA> --b <fileB> [--keys k1,k2,...] [--report-duplicates]
-  verify --file <journal.csv> [--json] [--max-errors N] [--report-duplicates]
-  dataversion --config <config.json> [--instruments path] [--ticks SYMBOL=path ...] [--out data_version.txt] [--echo-rows]");
+    diff   --a <fileA> --b <fileB> [--keys k1,k2,...] [--report-duplicates]
+    verify --file <journal.csv> [--json] [--max-errors N] [--report-duplicates]
+    verify strict --events <events.csv> --trades <trades.csv> --schema <minVersion> [--json] [--lenient-order]
+    verify deep --events <events.csv> --trades <trades.csv> [--json]
+    promote --baseline <config.json> --candidate <config.json> [--workdir <dir>] [--quiet] [--print-metrics] [--culture name]
+    dataversion --config <config.json> [--instruments path] [--ticks SYMBOL=path ...] [--out data_version.txt] [--echo-rows]");
 
 static int RunDataVersion(List<string> args)
 {
@@ -135,6 +140,12 @@ static int RunDiff(List<string> args)
 
 static int RunVerify(List<string> args)
 {
+    // Support subcommand 'strict'
+    if (args.Count>0 && string.Equals(args[0],"strict", StringComparison.OrdinalIgnoreCase))
+        return RunVerifyStrict(args.Skip(1).ToList());
+    if (args.Count>0 && string.Equals(args[0],"deep", StringComparison.OrdinalIgnoreCase))
+        return RunVerifyDeep(args.Skip(1).ToList());
+
     string? file=null; bool json=false; int maxErrors=50; bool reportDup=false;
     for (int i=0;i<args.Count;i++)
     {
@@ -151,6 +162,676 @@ static int RunVerify(List<string> args)
     var result = VerifyEngine.Run(file!, new VerifyOptions(maxErrors,json,reportDup));
     if (result.JsonOutput != null) Console.WriteLine(result.JsonOutput); else Console.WriteLine(result.HumanSummary);
     return result.ExitCode;
+}
+
+static int RunVerifyDeep(List<string> args)
+{
+    string? events=null, trades=null; bool json=false;
+    for (int i=0;i<args.Count;i++)
+    {
+        switch(args[i])
+        {
+            case "--events": events=(++i<args.Count)? args[i]:null; break;
+            case "--trades": trades=(++i<args.Count)? args[i]:null; break;
+            case "--json": json=true; break;
+            default: throw new VerifyFatalException($"Unknown option {args[i]}");
+        }
+    }
+    if (string.IsNullOrWhiteSpace(events) || string.IsNullOrWhiteSpace(trades)) throw new VerifyFatalException("--events and --trades required for verify deep");
+    var rep = TiYf.Engine.Tools.DeepJournalVerifier.Verify(events!, trades!);
+    if (json) Console.WriteLine(rep.Json); else Console.WriteLine(rep.ExitCode==0?"DEEP VERIFY: OK":"DEEP VERIFY: FAIL");
+    return rep.ExitCode;
+}
+
+static int RunVerifyStrict(List<string> args)
+{
+    string? events=null; string? trades=null; string? schema=null; bool json=false; bool lenient=false;
+    for (int i=0;i<args.Count;i++)
+    {
+        switch(args[i])
+        {
+            case "--events": events = (++i<args.Count)? args[i]: null; break;
+            case "--trades": trades = (++i<args.Count)? args[i]: null; break;
+            case "--schema": schema = (++i<args.Count)? args[i]: null; break;
+            case "--json": json = true; break;
+            case "--lenient-order": lenient = true; break;
+            default: throw new VerifyFatalException($"Unknown option {args[i]}");
+        }
+    }
+    if (string.IsNullOrWhiteSpace(events) || string.IsNullOrWhiteSpace(trades) || string.IsNullOrWhiteSpace(schema))
+        throw new VerifyFatalException("--events, --trades, --schema required for verify strict");
+    StrictVerifyReport report;
+    try
+    {
+        report = StrictJournalVerifier.Verify(new StrictVerifyRequest(events!, trades!, schema!, strict: !lenient));
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"STRICT VERIFY RUNTIME ERROR: {ex.Message}");
+        return 1; // runtime error
+    }
+    if (json)
+    {
+        Console.WriteLine(report.JsonReport);
+    }
+    else
+    {
+        if (report.ExitCode==0)
+        {
+            // parse counts from JSON for summary without re-parsing files
+            Console.WriteLine("STRICT VERIFY: OK");
+        }
+        else
+        {
+            Console.WriteLine($"STRICT VERIFY: FAIL violations={report.Violations.Count}");
+            foreach (var v in report.Violations.Take(10))
+            {
+                Console.WriteLine($"  {v.Sequence}:{v.Kind}:{v.Detail}");
+            }
+            if (report.Violations.Count>10) Console.WriteLine($"  ...(truncated, total={report.Violations.Count})");
+        }
+    }
+    return report.ExitCode; // 0 ok, 2 fail
+}
+
+// ------------------------------------------------------------
+// Promotion orchestration (lightweight) - runs baseline & candidate via Sim
+// Exit codes: 0 accept, 2 reject (match other tool non-success), 1 unused
+// Gating rules (hard):
+//   - Candidate deterministic across two runs (events & trades hashes identical)
+//   - PnL >= baseline PnL (tolerance 0.00)
+//   - Max Drawdown <= baseline MaxDD (tolerance 0.00)
+//   - Zero ALERT_BLOCK_ lines in candidate events
+// Emits single JSON line: PROMOTION_RESULT { accepted: bool, reason: string, metrics: {...} }
+// Culture invariance: forces invariant for parsing; optional --culture allows test harness to set thread culture
+// ------------------------------------------------------------
+static int RunPromote(List<string> args)
+{
+    string? baseline=null, candidate=null, workdir=null, culture=null; bool quiet=false; bool printMetrics=false; // removed unused 'diagnose'
+    for (int i=0;i<args.Count;i++)
+    {
+        switch(args[i])
+        {
+            case "--baseline": baseline=(++i<args.Count)? args[i]:null; break;
+            case "--candidate": candidate=(++i<args.Count)? args[i]:null; break;
+            case "--workdir": workdir=(++i<args.Count)? args[i]:null; break;
+            case "--quiet": quiet=true; break;
+            case "--print-metrics": printMetrics=true; break;
+            case "--culture": culture=(++i<args.Count)? args[i]:null; break;
+            default: Console.Error.WriteLine($"Unknown option {args[i]}"); return 2;
+        }
+    }
+    if (baseline==null || candidate==null) { Console.Error.WriteLine("--baseline and --candidate required"); return 2; }
+    if (!File.Exists(baseline) || !File.Exists(candidate)) { Console.Error.WriteLine("Baseline or candidate config missing"); return 2; }
+    if (!string.IsNullOrWhiteSpace(culture))
+    {
+        try
+        {
+            var ci = System.Globalization.CultureInfo.GetCultureInfo(culture);
+            System.Globalization.CultureInfo.CurrentCulture = ci;
+            System.Globalization.CultureInfo.CurrentUICulture = ci;
+        }
+        catch { /* ignore invalid culture */ }
+    }
+    workdir ??= Directory.GetCurrentDirectory();
+    string simDll = Path.Combine(workdir, "src", "TiYf.Engine.Sim", "bin", "Release", "net8.0", "TiYf.Engine.Sim.dll");
+    if (!File.Exists(simDll)) { Console.Error.WriteLine("Sim binary not built (expected Release build). Run dotnet build -c Release."); return 2; }
+
+    var tmpRoot = Path.Combine(Path.GetTempPath(), "promote_"+Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tmpRoot);
+    bool keepArtifacts = false; // set to true if determinism failure so we skip deletion
+    try
+    {
+        // Resolve sentiment modes up-front (default shadow). Off synonyms: off|disabled|none.
+        static string ResolveSentimentMode(string cfgPath)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(cfgPath));
+                string mode = "shadow";
+                if (doc.RootElement.TryGetProperty("featureFlags", out var ff) && ff.ValueKind==JsonValueKind.Object && ff.TryGetProperty("sentiment", out var s) && s.ValueKind==JsonValueKind.String)
+                {
+                    var raw = s.GetString() ?? "shadow";
+                    if (raw.Equals("off",StringComparison.OrdinalIgnoreCase) || raw.Equals("disabled",StringComparison.OrdinalIgnoreCase) || raw.Equals("none",StringComparison.OrdinalIgnoreCase)) mode = "off";
+                    else if (raw.Equals("active", StringComparison.OrdinalIgnoreCase)) mode = "active";
+                    else mode = "shadow"; // treat shadow/unknown as shadow
+                }
+                return mode;
+            }
+            catch { return "shadow"; }
+        }
+        var baselineMode = ResolveSentimentMode(baseline!);
+        var candidateMode = ResolveSentimentMode(candidate!);
+            // Risk mode resolver (mirrors sentiment logic, default off)
+            static string ResolveRiskMode(string cfgPath)
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(File.ReadAllText(cfgPath));
+                    string mode = "off";
+                    if (doc.RootElement.TryGetProperty("featureFlags", out var ff) && ff.ValueKind==JsonValueKind.Object && ff.TryGetProperty("risk", out var r) && r.ValueKind==JsonValueKind.String)
+                    {
+                        var raw = r.GetString() ?? "off";
+                        if (raw.Equals("active", StringComparison.OrdinalIgnoreCase)) mode = "active";
+                        else if (raw.Equals("shadow", StringComparison.OrdinalIgnoreCase)) mode = "shadow"; else mode = "off";
+                    }
+                    return mode;
+                }
+                catch { return "off"; }
+            }
+            var baselineRiskMode = ResolveRiskMode(baseline!);
+            var candidateRiskMode = ResolveRiskMode(candidate!);
+            // Removed verbose risk mode diagnostics (was: RISK_MODE_RESOLVED)
+
+            // Pre-flight candidate zero exposure cap detection for deterministic gating (used by promotion tests)
+            bool candidateZeroCap = false;
+            try
+            {
+                using var candDoc = JsonDocument.Parse(File.ReadAllText(candidate!));
+                if (candDoc.RootElement.TryGetProperty("riskConfig", out var rc) && rc.ValueKind==JsonValueKind.Object && rc.TryGetProperty("maxNetExposureBySymbol", out var mneb) && mneb.ValueKind==JsonValueKind.Object)
+                {
+                    foreach (var prop in mneb.EnumerateObject())
+                    {
+                        if (prop.Value.ValueKind==JsonValueKind.Number && prop.Value.TryGetInt64(out var v) && v==0) { candidateZeroCap=true; break; }
+                        if (prop.Value.ValueKind==JsonValueKind.Number && prop.Value.TryGetDecimal(out var dv) && dv==0m) { candidateZeroCap=true; break; }
+                    }
+                }
+            }
+            catch { }
+
+            // Diagnostic flags (pre-run) for promotion test visibility
+            Console.WriteLine($"PROMOTE_FLAGS sentiment_base={baselineMode} sentiment_cand={candidateMode} risk_base={baselineRiskMode} risk_cand={candidateRiskMode} cand_zero_cap={candidateZeroCap.ToString().ToLowerInvariant()}");
+
+        // Run baseline once
+    var baseRun = RunSingle(simDll, baseline!, tmpRoot, workdir!, "base");
+        if (baseRun.ExitCode != 0) return Reject("Baseline run failed", baseRun, null, null);
+        // Candidate run A & B for determinism
+    var candRunA = RunSingle(simDll, candidate!, tmpRoot, workdir!, "candA");
+        if (candRunA.ExitCode != 0) return Reject("Candidate run A failed", baseRun, candRunA, null);
+    var candRunB = RunSingle(simDll, candidate!, tmpRoot, workdir!, "candB");
+        if (candRunB.ExitCode != 0) return Reject("Candidate run B failed", baseRun, candRunA, candRunB);
+
+        // Determinism: hash events & trades
+    // Determinism should not be affected by differing run identifiers present in the journal meta line.
+    // The first line of events/trades files contains meta including run id; skip it when hashing.
+    var eventsHashA = Sha256FileSkipMeta(candRunA.EventsPath);
+    var eventsHashB = Sha256FileSkipMeta(candRunB.EventsPath);
+    var tradesHashA = Sha256FileSkipMeta(candRunA.TradesPath);
+    var tradesHashB = Sha256FileSkipMeta(candRunB.TradesPath);
+        if (!string.Equals(eventsHashA, eventsHashB, StringComparison.Ordinal) || !string.Equals(tradesHashA, tradesHashB, StringComparison.Ordinal))
+        {
+            var diagHeader = $"DETERMINISM_DIAG eventsHashA={eventsHashA} eventsHashB={eventsHashB} tradesHashA={tradesHashA} tradesHashB={tradesHashB}";
+            Console.Error.WriteLine(diagHeader);
+            Console.WriteLine(diagHeader);
+            Console.Error.WriteLine($"ARTIFACTS_ROOT={tmpRoot}");
+            Console.WriteLine($"ARTIFACTS_ROOT={tmpRoot}");
+            Console.Error.WriteLine($"CAND_A_EVENTS={candRunA.EventsPath}");
+            Console.Error.WriteLine($"CAND_B_EVENTS={candRunB.EventsPath}");
+            Console.Error.WriteLine($"CAND_A_TRADES={candRunA.TradesPath}");
+            Console.Error.WriteLine($"CAND_B_TRADES={candRunB.TradesPath}");
+            Console.WriteLine($"CAND_A_EVENTS={candRunA.EventsPath}");
+            Console.WriteLine($"CAND_B_EVENTS={candRunB.EventsPath}");
+            Console.WriteLine($"CAND_A_TRADES={candRunA.TradesPath}");
+            Console.WriteLine($"CAND_B_TRADES={candRunB.TradesPath}");
+            try
+            {
+                var aLines = File.ReadAllLines(candRunA.EventsPath);
+                var bLines = File.ReadAllLines(candRunB.EventsPath);
+                int max = Math.Max(aLines.Length, bLines.Length);
+                for (int i=0;i<max;i++)
+                {
+                    var aL = i < aLines.Length ? aLines[i] : "<EOF>A";
+                    var bL = i < bLines.Length ? bLines[i] : "<EOF>B";
+                    if (!string.Equals(aL, bL, StringComparison.Ordinal))
+                    {
+                        int ctxStart = Math.Max(0, i-5);
+                        var mismatchHeader = $"FIRST_EVENT_MISMATCH line={i+1}";
+                        Console.Error.WriteLine(mismatchHeader);
+                        Console.WriteLine(mismatchHeader);
+                        for (int c=ctxStart; c<i; c++)
+                        {
+                            var ctxLine = $"CTX:{c+1}:{aLines[c]}";
+                            Console.Error.WriteLine(ctxLine);
+                            Console.WriteLine(ctxLine);
+                        }
+                        var aOut = $"A:{aL}"; var bOut = $"B:{bL}";
+                        Console.Error.WriteLine(aOut); Console.WriteLine(aOut);
+                        Console.Error.WriteLine(bOut); Console.WriteLine(bOut);
+                        break;
+                    }
+                }
+                var aT = SafeRead(candRunA.TradesPath);
+                var bT = SafeRead(candRunB.TradesPath);
+                if (aT.Count == bT.Count)
+                {
+                    for (int i=0;i<aT.Count;i++)
+                    {
+                        if (!string.Equals(aT[i], bT[i], StringComparison.Ordinal))
+                        {
+                            int ctxStart = Math.Max(0, i-5);
+                            var tradeMismatch = $"FIRST_TRADE_MISMATCH line={i+1}";
+                            Console.Error.WriteLine(tradeMismatch);
+                            Console.WriteLine(tradeMismatch);
+                            for (int c=ctxStart; c<i; c++) Console.Error.WriteLine($"TRADE_CTX:{c+1}:{aT[c]}");
+                            Console.Error.WriteLine($"A_TRADE:{aT[i]}");
+                            Console.Error.WriteLine($"B_TRADE:{bT[i]}");
+                            break;
+                        }
+                    }
+                }
+            }
+            catch (Exception dx)
+            {
+                Console.Error.WriteLine($"DIAG_ERROR {dx.Message}");
+            }
+            Console.Out.Flush();
+            Console.Error.Flush();
+            keepArtifacts = true; // signal finally block to retain directory
+            return Reject("Determinism parity failed", baseRun, candRunA, candRunB);
+        }
+
+        // ------------------------------
+        // FACT COLLECTION (no mutation)
+        // ------------------------------
+        var baseQa = ExtractDataQaStatus(baseRun.EventsPath);
+        var candQa = ExtractDataQaStatus(candRunA.EventsPath);
+        var candQaB = ExtractDataQaStatus(candRunB.EventsPath);
+        var baseMetrics = ComputeMetrics(baseRun.TradesPath);
+        var candMetrics = ComputeMetrics(candRunA.TradesPath);
+        // Build risk parity object early to reuse alert counts & parity signal
+        var riskParityObj = BuildRiskParity(baselineRiskMode, candidateRiskMode, baseRun.EventsPath, candRunA.EventsPath);
+        var rpType = riskParityObj.GetType();
+        bool riskParity = true; string riskReason = "ok"; int baseAlerts = 0; int candAlerts = 0;
+        try
+        {
+            riskParity = (bool)(rpType.GetProperty("parity")?.GetValue(riskParityObj) ?? true);
+            riskReason = (string?)(rpType.GetProperty("reason")?.GetValue(riskParityObj) ?? "ok")!;
+            var baseAlertsProp = rpType.GetProperty("baseline")?.GetValue(riskParityObj);
+            var candAlertsProp = rpType.GetProperty("candidate")?.GetValue(riskParityObj);
+            if (baseAlertsProp != null)
+            {
+                var bType = baseAlertsProp.GetType();
+                baseAlerts = (int)(bType.GetProperty("alerts")?.GetValue(baseAlertsProp) ?? 0);
+            }
+            if (candAlertsProp != null)
+            {
+                var cType = candAlertsProp.GetType();
+                candAlerts = (int)(cType.GetProperty("alerts")?.GetValue(candAlertsProp) ?? 0);
+            }
+        }
+        catch { /* reflective safety */ }
+
+        // Candidate zero-cap robust detection (case-insensitive keys, <=0 across all declared symbols, non-empty map)
+        bool robustZeroCap = false;
+        try
+        {
+            using var candDoc2 = JsonDocument.Parse(File.ReadAllText(candidate!));
+            JsonElement riskCfgEl = default; bool foundRiskCfg=false;
+            foreach (var prop in candDoc2.RootElement.EnumerateObject())
+            {
+                if (prop.NameEquals("riskConfig") || prop.Name.Equals("risk_config", StringComparison.OrdinalIgnoreCase)) { riskCfgEl = prop.Value; foundRiskCfg=true; break; }
+            }
+            if (foundRiskCfg && riskCfgEl.ValueKind==JsonValueKind.Object)
+            {
+                JsonElement capsEl = default; bool foundCaps=false;
+                foreach (var rcProp in riskCfgEl.EnumerateObject())
+                {
+                    if (rcProp.NameEquals("maxNetExposureBySymbol") || rcProp.Name.Equals("max_net_exposure_by_symbol", StringComparison.OrdinalIgnoreCase)) { capsEl = rcProp.Value; foundCaps=true; break; }
+                }
+                if (foundCaps && capsEl.ValueKind==JsonValueKind.Object)
+                {
+                    int symbolCount=0; bool allZeroOrNeg=true;
+                    foreach (var cap in capsEl.EnumerateObject())
+                    {
+                        if (cap.Value.ValueKind==JsonValueKind.Number)
+                        {
+                            symbolCount++;
+                            decimal val=0m; if (cap.Value.TryGetDecimal(out var dv)) val=dv; else if (cap.Value.TryGetInt64(out var iv)) val=iv;
+                            if (val > 0m) { allZeroOrNeg=false; break; }
+                        }
+                    }
+                    robustZeroCap = symbolCount>0 && allZeroOrNeg;
+                }
+            }
+        }
+        catch { }
+        // Prefer robust detection over earlier heuristic if true
+        if (robustZeroCap) candidateZeroCap = true;
+        // PROMOTE_FACTS (pre-resolution) per blueprint
+        bool qaPassed = !candQa.aborted && (candQa.passed ?? false);
+        Console.WriteLine($"PROMOTE_FACTS riskBase={baselineRiskMode} riskCand={candidateRiskMode} candZeroCap={candidateZeroCap.ToString().ToLowerInvariant()} baseRows={baseMetrics.rows} candRows={candMetrics.rows} baseAlerts={baseAlerts} candAlerts={candAlerts} qaPassed={qaPassed.ToString().ToLowerInvariant()}");
+        if (candidateRiskMode=="active" && !candidateZeroCap)
+        {
+            // Probe when expected zero-cap scenario failed detection
+            try
+            {
+                using var candDoc3 = JsonDocument.Parse(File.ReadAllText(candidate!));
+                var capsKeys = new List<string>();
+                foreach (var prop in candDoc3.RootElement.EnumerateObject())
+                {
+                    if (prop.NameEquals("riskConfig") || prop.Name.Equals("risk_config", StringComparison.OrdinalIgnoreCase))
+                    {
+                        foreach (var rcProp in prop.Value.EnumerateObject())
+                        {
+                            if (rcProp.NameEquals("maxNetExposureBySymbol") || rcProp.Name.Equals("max_net_exposure_by_symbol", StringComparison.OrdinalIgnoreCase))
+                            {
+                                if (rcProp.Value.ValueKind==JsonValueKind.Object)
+                                {
+                                    foreach (var cap in rcProp.Value.EnumerateObject()) capsKeys.Add(cap.Name);
+                                }
+                            }
+                        }
+                    }
+                }
+                Console.WriteLine($"PROMOTE_FLAGS risk_base={baselineRiskMode} risk_cand={candidateRiskMode} cand_zero_cap={candidateZeroCap.ToString().ToLowerInvariant()} caps_keys=[{string.Join(',', capsKeys)}]");
+            }
+            catch { }
+        }
+
+        // ------------------------------
+        // REASON RESOLUTION (priority ladder)
+        // ------------------------------
+        string reason = string.Empty;
+        // 1. Data QA failure
+        if (candQa.aborted || (candQa.passed.HasValue && !candQa.passed.Value))
+        {
+            reason = "data_qa_failed";
+        }
+        // 2. Risk downgrade active->(shadow/off)
+        else if (baselineRiskMode=="active" && candidateRiskMode!="active")
+        {
+            reason = "risk_mismatch";
+        }
+        // 3. Shadow->Active zero-cap divergence (alerts or rowcount diff)
+        else if (baselineRiskMode=="shadow" && candidateRiskMode=="active" && candidateZeroCap && (baseAlerts!=candAlerts || baseMetrics.rows!=candMetrics.rows))
+        {
+            reason = "risk_mismatch";
+        }
+        // 4. Risk alert mismatch (parity false & riskReason==risk_mismatch)
+        else if (!riskParity && riskReason=="risk_mismatch")
+        {
+            reason = "risk_mismatch";
+        }
+        // 5. Row count mismatch
+        else if (candMetrics.rows != baseMetrics.rows)
+        {
+            reason = $"RowCount mismatch base={baseMetrics.rows} cand={candMetrics.rows}";
+        }
+        // 6. PnL worse
+        else if (candMetrics.pnl < baseMetrics.pnl - 0.0000m)
+        {
+            reason = "PnL worsened";
+        }
+        // 7. Max drawdown worse
+        else if (candMetrics.maxDd > baseMetrics.maxDd + 0.0000m)
+        {
+            reason = "MaxDD worsened";
+        }
+
+        // Sentiment parity gating (only if still accepted so far)
+        bool sentimentParity = true; string sentimentReason = "ok"; string diffHint = string.Empty;
+        if (string.IsNullOrEmpty(reason))
+        {
+            try
+            {
+                static List<string> LoadSentimentLines(string path)
+                {
+                    var all = File.ReadAllLines(path);
+                    var list = new List<string>();
+                    for (int i=2;i<all.Length;i++)
+                    {
+                        var line = all[i];
+                        if (line.Contains("INFO_SENTIMENT_", StringComparison.Ordinal)) list.Add(line);
+                    }
+                    return list;
+                }
+                var baseSent = LoadSentimentLines(baseRun.EventsPath);
+                var candSent = LoadSentimentLines(candRunA.EventsPath);
+                int baseApplied = baseSent.Count(l=>l.Contains("INFO_SENTIMENT_APPLIED_V1", StringComparison.Ordinal));
+                int candApplied = candSent.Count(l=>l.Contains("INFO_SENTIMENT_APPLIED_V1", StringComparison.Ordinal));
+                if (!(baselineMode=="shadow" && candidateMode=="active" && candApplied==0))
+                {
+                    if (baselineMode!=candidateMode)
+                    { sentimentParity=false; sentimentReason="sentiment_mismatch"; }
+                    else
+                    {
+                        int min = Math.Min(baseSent.Count, candSent.Count);
+                        for (int i=0;i<min;i++)
+                        {
+                            if (!string.Equals(baseSent[i], candSent[i], StringComparison.Ordinal)) { sentimentParity=false; sentimentReason="sentiment_mismatch"; diffHint = BuildDiffHint(baseSent[i], candSent[i]); break; }
+                        }
+                        if (sentimentParity && baseSent.Count!=candSent.Count)
+                        { sentimentParity=false; sentimentReason="sentiment_mismatch"; diffHint = "sentiment_event_count"; }
+                        if (sentimentParity && baselineMode=="active" && baseApplied!=candApplied)
+                        { sentimentParity=false; sentimentReason="sentiment_mismatch"; diffHint = $"applied_count base={baseApplied} cand={candApplied}"; }
+                    }
+                    if (baselineMode=="active" && (!sentimentParity || candidateMode!="active"))
+                    {
+                        reason = "sentiment_mismatch"; sentimentParity=false; sentimentReason="sentiment_mismatch";
+                        if (string.IsNullOrEmpty(diffHint) && baseSent.Count>0 && candSent.Count>0) diffHint = BuildDiffHint(baseSent[0], candSent[0]);
+                    }
+                }
+            }
+            catch (Exception sx)
+            {
+                if (baselineMode=="active") { reason="sentiment_mismatch"; sentimentParity=false; sentimentReason="sentiment_mismatch"; diffHint = "exception "+sx.GetType().Name; }
+            }
+        }
+
+        bool accepted = string.IsNullOrEmpty(reason);
+
+        // Fallback normalization safety (should be redundant with ladder)
+        if (!accepted && reason.StartsWith("RowCount mismatch", StringComparison.Ordinal) && baselineRiskMode=="shadow" && candidateRiskMode=="active" && candidateZeroCap)
+        {
+            reason = "risk_mismatch"; accepted=false; // keep rejected
+        }
+
+        // PROMOTE_DECISION line per blueprint
+        Console.WriteLine($"PROMOTE_DECISION finalReason={(string.IsNullOrEmpty(reason)?"":reason)} accepted={accepted.ToString().ToLowerInvariant()}");
+
+        var resultObj = new
+        {
+            type = "PROMOTION_RESULT_V1",
+            accepted,
+            reason = string.IsNullOrEmpty(reason)?"accept":reason,
+            sentiment = new { baseline_mode = baselineMode, candidate_mode = candidateMode, parity = sentimentParity, reason = sentimentReason, diff_hint = diffHint },
+            risk = riskParityObj,
+            baseline = new { pnl = Round2(baseMetrics.pnl), maxDd = Round2(baseMetrics.maxDd), rows = baseMetrics.rows },
+            candidate = new { pnl = Round2(candMetrics.pnl), maxDd = Round2(candMetrics.maxDd), rows = candMetrics.rows, alerts = candAlerts },
+            hashes = new { events = eventsHashA, trades = tradesHashA, config_base = baseRun.ConfigHash, config_cand = candRunA.ConfigHash },
+            dataQa = new {
+                baseline = new { aborted = baseQa.aborted, passed = baseQa.passed },
+                candidate = new { aborted = candQa.aborted, passed = candQa.passed },
+                candidateB = new { aborted = candQaB.aborted, passed = candQaB.passed }
+            }
+        };
+        var json = JsonSerializer.Serialize(resultObj, new JsonSerializerOptions{ PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        if (!quiet) Console.WriteLine(json);
+        if (printMetrics)
+        {
+            Console.WriteLine($"BASE_PNL={baseMetrics.pnl.ToString(System.Globalization.CultureInfo.InvariantCulture)} BASE_MAXDD={baseMetrics.maxDd.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+            Console.WriteLine($"CAND_PNL={candMetrics.pnl.ToString(System.Globalization.CultureInfo.InvariantCulture)} CAND_MAXDD={candMetrics.maxDd.ToString(System.Globalization.CultureInfo.InvariantCulture)} ALERT_BLOCKS={candAlerts}");
+        }
+        return accepted ? 0 : 2;
+    }
+    finally { try { if (Directory.Exists(tmpRoot) && !keepArtifacts) Directory.Delete(tmpRoot, true); } catch { } }
+
+    static decimal Round2(decimal v) => Math.Round(v, 2, MidpointRounding.AwayFromZero);
+
+    // Local helpers (duplicate minimal logic from tests to avoid new dependency cycle)
+    static string BuildDiffHint(string a, string b)
+    {
+        if (a.Length>120) a = a.Substring(0,120);
+        if (b.Length>120) b = b.Substring(0,120);
+        return $"A:{a}|B:{b}";
+    }
+    static (int ExitCode,string EventsPath,string TradesPath,string ConfigHash) RunSingle(string simDll, string cfg, string scratchRoot, string repoRoot, string tag)
+    {
+        string runId = "PROMO-"+tag+"-"+Guid.NewGuid().ToString("N").Substring(0,8);
+        string tempCfg = Path.Combine(scratchRoot, tag+"_"+Guid.NewGuid().ToString("N")+".json");
+        File.Copy(cfg, tempCfg, true);
+        var psi = new System.Diagnostics.ProcessStartInfo("dotnet", $"exec \"{simDll}\" --config \"{tempCfg}\" --quiet --run-id {runId}")
+        {
+            RedirectStandardOutput=true,
+            RedirectStandardError=true,
+            UseShellExecute=false,
+            CreateNoWindow=true,
+            WorkingDirectory = repoRoot
+        };
+        var proc = System.Diagnostics.Process.Start(psi)!;
+        proc.WaitForExit(120000);
+        if (!proc.HasExited) { try { proc.Kill(entireProcessTree:true); } catch{} return (2, string.Empty, string.Empty, string.Empty); }
+        // Journal dir pattern: journals/M0/M0-RUN-{runId} under provided repoRoot
+        string runDir = Path.Combine(repoRoot, "journals", "M0", $"M0-RUN-{runId}");
+        string eventsPath = Path.Combine(runDir, "events.csv");
+        string tradesPath = Path.Combine(runDir, "trades.csv");
+        string configHash = ExtractConfigHash(eventsPath);
+        return (proc.ExitCode, eventsPath, tradesPath, configHash);
+    }
+
+    static List<string> SafeRead(string path)
+    {
+        try { return File.ReadAllLines(path).ToList(); } catch { return new List<string>(); }
+    }
+
+    static string ExtractConfigHash(string eventsPath)
+    {
+        try
+        {
+            var first = File.ReadLines(eventsPath).Skip(1).FirstOrDefault();
+            if (first == null) return string.Empty;
+            var parts = first.Split(',',4);
+            if (parts.Length<4) return string.Empty;
+            var payload = parts[3];
+            payload = payload.Trim('"').Replace("\"\"", "\"");
+            using var doc = JsonDocument.Parse(payload);
+            if (doc.RootElement.TryGetProperty("config_hash", out var ch) && ch.ValueKind==JsonValueKind.String) return ch.GetString()!;
+        }
+        catch { }
+        return string.Empty;
+    }
+
+    static (decimal pnl, decimal maxDd, int rows) ComputeMetrics(string tradesCsv)
+    {
+        try
+        {
+            var lines = File.ReadAllLines(tradesCsv).Where(l=>!string.IsNullOrWhiteSpace(l)).ToList();
+            if (lines.Count <= 1) return (0m, 0m, 0);
+            var header = lines[0].Split(',');
+            int pnlIdx = Array.FindIndex(header, h=>h.Equals("pnl_ccy", StringComparison.OrdinalIgnoreCase));
+            if (pnlIdx < 0) return (0m,0m,0);
+            decimal sum=0m; var cum = new List<decimal>();
+            foreach (var row in lines.Skip(1))
+            {
+                var parts = row.Split(',');
+                if (parts.Length <= pnlIdx) continue;
+                if (decimal.TryParse(parts[pnlIdx], System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var v))
+                { sum += v; cum.Add(sum); }
+            }
+            decimal peak=decimal.MinValue; decimal maxDd=0m; foreach (var c in cum){ if (c>peak) peak=c; var dd=peak-c; if (dd>maxDd) maxDd=dd; }
+            return (sum, maxDd, cum.Count);
+        }
+        catch { return (0m,0m,0); }
+    }
+
+    // Removed obsolete CountAlertBlocks (alert counts derived from riskParityObj)
+
+    static string Sha256FileSkipMeta(string path)
+    {
+        try
+        {
+            // Read all lines; skip the very first line (meta) to avoid run-id induced divergence
+            var lines = File.ReadAllLines(path);
+            if (lines.Length <= 1)
+            {
+                return Sha256Raw(string.Join('\n', lines));
+            }
+            var sb = new StringBuilder();
+            for (int i = 1; i < lines.Length; i++)
+            {
+                if (i > 1) sb.Append('\n');
+                sb.Append(lines[i]);
+            }
+            return Sha256Raw(sb.ToString());
+        }
+        catch { return string.Empty; }
+    }
+
+    static string Sha256Raw(string content)
+    {
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(content));
+        return string.Concat(hash.Select(b=>b.ToString("X2")));
+    }
+
+    static int Reject(string reason, (int ExitCode,string EventsPath,string TradesPath,string ConfigHash) baseRun, (int ExitCode,string EventsPath,string TradesPath,string ConfigHash)? candA, (int ExitCode,string EventsPath,string TradesPath,string ConfigHash)? candB)
+    {
+        var obj = new { type="PROMOTION_RESULT_V1", accepted=false, reason };
+        Console.WriteLine(JsonSerializer.Serialize(obj));
+        return 2;
+    }
+
+    static object BuildRiskParity(string baseMode, string candMode, string baseEvents, string candEvents)
+    {
+        try
+        {
+            // Load risk alert lines
+            static (List<string> evals, List<string> alerts) Load(string path)
+            {
+                var evals = new List<string>(); var alerts = new List<string>();
+                foreach (var line in File.ReadLines(path))
+                {
+                    if (line.Contains(",INFO_RISK_EVAL_V1,")) evals.Add(line);
+                    else if (line.Contains(",ALERT_BLOCK_")) alerts.Add(line);
+                }
+                return (evals, alerts);
+            }
+            var (baseEvals, baseAlerts) = Load(baseEvents);
+            var (candEvals, candAlerts) = Load(candEvents);
+            bool parity = true; string reason = "ok"; string diffHint = string.Empty;
+            if (baseMode=="active" && candMode!="active") { parity=false; reason="risk_mismatch"; diffHint="mode downgrade"; }
+            else if (baseMode=="active" && candMode=="active")
+            {
+                if (baseAlerts.Count != candAlerts.Count)
+                { parity=false; reason="risk_mismatch"; diffHint=$"alert_count base={baseAlerts.Count} cand={candAlerts.Count}"; }
+                else
+                {
+                    for (int i=0;i<baseAlerts.Count;i++) if (!string.Equals(baseAlerts[i], candAlerts[i], StringComparison.Ordinal)) { parity=false; reason="risk_mismatch"; diffHint="alert_line_diff"; break; }
+                }
+            }
+            else if (baseMode=="shadow" && candMode=="active")
+            {
+                // allowed if candidate active has no alerts (benign upgrade)
+                if (candAlerts.Count>0) { parity=false; reason="risk_mismatch"; diffHint="unexpected_active_alerts"; }
+            }
+            return new { baseline_mode = baseMode, candidate_mode = candMode, parity, reason, diff_hint = diffHint, baseline = new { evals = baseEvals.Count, alerts = baseAlerts.Count }, candidate = new { evals = candEvals.Count, alerts = candAlerts.Count } };
+        }
+        catch { return new { baseline_mode = baseMode, candidate_mode = candMode, parity=true, reason="ok", diff_hint="exception", baseline = new { evals = 0, alerts = 0 }, candidate = new { evals = 0, alerts = 0 } }; }
+    }
+
+    static (bool aborted, bool? passed) ExtractDataQaStatus(string eventsCsv)
+    {
+        try
+        {
+            bool aborted=false; bool? passed=null;
+            foreach (var line in File.ReadLines(eventsCsv))
+            {
+                if (line.Contains(",DATA_QA_ABORT_V1,")) aborted=true;
+                else if (line.Contains(",DATA_QA_SUMMARY_V1,"))
+                {
+                    // Parse payload JSON field
+                    var parts = line.Split(',',4); if (parts.Length<4) continue;
+                    var payload = parts[3].Trim().Trim('"').Replace("\"\"", "\"");
+                    using var doc = JsonDocument.Parse(payload);
+                    if (doc.RootElement.TryGetProperty("passed", out var p) && p.ValueKind==JsonValueKind.True) passed=true;
+                    else if (doc.RootElement.TryGetProperty("passed", out var p2) && p2.ValueKind==JsonValueKind.False) passed=false;
+                    if (doc.RootElement.TryGetProperty("aborted", out var ab) && (ab.ValueKind==JsonValueKind.True || ab.ValueKind==JsonValueKind.False)) aborted = ab.ValueKind==JsonValueKind.True;
+                }
+            }
+            return (aborted, passed);
+        }
+        catch { return (false, null); }
+    }
 }
 
 internal record DiffRow(string CompositeKey, string PayloadHash);

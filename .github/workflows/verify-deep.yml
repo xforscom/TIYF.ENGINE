@@ -1,0 +1,98 @@
+name: verify-deep
+
+on:
+  push:
+    branches: [ main, feat/m4-seed, feat/m5-seed ]
+  pull_request:
+    branches: [ main, feat/m4-seed, feat/m5-seed ]
+  workflow_dispatch: {}
+
+jobs:
+  verify-deep:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Clean tree guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "$(git status --porcelain)" ]; then echo "Dirty tree before build"; git status; exit 1; fi
+      - name: Restore (with retry)
+        shell: bash
+        run: |
+          set -euo pipefail
+          n=0
+          until [ "$n" -ge 3 ]; do
+            dotnet restore TiYf.Engine.sln && break
+            n=$((n+1)); echo "Restore attempt $n failed; retrying in 3s..."; sleep 3
+          done
+          [ "$n" -lt 3 ] || { echo "Restore failed after retries"; exit 1; }
+      - name: Build (Release)
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet build TiYf.Engine.sln -c Release --nologo --no-restore
+      - name: Resolve binaries
+        id: paths
+        shell: bash
+        run: |
+          ROOT="$GITHUB_WORKSPACE"
+          SIM_R="$ROOT/src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"
+          SIM_D="$ROOT/src/TiYf.Engine.Sim/bin/Debug/net8.0/TiYf.Engine.Sim.dll"
+          TOOLS_R="$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
+          TOOLS_D="$ROOT/src/TiYf.Engine.Tools/bin/Debug/net8.0/TiYf.Engine.Tools.dll"
+          if [ -f "$SIM_R" ]; then echo "sim=$SIM_R" >> $GITHUB_OUTPUT; elif [ -f "$SIM_D" ]; then echo "sim=$SIM_D" >> $GITHUB_OUTPUT; else echo "Sim dll not found"; exit 2; fi
+          if [ -f "$TOOLS_R" ]; then echo "tools=$TOOLS_R" >> $GITHUB_OUTPUT; elif [ -f "$TOOLS_D" ]; then echo "tools=$TOOLS_D" >> $GITHUB_OUTPUT; else echo "Tools dll not found"; exit 2; fi
+      - name: Run sim (fixture)
+        id: run_sim
+        shell: bash
+        run: |
+          set -euo pipefail
+          CFG="tests/fixtures/backtest_m0/config.backtest-m0.json"
+          rm -rf journals || true
+          # Run and capture stdout to parse precise journal paths
+          OUT=$(mktemp)
+          set +e
+          dotnet exec "${{ steps.paths.outputs.sim }}" --config "$CFG" --run-id DEEP-CI --quiet | tee "$OUT" || true
+          DOTNET_CODE=$?
+          set -e
+          # Try to parse events/trades paths from stdout
+          EV=$(grep -m1 '^JOURNAL_DIR_EVENTS=' "$OUT" | cut -d= -f2 || true)
+          TR=$(grep -m1 '^JOURNAL_DIR_TRADES=' "$OUT" | cut -d= -f2 || true)
+          if [ -z "$EV" ] || [ -z "$TR" ]; then
+            RUN_DIR=$(ls -d journals/*DEEP-CI* 2>/dev/null | head -n1 || true)
+            echo "RUN_DIR=$RUN_DIR"
+            test -n "$RUN_DIR"
+            EV="$RUN_DIR/events.csv"; TR="$RUN_DIR/trades.csv"
+          fi
+          test -f "$EV" && test -f "$TR"
+          echo "events=$EV" >> $GITHUB_OUTPUT
+          echo "trades=$TR" >> $GITHUB_OUTPUT
+      - name: Deep verify
+        id: deep
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/verify-deep
+          set +e
+          JSON=$(dotnet exec "${{ steps.paths.outputs.tools }}" verify deep --events "${{ steps.run_sim.outputs.events }}" --trades "${{ steps.run_sim.outputs.trades }}" --json)
+          EC=$?
+          set -e
+          echo "$JSON" | tee artifacts/verify-deep/report.json
+          echo "ec=$EC" >> $GITHUB_OUTPUT
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-deep-${{ matrix.os }}
+          path: artifacts/verify-deep
+      - name: Fail if deep verify failed
+        if: steps.deep.outputs.ec != '0'
+        shell: bash
+        run: exit 1
