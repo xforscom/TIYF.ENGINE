@@ -685,7 +685,7 @@ static int RunPromote(List<string> args)
             factsPenaltyCand = File.ReadLines(candRunA.EventsPath).Count(l=>l.Contains("PENALTY_APPLIED_V1"));
         }
         catch { }
-        Console.WriteLine($"PROMOTE_FACTS riskBase={baselineRiskMode} riskCand={candidateRiskMode} candZeroCap={candidateZeroCap.ToString().ToLowerInvariant()} baseRows={baseMetrics.rows} candRows={candMetrics.rows} baseAlerts={baseAlerts} candAlerts={candAlerts} penBase={factsPenaltyBase} penCand={factsPenaltyCand} qaPassed={qaPassed.ToString().ToLowerInvariant()}");
+    Console.WriteLine($"PROMOTE_FACTS riskBase={baselineRiskMode} riskCand={candidateRiskMode} candZeroCap={candidateZeroCap.ToString().ToLowerInvariant()} baseRows={baseMetrics.rows} candRows={candMetrics.rows} baseAlerts={baseAlerts} candAlerts={candAlerts} penBase={factsPenaltyBase} penCand={factsPenaltyCand} penaltyBaseCount={factsPenaltyBase} penaltyCandCount={factsPenaltyCand} qaPassed={qaPassed.ToString().ToLowerInvariant()}");
         if (candidateRiskMode=="active" && !candidateZeroCap)
         {
             // Probe when expected zero-cap scenario failed detection
