@@ -113,7 +113,15 @@ jobs:
           RUN_ID=CANARY-$MODE-B
           OUT=$(mktemp)
           dotnet exec "$SIM" --config "$OUTCFG_B" --quiet --run-id "$RUN_ID" | tee "$OUT"
-          RUN_DIR=$(ls -d "$ROOT"/journals/*"$RUN_ID"* 2>/dev/null | head -n1 || true)
+          EV_B=$(grep -m1 '^JOURNAL_DIR_EVENTS=' "$OUT" | cut -d= -f2 || true)
+          TR_B=$(grep -m1 '^JOURNAL_DIR_TRADES=' "$OUT" | cut -d= -f2 || true)
+          RUN_DIR=""
+          if [ -n "$EV_B" ] && [ -n "$TR_B" ]; then
+            RUN_DIR="$(dirname "$EV_B")"
+          fi
+          if [ -z "$EV_B" ] || [ -z "$TR_B" ]; then
+            RUN_DIR=$(ls -d "$ROOT"/journals/*"$RUN_ID"* 2>/dev/null | head -n1 || true)
+          fi
           echo "RUN_DIR_B=$RUN_DIR"; test -n "$RUN_DIR"
           EV_B="$RUN_DIR/events.csv"; TR_B="$RUN_DIR/trades.csv"
           test -f "$EV_B"; test -f "$TR_B"
