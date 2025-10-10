@@ -43,7 +43,15 @@ jobs:
         run: |
           # Clean any prior A run dir and execute with explicit run-id to avoid meta/run-id interference
           if (Test-Path journals/M0/M0-RUN-A) { Remove-Item -Recurse -Force journals/M0/M0-RUN-A }
-          dotnet run --project src/TiYf.Engine.Sim -- --config tests/fixtures/backtest_m0/config.backtest-m0.json --run-id A
+          # Mutate base config to disable non-M0 systems (risk, sentiment, penalty)
+          $baseCfg = Get-Content 'tests/fixtures/backtest_m0/config.backtest-m0.json' -Raw | ConvertFrom-Json
+          if ($null -eq $baseCfg.featureFlags) { $baseCfg | Add-Member -NotePropertyName featureFlags -NotePropertyValue (@{}) }
+          $baseCfg.featureFlags.sentiment = 'off'
+          $baseCfg.featureFlags.risk = 'off'
+          $baseCfg.featureFlags.penalty = 'off'
+          $cfgA = "$(Join-Path $PWD 'tmp-m0-a.json')"
+          $baseCfg | ConvertTo-Json -Depth 6 | Set-Content -Path $cfgA -Encoding utf8
+          dotnet run --project src/TiYf.Engine.Sim -- --config "$cfgA" --run-id M0-RUN-A
           Copy-Item journals/M0/M0-RUN-A/events.csv artifacts/raw/events_A.csv
           Copy-Item journals/M0/M0-RUN-A/trades.csv artifacts/raw/trades_A.csv
 
@@ -51,7 +59,10 @@ jobs:
         run: |
           # Clean any prior B run dir and execute with explicit run-id to avoid meta/run-id interference
           if (Test-Path journals/M0/M0-RUN-B) { Remove-Item -Recurse -Force journals/M0/M0-RUN-B }
-          dotnet run --project src/TiYf.Engine.Sim -- --config tests/fixtures/backtest_m0/config.backtest-m0.json --run-id B
+          # Reuse the same non-M0-off config for B to ensure identical toggles
+          $cfgB = "$(Join-Path $PWD 'tmp-m0-b.json')"
+          Copy-Item $cfgA $cfgB -Force
+          dotnet run --project src/TiYf.Engine.Sim -- --config "$cfgB" --run-id M0-RUN-B
           Copy-Item journals/M0/M0-RUN-B/events.csv artifacts/raw/events_B.csv
           Copy-Item journals/M0/M0-RUN-B/trades.csv artifacts/raw/trades_B.csv
 
