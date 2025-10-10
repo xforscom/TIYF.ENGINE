@@ -76,6 +76,10 @@ jobs:
           fi
           EV=$(grep -m1 '^JOURNAL_DIR_EVENTS=' "$OUT" | cut -d= -f2 || true)
           TR=$(grep -m1 '^JOURNAL_DIR_TRADES=' "$OUT" | cut -d= -f2 || true)
+          RUN_DIR=""
+          if [ -n "$EV" ] && [ -n "$TR" ]; then
+            RUN_DIR="$(dirname "$EV")"
+          fi
           if [ -z "$EV" ] || [ -z "$TR" ]; then
             echo "Missing JOURNAL_DIR entries in simulator output" >&2
             echo '--- simulator stdout ---'
