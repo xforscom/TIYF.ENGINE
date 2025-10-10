@@ -1,31 +1,25 @@
-using System;
-using System.IO;
-using System.Linq;
-using System.Text;
-using System.Text.Json;
-using System.Globalization;
-using Xunit;
+using System;using System.IO;using System.Linq;using System.Text;using System.Text.Json;using System.Globalization;using Xunit;
 
 namespace TiYf.Engine.Tools.Tests;
 
 public class PenaltyScaffoldTests
 {
-    private string Temp(string name, string content) { var p = Path.Combine(Path.GetTempPath(), $"pen_{Guid.NewGuid():N}_{name}"); File.WriteAllText(p, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)); return p; }
+    private string Temp(string name,string content){ var p=Path.Combine(Path.GetTempPath(),$"pen_{Guid.NewGuid():N}_{name}"); File.WriteAllText(p,content,new UTF8Encoding(encoderShouldEmitUTF8Identifier:false)); return p; }
 
-    private (string cfg, string instruments, string ticks) BuildConfig(bool enablePenalty, bool forcePenalty)
+    private (string cfg,string instruments,string ticks) BuildConfig(bool enablePenalty,bool forcePenalty)
     {
         var instrumentsCsv = "symbol\nEURUSD\n"; var instPath = Temp("inst.csv", instrumentsCsv);
         var ticksCsv = new StringBuilder();
         ticksCsv.AppendLine("utc_ts,price,vol");
-        var start = new DateTime(2025, 1, 2, 0, 0, 0, DateTimeKind.Utc);
-        for (int i = 0; i < 3; i++) ticksCsv.AppendLine(start.AddMinutes(i).ToString("O") + ",1.1000,1");
+        var start = new DateTime(2025,1,2,0,0,0,DateTimeKind.Utc);
+        for (int i=0;i<3;i++) ticksCsv.AppendLine(start.AddMinutes(i).ToString("O")+",1.1000,1");
         var ticksPath = Temp("ticks.csv", ticksCsv.ToString());
         var ffPenalty = enablePenalty ? ("\"penalty\":\"shadow\",") : string.Empty;
-        var penaltyCfg = forcePenalty ? ",\"penaltyConfig\":{\"forcePenalty\":true}" : string.Empty;
-        var ciScaffold = enablePenalty && forcePenalty ? ",\"ciPenaltyScaffold\":true" : string.Empty;
-        var cfgJson = $"{{\n  \"SchemaVersion\":\"1.3.0\",\n  \"RunId\":\"{Guid.NewGuid():N}\",\n  \"InstrumentFile\":\"{instPath.Replace("\\", "/")}\",\n  \"InputTicksFile\":\"{ticksPath.Replace("\\", "/")}\",\n  \"JournalRoot\":\"journals/M0\",\n  \"featureFlags\":{{{ffPenalty}\"sentiment\":\"off\"}}{penaltyCfg}{ciScaffold}\n}}";
+    var penaltyCfg = forcePenalty ? ",\"penaltyConfig\":{\"forcePenalty\":true}" : string.Empty;
+    var ciScaffold = enablePenalty && forcePenalty ? ",\"ciPenaltyScaffold\":true" : string.Empty;
+    var cfgJson = $"{{\n  \"SchemaVersion\":\"1.3.0\",\n  \"RunId\":\"{Guid.NewGuid():N}\",\n  \"InstrumentFile\":\"{instPath.Replace("\\","/")}\",\n  \"InputTicksFile\":\"{ticksPath.Replace("\\","/")}\",\n  \"JournalRoot\":\"journals/M0\",\n  \"featureFlags\":{{{ffPenalty}\"sentiment\":\"off\"}}{penaltyCfg}{ciScaffold}\n}}";
         var cfgPath = Temp("cfg.json", cfgJson);
-        return (cfgPath, instPath, ticksPath);
+        return (cfgPath,instPath,ticksPath);
     }
 
     private static string FindSolutionRoot()
@@ -82,48 +76,48 @@ public class PenaltyScaffoldTests
             .ToArray();
     }
 
-    private string RunSim(string cfgPath, string runId, string? expectedMode = null, bool? expectForce = null, bool? expectCiScaffold = null)
+    private string RunSim(string cfgPath,string runId, string? expectedMode = null, bool? expectForce = null, bool? expectCiScaffold = null)
     {
         var root = FindSolutionRoot();
-        var dll = Path.Combine(root, "src", "TiYf.Engine.Sim", "bin", "Release", "net8.0", "TiYf.Engine.Sim.dll");
-        Assert.True(File.Exists(dll), $"Sim DLL missing; build Release first at {dll}");
+        var dll = Path.Combine(root,"src","TiYf.Engine.Sim","bin","Release","net8.0","TiYf.Engine.Sim.dll");
+        Assert.True(File.Exists(dll),$"Sim DLL missing; build Release first at {dll}");
         // Determinism: ensure we don't reuse a previous journal run folder from earlier local runs
-        var runDir = Path.Combine(root, "journals", "M0", runId);
+    var runDir = Path.Combine(root, "journals", "M0", runId);
         if (Directory.Exists(runDir))
         {
             try { Directory.Delete(runDir, recursive: true); } catch { /* best effort cleanup */ }
         }
-        var psi = new System.Diagnostics.ProcessStartInfo("dotnet", $"exec \"{dll}\" --config \"{cfgPath}\" --run-id {runId} --verbose")
-        { RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = root };
-        var p = System.Diagnostics.Process.Start(psi)!; p.WaitForExit(15000);
-        var stdout = p.StandardOutput.ReadToEnd();
-        var stderr = p.StandardError.ReadToEnd();
-        // Sanity: confirm simulator parsed penalty flags as expected for this test
-        var lines = stdout.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-        string? penaltyMode = null; string? eventsPath = null; bool forceFlag = false; bool ciFlag = false;
-        foreach (var line in lines)
+    var psi = new System.Diagnostics.ProcessStartInfo("dotnet",$"exec \"{dll}\" --config \"{cfgPath}\" --run-id {runId} --verbose")
+        { RedirectStandardError=true,RedirectStandardOutput=true,UseShellExecute=false,CreateNoWindow=true, WorkingDirectory = root };
+    var p = System.Diagnostics.Process.Start(psi)!; p.WaitForExit(15000);
+    var stdout = p.StandardOutput.ReadToEnd();
+    var stderr = p.StandardError.ReadToEnd();
+    // Sanity: confirm simulator parsed penalty flags as expected for this test
+    var lines = stdout.Split(new[]{'\r','\n'}, StringSplitOptions.RemoveEmptyEntries);
+    string? penaltyMode = null; string? eventsPath = null; bool forceFlag = false; bool ciFlag = false;
+    foreach (var line in lines)
+    {
+        if (TryParseKeyValue(line, "PENALTY_MODE_RESOLVED", out var v))
         {
-            if (TryParseKeyValue(line, "PENALTY_MODE_RESOLVED", out var v))
-            {
-                penaltyMode = v.Split(' ')[0];
-                // also check inline flags
-                forceFlag = line.IndexOf("force=true", StringComparison.OrdinalIgnoreCase) >= 0;
-                ciFlag = line.IndexOf("ci_scaffold=true", StringComparison.OrdinalIgnoreCase) >= 0;
-            }
-            if (TryParseKeyValue(line, "JOURNAL_DIR_EVENTS", out var pth)) eventsPath = pth;
+            penaltyMode = v.Split(' ')[0];
+            // also check inline flags
+            forceFlag = line.IndexOf("force=true", StringComparison.OrdinalIgnoreCase) >= 0;
+            ciFlag = line.IndexOf("ci_scaffold=true", StringComparison.OrdinalIgnoreCase) >= 0;
         }
-        if (!string.IsNullOrWhiteSpace(expectedMode))
+        if (TryParseKeyValue(line, "JOURNAL_DIR_EVENTS", out var pth)) eventsPath = pth;
+    }
+    if (!string.IsNullOrWhiteSpace(expectedMode))
+    {
+        if (string.IsNullOrWhiteSpace(penaltyMode))
         {
-            if (string.IsNullOrWhiteSpace(penaltyMode))
-            {
-                var head = string.Join(Environment.NewLine, lines.Take(20));
-                Assert.Fail($"Expected penalty mode '{expectedMode}', but none was resolved. First stdout lines:\n{head}");
-            }
-            Assert.Equal(expectedMode, penaltyMode);
+            var head = string.Join(Environment.NewLine, lines.Take(20));
+            Assert.Fail($"Expected penalty mode '{expectedMode}', but none was resolved. First stdout lines:\n{head}");
         }
-        if (expectForce.HasValue) Assert.Equal(expectForce.Value, forceFlag);
-        if (expectCiScaffold.HasValue) Assert.Equal(expectCiScaffold.Value, ciFlag);
-        Assert.Equal(0, p.ExitCode);
+        Assert.Equal(expectedMode, penaltyMode);
+    }
+    if (expectForce.HasValue) Assert.Equal(expectForce.Value, forceFlag);
+    if (expectCiScaffold.HasValue) Assert.Equal(expectCiScaffold.Value, ciFlag);
+        Assert.Equal(0,p.ExitCode);
         // Prefer the simulator-reported events path for precision
         eventsPath ??= Path.Combine(runDir, "events.csv");
         // Rare flake guard: if penalty expected but not found (filesystem lag or race), retry once after cleanup
@@ -140,25 +134,25 @@ public class PenaltyScaffoldTests
     [Fact]
     public void Penalty_Disabled_NoEvents()
     {
-        var (cfg, _, _) = BuildConfig(false, false);
-        var eventsPath = RunSim(cfg, "PENOFF", expectedMode: "off", expectForce: false, expectCiScaffold: false);
-        var hasPenalty = File.ReadAllLines(eventsPath).Any(l => l.Contains("PENALTY_APPLIED_V1"));
+        var (cfg,_,_) = BuildConfig(false,false);
+    var eventsPath = RunSim(cfg,"PENOFF", expectedMode: "off", expectForce: false, expectCiScaffold: false);
+        var hasPenalty = File.ReadAllLines(eventsPath).Any(l=>l.Contains("PENALTY_APPLIED_V1"));
         Assert.False(hasPenalty);
     }
 
     [Fact]
     public void Penalty_Enabled_Emits_Deterministic()
     {
-        var (cfg, _, _) = BuildConfig(true, true);
-        var e1 = RunSim(cfg, "PENON1", expectedMode: "shadow", expectForce: true, expectCiScaffold: true);
-        var e2 = RunSim(cfg, "PENON2", expectedMode: "shadow", expectForce: true, expectCiScaffold: true);
+        var (cfg,_,_) = BuildConfig(true,true);
+    var e1 = RunSim(cfg,"PENON1", expectedMode: "shadow", expectForce: true, expectCiScaffold: true);
+    var e2 = RunSim(cfg,"PENON2", expectedMode: "shadow", expectForce: true, expectCiScaffold: true);
         var p1 = LoadPenaltyPayloads(e1);
         var p2 = LoadPenaltyPayloads(e2);
         Assert.True(p1.Length >= 1, "Expected at least one penalty in run A");
         Assert.True(p2.Length >= 1, "Expected at least one penalty in run B");
         // Determinism: payloads equal when sorted by (ts,symbol)
         Assert.Equal(p1.Length, p2.Length);
-        for (int i = 0; i < p1.Length; i++)
+        for (int i=0;i<p1.Length;i++)
         {
             Assert.Equal(p1[i].symbol, p2[i].symbol);
             Assert.Equal(p1[i].ts, p2[i].ts);
@@ -172,8 +166,8 @@ public class PenaltyScaffoldTests
     [Fact]
     public void Penalty_Formatting_Invariant()
     {
-        var (cfg, _, _) = BuildConfig(true, true);
-        var ev = RunSim(cfg, "PENFMT", expectedMode: "shadow", expectForce: true, expectCiScaffold: true);
+        var (cfg,_,_) = BuildConfig(true,true);
+    var ev = RunSim(cfg,"PENFMT", expectedMode: "shadow", expectForce: true, expectCiScaffold: true);
         var payloads = LoadPenaltyPayloads(ev);
         Assert.True(payloads.Length >= 1, "Expected at least one penalty payload");
         // Check formatting invariants using raw JSON to ensure non-scientific representations
@@ -181,7 +175,7 @@ public class PenaltyScaffoldTests
         foreach (var line in lines)
         {
             if (!line.Contains("PENALTY_APPLIED_V1")) continue;
-            var parts = line.Split(',', 4);
+            var parts = line.Split(',',4);
             if (parts.Length < 4) continue;
             var payloadRaw = parts[3].Trim();
             if (payloadRaw.StartsWith('"')) payloadRaw = payloadRaw.Substring(1, payloadRaw.Length - 2).Replace("\"\"", "\"");
