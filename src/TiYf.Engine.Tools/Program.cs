@@ -526,6 +526,13 @@ static int RunPromote(List<string> args)
         catch (Exception ex)
         {
             Console.Error.WriteLine($"PROMOTE_STRICT_CAND_ERROR {ex.Message}");
+            try
+            {
+                var qa = ExtractDataQaStatus(candRunA.EventsPath);
+                if (qa.aborted || (qa.passed.HasValue && qa.passed.Value==false))
+                    return Reject("data_qa_failed", baseRun, candRunA, candRunB);
+            }
+            catch { }
             return Reject("verify_failed", baseRun, candRunA, candRunB);
         }
 
@@ -1039,9 +1046,33 @@ static int RunPromote(List<string> args)
 
     static int Reject(string reason, (int ExitCode,string EventsPath,string TradesPath,string ConfigHash) baseRun, (int ExitCode,string EventsPath,string TradesPath,string ConfigHash)? candA, (int ExitCode,string EventsPath,string TradesPath,string ConfigHash)? candB)
     {
-        var obj = new { type="PROMOTION_RESULT_V1", accepted=false, reason };
-        Console.WriteLine(JsonSerializer.Serialize(obj));
+        object? dataQa = null;
+        try
+        {
+            var baselineQa = BuildQaStatus(baseRun.EventsPath);
+            var candAQa = candA.HasValue ? BuildQaStatus(candA.Value.EventsPath) : null;
+            var candBQa = candB.HasValue ? BuildQaStatus(candB.Value.EventsPath) : null;
+            if (baselineQa != null || candAQa != null || candBQa != null)
+            {
+                dataQa = new {
+                    baseline = baselineQa,
+                    candidate = candAQa,
+                    candidateB = candBQa
+                };
+            }
+        }
+        catch { }
+        var obj = new { type="PROMOTION_RESULT_V1", accepted=false, reason, dataQa };
+        var opts = new JsonSerializerOptions{ PropertyNamingPolicy = JsonNamingPolicy.CamelCase, DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
+        Console.WriteLine(JsonSerializer.Serialize(obj, opts));
         return 2;
+
+        static object? BuildQaStatus(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return null;
+            var qa = ExtractDataQaStatus(path);
+            return new { aborted = qa.aborted, passed = qa.passed };
+        }
     }
 
     static object BuildRiskParity(string baseMode, string candMode, string baseEvents, string candEvents)

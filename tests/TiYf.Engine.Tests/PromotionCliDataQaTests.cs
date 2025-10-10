@@ -3,11 +3,14 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using TiYf.Engine.Core.Infrastructure;
 using Xunit;
 
 [Collection("E2E-Serial")] // serialize due to journal/journals reuse
 public class PromotionCliDataQaTests
 {
+    private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
     private record CliResult(int ExitCode, string Stdout, string Stderr);
 
     private static string RepoRoot()
@@ -74,7 +77,8 @@ public class PromotionCliDataQaTests
             ["repair"] = new System.Text.Json.Nodes.JsonObject { ["forwardFillBars"] = 1, ["dropSpikes"] = false }
         };
         var path = Path.Combine(Path.GetTempPath(), "promo_active_pass_"+Guid.NewGuid().ToString("N")+".json");
-        File.WriteAllText(path, node.ToJsonString());
+        ApplySchema(node);
+        File.WriteAllText(path, node.ToJsonString(), Utf8NoBom);
         return path;
     }
 
@@ -112,8 +116,15 @@ public class PromotionCliDataQaTests
             dataObj["instrumentsFile"] = Path.Combine(tmp, "instruments.csv").Replace('\\','/');
         }
         var path = Path.Combine(Path.GetTempPath(), "promo_active_fail_cfg_"+Guid.NewGuid().ToString("N")+".json");
-        File.WriteAllText(path, node.ToJsonString());
+        ApplySchema(node);
+        File.WriteAllText(path, node.ToJsonString(), Utf8NoBom);
         return path;
+    }
+
+    private static void ApplySchema(System.Text.Json.Nodes.JsonObject node)
+    {
+        node["schema"] = Schema.Version;
+        node["schemaVersion"] = Schema.Version;
     }
 
     [Fact]
@@ -121,15 +132,16 @@ public class PromotionCliDataQaTests
     {
         var root = RepoRoot();
         var baselineSrc = Path.Combine(root, "tests","fixtures","backtest_m0","config.backtest-m0.json");
-        var candidateSrc = Path.Combine(root, "tests","fixtures","backtest_m0","config.backtest-m0.candidate.json");
-        var baseline = WriteActivePassConfig(baselineSrc);
-        var candidate = WriteActivePassConfig(candidateSrc);
+    var baseline = WriteActivePassConfig(baselineSrc);
+    var candidate = WriteActivePassConfig(baselineSrc);
         var res = RunPromote(baseline, candidate);
         if (res.ExitCode != 0)
             Assert.Fail($"Expected exit 0, got {res.ExitCode}\nSTDOUT\n{res.Stdout}\nSTDERR\n{res.Stderr}");
-        using var doc = ParseResult(res.Stdout, out var rootEl);
-        Assert.True(rootEl.GetProperty("accepted").GetBoolean());
-        Assert.Equal("accept", rootEl.GetProperty("reason").GetString());
+    using var doc = ParseResult(res.Stdout, out var rootEl);
+    Assert.True(rootEl.TryGetProperty("accepted", out var acceptedEl), $"accepted missing\nSTDOUT\n{res.Stdout}\nSTDERR\n{res.Stderr}");
+    Assert.True(acceptedEl.GetBoolean());
+    Assert.True(rootEl.TryGetProperty("reason", out var reasonElAccept), $"reason missing\nSTDOUT\n{res.Stdout}\nSTDERR\n{res.Stderr}");
+    Assert.Equal("accept", reasonElAccept.GetString());
         var dataQa = rootEl.GetProperty("dataQa").GetProperty("candidate");
         Assert.False(dataQa.GetProperty("aborted").GetBoolean());
         Assert.True(dataQa.GetProperty("passed").GetBoolean());
@@ -146,8 +158,10 @@ public class PromotionCliDataQaTests
         if (res.ExitCode != 2)
             Assert.Fail($"Expected exit 2, got {res.ExitCode}\nSTDOUT\n{res.Stdout}\nSTDERR\n{res.Stderr}");
         using var doc = ParseResult(res.Stdout, out var rootEl);
-        Assert.False(rootEl.GetProperty("accepted").GetBoolean());
-        Assert.Equal("data_qa_failed", rootEl.GetProperty("reason").GetString());
+        Assert.True(rootEl.TryGetProperty("accepted", out var acceptedElReject), $"accepted missing\nSTDOUT\n{res.Stdout}\nSTDERR\n{res.Stderr}");
+        Assert.False(acceptedElReject.GetBoolean());
+        Assert.True(rootEl.TryGetProperty("reason", out var reasonEl), $"reason missing\nSTDOUT\n{res.Stdout}\nSTDERR\n{res.Stderr}");
+        Assert.Equal("data_qa_failed", reasonEl.GetString());
         var dataQa = rootEl.GetProperty("dataQa").GetProperty("candidate");
         Assert.True(dataQa.GetProperty("aborted").GetBoolean() || (dataQa.TryGetProperty("passed", out var passed) && passed.ValueKind==JsonValueKind.False));
     }
@@ -157,14 +171,15 @@ public class PromotionCliDataQaTests
     {
         var root = RepoRoot();
         var baselineSrc = Path.Combine(root, "tests","fixtures","backtest_m0","config.backtest-m0.json");
-        var candidateSrc = Path.Combine(root, "tests","fixtures","backtest_m0","config.backtest-m0.candidate.json");
-        var baseline = WriteActivePassConfig(baselineSrc);
-        var candidate = WriteActivePassConfig(candidateSrc);
+    var baseline = WriteActivePassConfig(baselineSrc);
+    var candidate = WriteActivePassConfig(baselineSrc);
         var res = RunPromote(baseline, candidate, culture: "de-DE");
         if (res.ExitCode != 0)
             Assert.Fail($"Expected exit 0 (culture), got {res.ExitCode}\nSTDOUT\n{res.Stdout}\nSTDERR\n{res.Stderr}");
-        using var doc = ParseResult(res.Stdout, out var rootEl);
-        Assert.True(rootEl.GetProperty("accepted").GetBoolean());
-        Assert.Equal("accept", rootEl.GetProperty("reason").GetString());
+    using var doc = ParseResult(res.Stdout, out var rootEl);
+    Assert.True(rootEl.TryGetProperty("accepted", out var acceptedElCulture), $"accepted missing\nSTDOUT\n{res.Stdout}\nSTDERR\n{res.Stderr}");
+    Assert.True(acceptedElCulture.GetBoolean());
+    Assert.True(rootEl.TryGetProperty("reason", out var reasonElCulture), $"reason missing\nSTDOUT\n{res.Stdout}\nSTDERR\n{res.Stderr}");
+    Assert.Equal("accept", reasonElCulture.GetString());
     }
 }
