@@ -7,7 +7,7 @@ using System.Text.Json;
 using TiYf.Engine.Tools; // VerifyEngine types
 
 // ------------------------------------------------------------
-// CLI entrypoint: supports 'diff' and 'verify'
+// CLI entrypoint: supports 'diff', 'verify', 'promote', 'dataversion'
 // ------------------------------------------------------------
 var argv = args.ToList();
 if (argv.Count == 0 || argv[0] == "--help") { PrintHelp(); return 2; }
@@ -40,6 +40,7 @@ static void PrintHelp() => Console.WriteLine(@"Usage:
     diff   --a <fileA> --b <fileB> [--keys k1,k2,...] [--report-duplicates]
     verify --file <journal.csv> [--json] [--max-errors N] [--report-duplicates]
     verify strict --events <events.csv> --trades <trades.csv> --schema <minVersion> [--json] [--lenient-order]
+    verify parity --events-a <eventsA.csv> --events-b <eventsB.csv> [--trades-a <tradesA.csv> --trades-b <tradesB.csv>] [--json]
     promote --baseline <config.json> --candidate <config.json> [--workdir <dir>] [--quiet] [--print-metrics] [--culture name]
     dataversion --config <config.json> [--instruments path] [--ticks SYMBOL=path ...] [--out data_version.txt] [--echo-rows]");
 
@@ -140,8 +141,13 @@ static int RunDiff(List<string> args)
 static int RunVerify(List<string> args)
 {
     // Support subcommand 'strict'
-    if (args.Count>0 && string.Equals(args[0],"strict", StringComparison.OrdinalIgnoreCase))
-        return RunVerifyStrict(args.Skip(1).ToList());
+    if (args.Count>0)
+    {
+        if (string.Equals(args[0],"strict", StringComparison.OrdinalIgnoreCase))
+            return RunVerifyStrict(args.Skip(1).ToList());
+        if (string.Equals(args[0],"parity", StringComparison.OrdinalIgnoreCase))
+            return RunVerifyParity(args.Skip(1).ToList());
+    }
 
     string? file=null; bool json=false; int maxErrors=50; bool reportDup=false;
     for (int i=0;i<args.Count;i++)
@@ -212,6 +218,160 @@ static int RunVerifyStrict(List<string> args)
     return report.ExitCode; // 0 ok, 2 fail
 }
 
+// Local hash helper to avoid forward reference issues with Sha256Raw
+static string HashRaw(string content)
+{
+    using var sha = System.Security.Cryptography.SHA256.Create();
+    var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(content));
+    return string.Concat(hash.Select(b=>b.ToString("X2")));
+}
+
+static int RunVerifyParity(List<string> args)
+{
+    string? eventsA=null, eventsB=null, tradesA=null, tradesB=null; bool json=false;
+    for (int i=0;i<args.Count;i++)
+    {
+        switch(args[i])
+        {
+            case "--events-a": eventsA = (++i<args.Count)? args[i]: null; break;
+            case "--events-b": eventsB = (++i<args.Count)? args[i]: null; break;
+            case "--trades-a": tradesA = (++i<args.Count)? args[i]: null; break;
+            case "--trades-b": tradesB = (++i<args.Count)? args[i]: null; break;
+            case "--json": json = true; break;
+            default: throw new VerifyFatalException($"Unknown option {args[i]}");
+        }
+    }
+    if (string.IsNullOrWhiteSpace(eventsA) || string.IsNullOrWhiteSpace(eventsB))
+        throw new VerifyFatalException("--events-a and --events-b required for verify parity");
+    if (!File.Exists(eventsA!) || !File.Exists(eventsB!))
+        throw new VerifyFatalException("events files must exist");
+    if (!string.IsNullOrWhiteSpace(tradesA) ^ !string.IsNullOrWhiteSpace(tradesB))
+        throw new VerifyFatalException("--trades-a and --trades-b must be provided together");
+    if (!string.IsNullOrWhiteSpace(tradesA) && (!File.Exists(tradesA!) || !File.Exists(tradesB!)))
+        throw new VerifyFatalException("trades files must exist");
+
+    try
+    {
+        var normEventsA = NormalizeEvents(eventsA!);
+        var normEventsB = NormalizeEvents(eventsB!);
+    var eventsHashA = HashRaw(string.Join('\n', normEventsA));
+    var eventsHashB = HashRaw(string.Join('\n', normEventsB));
+        bool eventsMatch = string.Equals(eventsHashA, eventsHashB, StringComparison.Ordinal);
+        (int line, string a, string b)? eventsFirstDiff = null;
+        if (!eventsMatch)
+        {
+            int max = Math.Max(normEventsA.Count, normEventsB.Count);
+            for (int i=0;i<max;i++)
+            {
+                var a = i<normEventsA.Count? normEventsA[i] : "<EOF>A";
+                var b = i<normEventsB.Count? normEventsB[i] : "<EOF>B";
+                if (!string.Equals(a,b,StringComparison.Ordinal)) { eventsFirstDiff = (i+1,a,b); break; }
+            }
+        }
+
+        bool tradesProvided = !string.IsNullOrWhiteSpace(tradesA);
+        bool tradesMatch = true; string tradesHashA = string.Empty, tradesHashB = string.Empty; (int line, string a, string b)? tradesFirstDiff = null;
+        if (tradesProvided)
+        {
+            var normTradesA = NormalizeTrades(tradesA!);
+            var normTradesB = NormalizeTrades(tradesB!);
+            tradesHashA = HashRaw(string.Join('\n', normTradesA));
+            tradesHashB = HashRaw(string.Join('\n', normTradesB));
+            tradesMatch = string.Equals(tradesHashA, tradesHashB, StringComparison.Ordinal);
+            if (!tradesMatch)
+            {
+                int max = Math.Max(normTradesA.Count, normTradesB.Count);
+                for (int i=0;i<max;i++)
+                {
+                    var a = i<normTradesA.Count? normTradesA[i] : "<EOF>A";
+                    var b = i<normTradesB.Count? normTradesB[i] : "<EOF>B";
+                    if (!string.Equals(a,b,StringComparison.Ordinal)) { tradesFirstDiff = (i+1,a,b); break; }
+                }
+            }
+        }
+
+        int exit = (eventsMatch && (!tradesProvided || tradesMatch)) ? 0 : 2;
+        if (json)
+        {
+            var obj = new
+            {
+                type = "VERIFY_PARITY_V1",
+                events = new { match = eventsMatch, hashA = eventsHashA, hashB = eventsHashB, firstDiff = eventsFirstDiff.HasValue ? new { line = eventsFirstDiff.Value.line, a = eventsFirstDiff.Value.a, b = eventsFirstDiff.Value.b } : null },
+                trades = tradesProvided ? new { match = tradesMatch, hashA = tradesHashA, hashB = tradesHashB, firstDiff = tradesFirstDiff.HasValue ? new { line = tradesFirstDiff.Value.line, a = tradesFirstDiff.Value.a, b = tradesFirstDiff.Value.b } : null } : null,
+                exitCode = exit
+            };
+            Console.WriteLine(JsonSerializer.Serialize(obj));
+        }
+        else
+        {
+            if (eventsMatch) Console.WriteLine($"PARITY events: OK hashA={eventsHashA} hashB={eventsHashB}");
+            else
+            {
+                Console.WriteLine($"PARITY events: MISMATCH hashA={eventsHashA} hashB={eventsHashB}");
+                if (eventsFirstDiff.HasValue)
+                {
+                    Console.WriteLine($"FIRST_DIFF line={eventsFirstDiff.Value.line}");
+                    Console.WriteLine($"A:{eventsFirstDiff.Value.a}");
+                    Console.WriteLine($"B:{eventsFirstDiff.Value.b}");
+                }
+            }
+            if (tradesProvided)
+            {
+                if (tradesMatch) Console.WriteLine($"PARITY trades: OK hashA={tradesHashA} hashB={tradesHashB}");
+                else
+                {
+                    Console.WriteLine($"PARITY trades: MISMATCH hashA={tradesHashA} hashB={tradesHashB}");
+                    if (tradesFirstDiff.HasValue)
+                    {
+                        Console.WriteLine($"FIRST_DIFF line={tradesFirstDiff.Value.line}");
+                        Console.WriteLine($"A:{tradesFirstDiff.Value.a}");
+                        Console.WriteLine($"B:{tradesFirstDiff.Value.b}");
+                    }
+                }
+            }
+        }
+        return exit;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"VERIFY PARITY RUNTIME ERROR: {ex.Message}");
+        return 1;
+    }
+}
+
+static List<string> NormalizeEvents(string path)
+{
+    var all = File.ReadAllLines(path).ToList();
+    if (all.Count == 0) return all;
+    // Skip meta line if present (starts with schema_version=)
+    if (all[0].StartsWith("schema_version=", StringComparison.OrdinalIgnoreCase)) all.RemoveAt(0);
+    // Normalize line endings implicitly by using ReadAllLines and joining with \n at hash time.
+    return all;
+}
+
+static List<string> NormalizeTrades(string path)
+{
+    var all = File.ReadAllLines(path).ToList();
+    if (all.Count == 0) return all;
+    // Skip meta line if present
+    if (all[0].StartsWith("schema_version=", StringComparison.OrdinalIgnoreCase)) all.RemoveAt(0);
+    if (all.Count == 0) return all;
+    // Identify config_hash column index in header if present and blank it in data rows
+    var header = all[0];
+    var cols = header.Split(',');
+    int cfgIdx = Array.FindIndex(cols, c => string.Equals(c.Trim(), "config_hash", StringComparison.OrdinalIgnoreCase));
+    if (cfgIdx >= 0)
+    {
+        // ensure header normalized (keep as-is)
+        for (int i=1;i<all.Count;i++)
+        {
+            var parts = all[i].Split(',');
+            if (parts.Length > cfgIdx) { parts[cfgIdx] = string.Empty; all[i] = string.Join(',', parts); }
+        }
+    }
+    return all;
+}
+
 // ------------------------------------------------------------
 // Promotion orchestration (lightweight) - runs baseline & candidate via Sim
 // Exit codes: 0 accept, 2 reject (match other tool non-success), 1 unused
@@ -225,7 +385,7 @@ static int RunVerifyStrict(List<string> args)
 // ------------------------------------------------------------
 static int RunPromote(List<string> args)
 {
-    string? baseline=null, candidate=null, workdir=null, culture=null; bool quiet=false; bool printMetrics=false; // removed unused 'diagnose'
+    string? baseline=null, candidate=null, workdir=null, culture=null; bool quiet=false; bool printMetrics=false; bool allowParityMismatch=false; // removed unused 'diagnose'
     for (int i=0;i<args.Count;i++)
     {
         switch(args[i])
@@ -236,6 +396,7 @@ static int RunPromote(List<string> args)
             case "--quiet": quiet=true; break;
             case "--print-metrics": printMetrics=true; break;
             case "--culture": culture=(++i<args.Count)? args[i]:null; break;
+            case "--allow-parity-mismatch": allowParityMismatch=true; break;
             default: Console.Error.WriteLine($"Unknown option {args[i]}"); return 2;
         }
     }
@@ -323,11 +484,50 @@ static int RunPromote(List<string> args)
         // Run baseline once
     var baseRun = RunSingle(simDll, baseline!, tmpRoot, workdir!, "base");
         if (baseRun.ExitCode != 0) return Reject("Baseline run failed", baseRun, null, null);
+        // Strict verification (baseline)
+        try
+        {
+            var baseStrict = StrictJournalVerifier.Verify(new StrictVerifyRequest(baseRun.EventsPath, baseRun.TradesPath, "1.3.0", strict: true));
+            if (baseStrict.ExitCode != 0)
+            {
+                Console.WriteLine("PROMOTE_GATES baseline_strict=fail");
+                return Reject("baseline_verify_failed", baseRun, null, null);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"PROMOTE_STRICT_BASELINE_ERROR {ex.Message}");
+            return Reject("baseline_verify_failed", baseRun, null, null);
+        }
         // Candidate run A & B for determinism
     var candRunA = RunSingle(simDll, candidate!, tmpRoot, workdir!, "candA");
         if (candRunA.ExitCode != 0) return Reject("Candidate run A failed", baseRun, candRunA, null);
     var candRunB = RunSingle(simDll, candidate!, tmpRoot, workdir!, "candB");
         if (candRunB.ExitCode != 0) return Reject("Candidate run B failed", baseRun, candRunA, candRunB);
+
+        // Strict verification (candidate A)
+        try
+        {
+            var candStrict = StrictJournalVerifier.Verify(new StrictVerifyRequest(candRunA.EventsPath, candRunA.TradesPath, "1.3.0", strict: true));
+            if (candStrict.ExitCode != 0)
+            {
+                Console.WriteLine("PROMOTE_GATES candidate_strict=fail");
+                // Prefer data QA failure reason if detectable from candidate events
+                try
+                {
+                    var qa = ExtractDataQaStatus(candRunA.EventsPath);
+                    if (qa.aborted || (qa.passed.HasValue && qa.passed.Value==false))
+                        return Reject("data_qa_failed", baseRun, candRunA, candRunB);
+                }
+                catch { }
+                return Reject("verify_failed", baseRun, candRunA, candRunB);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"PROMOTE_STRICT_CAND_ERROR {ex.Message}");
+            return Reject("verify_failed", baseRun, candRunA, candRunB);
+        }
 
         // Determinism: hash events & trades
     // Determinism should not be affected by differing run identifiers present in the journal meta line.
@@ -408,7 +608,7 @@ static int RunPromote(List<string> args)
             return Reject("Determinism parity failed", baseRun, candRunA, candRunB);
         }
 
-        // ------------------------------
+    // ------------------------------
         // FACT COLLECTION (no mutation)
         // ------------------------------
         var baseQa = ExtractDataQaStatus(baseRun.EventsPath);
@@ -477,7 +677,15 @@ static int RunPromote(List<string> args)
         if (robustZeroCap) candidateZeroCap = true;
         // PROMOTE_FACTS (pre-resolution) per blueprint
         bool qaPassed = !candQa.aborted && (candQa.passed ?? false);
-        Console.WriteLine($"PROMOTE_FACTS riskBase={baselineRiskMode} riskCand={candidateRiskMode} candZeroCap={candidateZeroCap.ToString().ToLowerInvariant()} baseRows={baseMetrics.rows} candRows={candMetrics.rows} baseAlerts={baseAlerts} candAlerts={candAlerts} qaPassed={qaPassed.ToString().ToLowerInvariant()}");
+        // Penalty facts: counts per run for quick visibility
+        int factsPenaltyBase = 0, factsPenaltyCand = 0;
+        try
+        {
+            factsPenaltyBase = File.ReadLines(baseRun.EventsPath).Count(l=>l.Contains("PENALTY_APPLIED_V1"));
+            factsPenaltyCand = File.ReadLines(candRunA.EventsPath).Count(l=>l.Contains("PENALTY_APPLIED_V1"));
+        }
+        catch { }
+        Console.WriteLine($"PROMOTE_FACTS riskBase={baselineRiskMode} riskCand={candidateRiskMode} candZeroCap={candidateZeroCap.ToString().ToLowerInvariant()} baseRows={baseMetrics.rows} candRows={candMetrics.rows} baseAlerts={baseAlerts} candAlerts={candAlerts} penBase={factsPenaltyBase} penCand={factsPenaltyCand} qaPassed={qaPassed.ToString().ToLowerInvariant()}");
         if (candidateRiskMode=="active" && !candidateZeroCap)
         {
             // Probe when expected zero-cap scenario failed detection
@@ -506,7 +714,7 @@ static int RunPromote(List<string> args)
             catch { }
         }
 
-        // ------------------------------
+    // ------------------------------
         // REASON RESOLUTION (priority ladder)
         // ------------------------------
         string reason = string.Empty;
@@ -546,7 +754,7 @@ static int RunPromote(List<string> args)
             reason = "MaxDD worsened";
         }
 
-        // Sentiment parity gating (only if still accepted so far)
+    // Sentiment parity gating (only if still accepted so far)
         bool sentimentParity = true; string sentimentReason = "ok"; string diffHint = string.Empty;
         if (string.IsNullOrEmpty(reason))
         {
@@ -596,6 +804,92 @@ static int RunPromote(List<string> args)
             }
         }
 
+        // Penalty parity gating (before final events/trades parity) if still no reason
+        bool penaltyParity = true; string penaltyReason = "ok"; string penaltyHint = string.Empty;
+        if (string.IsNullOrEmpty(reason))
+        {
+            static string ResolvePenaltyMode(string cfg)
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(File.ReadAllText(cfg));
+                    if (doc.RootElement.TryGetProperty("featureFlags", out var ff) && ff.ValueKind==JsonValueKind.Object && ff.TryGetProperty("penalty", out var p) && p.ValueKind==JsonValueKind.String)
+                        return (p.GetString()??"off").ToLowerInvariant();
+                }
+                catch { }
+                return "off";
+            }
+            string basePenalty = ResolvePenaltyMode(baseline!);
+            string candPenalty = ResolvePenaltyMode(candidate!);
+            try
+            {
+                static List<string> LoadPenalty(string eventsPath)
+                {
+                    var lines = File.ReadAllLines(eventsPath);
+                    var list = new List<string>();
+                    for (int i=2;i<lines.Length;i++) if (lines[i].Contains("PENALTY_APPLIED_V1", StringComparison.Ordinal)) list.Add(lines[i]);
+                    return list;
+                }
+                var penA = LoadPenalty(baseRun.EventsPath);
+                var penB = LoadPenalty(candRunA.EventsPath);
+                int baseCnt = penA.Count, candCnt = penB.Count;
+                bool benignShadowToActiveZero = basePenalty=="shadow" && candPenalty=="active" && candCnt==0;
+                if (!benignShadowToActiveZero)
+                {
+                    if (basePenalty!=candPenalty) { penaltyParity=false; penaltyReason="penalty_mismatch"; }
+                    else
+                    {
+                        int min = Math.Min(baseCnt, candCnt);
+                        for (int i=0;i<min;i++) if (!string.Equals(penA[i], penB[i], StringComparison.Ordinal)) { penaltyParity=false; penaltyReason="penalty_mismatch"; penaltyHint = BuildDiffHint(penA[i], penB[i]); break; }
+                        if (penaltyParity && baseCnt!=candCnt) { penaltyParity=false; penaltyReason="penalty_mismatch"; penaltyHint = $"penalty_count base={baseCnt} cand={candCnt}"; }
+                    }
+                    if (!penaltyParity) reason = "penalty_mismatch";
+                }
+            }
+            catch (Exception ex)
+            {
+                // If baseline expects active, treat exceptions as mismatch
+                if (basePenalty=="active") { penaltyParity=false; penaltyReason="penalty_mismatch"; penaltyHint = "exception "+ex.GetType().Name; reason = "penalty_mismatch"; }
+            }
+        }
+
+        // 8. Baseline vs Candidate parity (events + trades) unless explicitly allowed to mismatch
+        if (string.IsNullOrEmpty(reason))
+        {
+            // allow override via env as well
+            if (!allowParityMismatch)
+            {
+                var envAllow = Environment.GetEnvironmentVariable("PROMOTE_ALLOW_PARITY_MISMATCH");
+                if (!string.IsNullOrEmpty(envAllow) && (envAllow.Equals("1") || envAllow.Equals("true", StringComparison.OrdinalIgnoreCase)))
+                    allowParityMismatch = true;
+            }
+            if (!allowParityMismatch)
+            {
+                var evA = NormalizeEvents(baseRun.EventsPath); var evB = NormalizeEvents(candRunA.EventsPath);
+                var trA = NormalizeTrades(baseRun.TradesPath); var trB = NormalizeTrades(candRunA.TradesPath);
+                string evHashA = HashRaw(string.Join('\n', evA)), evHashB = HashRaw(string.Join('\n', evB));
+                string trHashA = HashRaw(string.Join('\n', trA)), trHashB = HashRaw(string.Join('\n', trB));
+                bool evMatch = string.Equals(evHashA, evHashB, StringComparison.Ordinal);
+                bool trMatch = string.Equals(trHashA, trHashB, StringComparison.Ordinal);
+                if (!evMatch || !trMatch)
+                {
+                    // produce a compact first diff for diagnostics
+                    string diff = string.Empty;
+                    if (!evMatch)
+                    {
+                        int max = Math.Max(evA.Count, evB.Count);
+                        for (int i=0;i<max;i++) { var a = i<evA.Count?evA[i]:"<EOF>A"; var b = i<evB.Count?evB[i]:"<EOF>B"; if (!string.Equals(a,b,StringComparison.Ordinal)) { diff = $"events line={i+1}"; break; } }
+                    }
+                    else
+                    {
+                        int max = Math.Max(trA.Count, trB.Count);
+                        for (int i=0;i<max;i++) { var a = i<trA.Count?trA[i]:"<EOF>A"; var b = i<trB.Count?trB[i]:"<EOF>B"; if (!string.Equals(a,b,StringComparison.Ordinal)) { diff = $"trades line={i+1}"; break; } }
+                    }
+                    reason = string.IsNullOrEmpty(diff)? "parity_mismatch" : $"parity_mismatch ({diff})";
+                }
+            }
+        }
+
         bool accepted = string.IsNullOrEmpty(reason);
 
         // Fallback normalization safety (should be redundant with ladder)
@@ -613,6 +907,7 @@ static int RunPromote(List<string> args)
             accepted,
             reason = string.IsNullOrEmpty(reason)?"accept":reason,
             sentiment = new { baseline_mode = baselineMode, candidate_mode = candidateMode, parity = sentimentParity, reason = sentimentReason, diff_hint = diffHint },
+            penalty = new { parity = penaltyParity, reason = penaltyReason, diff_hint = penaltyHint },
             risk = riskParityObj,
             baseline = new { pnl = Round2(baseMetrics.pnl), maxDd = Round2(baseMetrics.maxDd), rows = baseMetrics.rows },
             candidate = new { pnl = Round2(candMetrics.pnl), maxDd = Round2(candMetrics.maxDd), rows = candMetrics.rows, alerts = candAlerts },
