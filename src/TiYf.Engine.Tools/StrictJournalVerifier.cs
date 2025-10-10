@@ -91,9 +91,14 @@ public static class StrictJournalVerifier
                 else if (ev.Type=="PENALTY_APPLIED_V1")
                 {
                     var prev = parsed.FirstOrDefault(p=>p.Seq == ev.Seq-1);
-                    // Allow penalty after BAR, any sentiment event (Z/CLAMP/APPLIED), or a risk evaluation
-                    if (prev==null || (prev.Type!="BAR_V1" && !prev.Type.StartsWith("INFO_SENTIMENT_", StringComparison.Ordinal) && prev.Type!="INFO_RISK_EVAL_V1"))
-                        V("order_violation", ev.Seq, GetSym(ev.Payload), ev.Ts.ToString("O"), "PENALTY must follow BAR, sentiment, or risk eval");
+                    // Allow penalty after BAR, any sentiment event (Z/CLAMP/APPLIED), another penalty, or a risk evaluation
+                    bool isAllowedPredecessor = prev!=null &&
+                        (prev.Type=="BAR_V1" ||
+                         prev.Type=="PENALTY_APPLIED_V1" ||
+                         prev.Type=="INFO_RISK_EVAL_V1" ||
+                         prev.Type.StartsWith("INFO_SENTIMENT_", StringComparison.Ordinal));
+                    if (!isAllowedPredecessor)
+                        V("order_violation", ev.Seq, GetSym(ev.Payload), ev.Ts.ToString("O"), "PENALTY must follow BAR, sentiment, penalty, or risk eval");
                 }
                 else if (ev.Type=="INFO_RISK_EVAL_V1")
                 {

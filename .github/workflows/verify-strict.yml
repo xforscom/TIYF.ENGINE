@@ -5,6 +5,7 @@ on:
     branches: [ main, feat/m4-seed ]
   pull_request:
     branches: [ main, feat/m4-seed ]
+  workflow_dispatch:
 
 jobs:
   verify-strict:

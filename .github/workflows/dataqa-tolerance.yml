@@ -5,6 +5,7 @@ on:
     branches: [ fix/dataqa-tolerance-missing-bars ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   matrix:
