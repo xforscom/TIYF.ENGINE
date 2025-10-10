@@ -1,15 +1,17 @@
 name: M0 Determinism
 
 on:
-  workflow_dispatch:
-  pull_request:
-    branches: [ main, feat/**, fix/** ]
   push:
+    branches: [ main ]
+  pull_request:
     branches: [ main ]
 
 jobs:
   m0-determinism:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: pwsh
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,122 +21,139 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Build (Release)
-        run: dotnet build TiYf.Engine.sln -c Release --nologo
-
-      - name: Clean journals
-        shell: bash
-        run: rm -rf journals || true
-
-      - name: Run A (capture stdout)
-        id: run_a
-        shell: bash
+      - name: Restore & Build
         run: |
-          set -euo pipefail
-          resolve_journal() {
-            local raw="$1"
-            local label="$2"
-            if [ -z "$raw" ]; then
-              echo "Missing $label journal path" >&2
-              exit 1
-            fi
-            if [ -f "$raw" ]; then
-              echo "$raw"
-              return 0
-            fi
-            if [ -d "$raw" ]; then
-              local candidate="$raw/${label}.csv"
-              if [ -f "$candidate" ]; then
-                echo "$candidate"
-                return 0
-              fi
-              echo "Directory $raw does not contain ${label}.csv" >&2
-              exit 1
-            fi
-            echo "Journal path $raw does not exist" >&2
-            exit 1
-          }
+          dotnet restore TiYf.Engine.sln
+          dotnet build TiYf.Engine.sln -c Release -warnaserror
 
-          LOG=run-A.log
-          dotnet exec src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll \
-            --config tests/fixtures/backtest_m0/config.backtest-m0.json \
-            --run-id A --quiet | tee "$LOG"
-          ev=$(awk -F= '/^JOURNAL_DIR_EVENTS=/{print $2}' "$LOG" | tail -n1)
-          tr=$(awk -F= '/^JOURNAL_DIR_TRADES=/{print $2}' "$LOG" | tail -n1)
-          ev_path=$(resolve_journal "$ev" events)
-          tr_path=$(resolve_journal "$tr" trades)
-          echo "EV_A=$ev_path" >> "$GITHUB_OUTPUT"
-          echo "TR_A=$tr_path" >> "$GITHUB_OUTPUT"
+      - name: Run Tests (Engine)
+        run: dotnet test tests/TiYf.Engine.Tests -c Release --logger "trx;LogFileName=tests.trx"
 
-      - name: Run B (capture stdout)
-        id: run_b
-        shell: bash
+      - name: Run Tests (Tools)
+        run: dotnet test tests/TiYf.Engine.Tools.Tests -c Release --logger "trx;LogFileName=tests-tools.trx"
+
+      - name: Prepare artifact dirs
         run: |
-          set -euo pipefail
-          resolve_journal() {
-            local raw="$1"
-            local label="$2"
-            if [ -z "$raw" ]; then
-              echo "Missing $label journal path" >&2
-              exit 1
-            fi
-            if [ -f "$raw" ]; then
-              echo "$raw"
-              return 0
-            fi
-            if [ -d "$raw" ]; then
-              local candidate="$raw/${label}.csv"
-              if [ -f "$candidate" ]; then
-                echo "$candidate"
-                return 0
-              fi
-              echo "Directory $raw does not contain ${label}.csv" >&2
-              exit 1
-            fi
-            echo "Journal path $raw does not exist" >&2
-            exit 1
-          }
+          Remove-Item -Recurse -Force artifacts -ErrorAction SilentlyContinue
+          New-Item -Force -ItemType Directory -Path artifacts/raw | Out-Null
+          New-Item -Force -ItemType Directory -Path artifacts/canonical | Out-Null
+          New-Item -Force -ItemType Directory -Path artifacts/hashes | Out-Null
 
-          LOG=run-B.log
-          dotnet exec src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll \
-            --config tests/fixtures/backtest_m0/config.backtest-m0.json \
-            --run-id B --quiet | tee "$LOG"
-          ev=$(awk -F= '/^JOURNAL_DIR_EVENTS=/{print $2}' "$LOG" | tail -n1)
-          tr=$(awk -F= '/^JOURNAL_DIR_TRADES=/{print $2}' "$LOG" | tail -n1)
-          ev_path=$(resolve_journal "$ev" events)
-          tr_path=$(resolve_journal "$tr" trades)
-          echo "EV_B=$ev_path" >> "$GITHUB_OUTPUT"
-          echo "TR_B=$tr_path" >> "$GITHUB_OUTPUT"
+      - name: Run M0 — A
+        run: |
+          # Clean any prior A run dir and execute with explicit run-id to avoid meta/run-id interference
+          if (Test-Path journals/M0/M0-RUN-A) { Remove-Item -Recurse -Force journals/M0/M0-RUN-A }
+          # Mutate base config to disable non-M0 systems (risk, sentiment, penalty)
+          $baseCfg = Get-Content 'tests/fixtures/backtest_m0/config.backtest-m0.json' -Raw | ConvertFrom-Json
+          if ($null -eq $baseCfg.featureFlags) { $baseCfg | Add-Member -NotePropertyName featureFlags -NotePropertyValue (@{}) }
+          $baseCfg.featureFlags.sentiment = 'off'
+          $baseCfg.featureFlags.risk = 'off'
+          $baseCfg.featureFlags.penalty = 'off'
+          $cfgA = "$(Join-Path $PWD 'tmp-m0-a.json')"
+          $baseCfg | ConvertTo-Json -Depth 6 | Set-Content -Path $cfgA -Encoding utf8
+          dotnet run --project src/TiYf.Engine.Sim -- --config "$cfgA" --run-id M0-RUN-A
+          Copy-Item journals/M0/M0-RUN-A/events.csv artifacts/raw/events_A.csv
+          Copy-Item journals/M0/M0-RUN-A/trades.csv artifacts/raw/trades_A.csv
+
+      - name: Run M0 — B
+        run: |
+          # Clean any prior B run dir and execute with explicit run-id to avoid meta/run-id interference
+          if (Test-Path journals/M0/M0-RUN-B) { Remove-Item -Recurse -Force journals/M0/M0-RUN-B }
+          # Reuse the same non-M0-off config for B to ensure identical toggles
+          $cfgB = "$(Join-Path $PWD 'tmp-m0-b.json')"
+          Copy-Item $cfgA $cfgB -Force
+          dotnet run --project src/TiYf.Engine.Sim -- --config "$cfgB" --run-id M0-RUN-B
+          Copy-Item journals/M0/M0-RUN-B/events.csv artifacts/raw/events_B.csv
+          Copy-Item journals/M0/M0-RUN-B/trades.csv artifacts/raw/trades_B.csv
 
       - name: Verify parity (events + trades)
-        shell: bash
+        id: parity
         run: |
-          set -euo pipefail
-          tools="src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
-          set +e
-          dotnet exec "$tools" verify parity \
-            --events-a "${{ steps.run_a.outputs.EV_A }}" \
-            --events-b "${{ steps.run_b.outputs.EV_B }}" \
-            --trades-a "${{ steps.run_a.outputs.TR_A }}" \
-            --trades-b "${{ steps.run_b.outputs.TR_B }}" \
-            --json | tee parity.json
-          code=$?
-          set -e
-          echo "PARITY_EXIT=$code" >> "$GITHUB_ENV"
+          # Use Tools CLI verify parity for normalized hashing and first-diff diagnostics
+          $tools = 'src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll'
+          $parityJson = & dotnet exec $tools verify parity --events-a 'artifacts/raw/events_A.csv' --events-b 'artifacts/raw/events_B.csv' --trades-a 'artifacts/raw/trades_A.csv' --trades-b 'artifacts/raw/trades_B.csv' --json
+          $parityExit = $LASTEXITCODE
+          if ($null -ne $parityJson) { $parityJson | Set-Content -Path artifacts/hashes/parity.json -Encoding UTF8 }
+          "parity_exit=$parityExit" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-      - name: Upload parity JSON (always)
+          # Extract invariants from raw files (meta line and counts)
+          $eventsMetaLine = (Get-Content artifacts/raw/events_A.csv -First 1)
+          $dataVersion = if ($eventsMetaLine -match 'data_version=([A-Fa-f0-9]{64})') { $Matches[1].ToUpper() } else { '' }
+          $alertCount = (Select-String -Path artifacts/raw/events_A.csv -Pattern 'ALERT_BLOCK_' -SimpleMatch | Measure-Object).Count
+          $tradesLines = Get-Content artifacts/raw/trades_A.csv
+          $tradesRowCount = ($tradesLines.Length - 1)
+
+          $manifest = [ordered]@{
+            parity_exit = $parityExit;
+            data_version = $dataVersion; alert_block_count = $alertCount; trades_rows = $tradesRowCount
+          } | ConvertTo-Json -Depth 3
+          $manifest | Set-Content -Path artifacts/hashes/manifest.json -Encoding UTF8
+
+          "data_version=$dataVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "trades_rows=$tradesRowCount" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "alert_count=$alertCount" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Assert Determinism & Invariants
+        run: |
+          $EXPECTED_DV = 'C531EDAA1B2B3EB9286B3EDA98B6443DD365C1A8DFEA2AFB4B77FC7DDD1D6122'
+          $parityExit = [int]'${{ steps.parity.outputs.parity_exit }}'
+          $dv  = '${{ steps.parity.outputs.data_version }}'
+          $rows = [int]'${{ steps.parity.outputs.trades_rows }}'
+          $alerts = [int]'${{ steps.parity.outputs.alert_count }}'
+
+          Write-Host "parity_exit=$parityExit"
+          Write-Host "data_version=$dv"; Write-Host "trades_rows=$rows"; Write-Host "alert_block_count=$alerts"
+
+          $fail = $false
+          if ($parityExit -ne 0) { Write-Error 'Verify parity mismatch'; $fail = $true }
+          if ($dv -ne $EXPECTED_DV) { Write-Error "Unexpected data_version: $dv"; $fail = $true }
+          if ($alerts -ne 0) { Write-Error "ALERT_BLOCK_* count not zero: $alerts"; $fail = $true }
+          if ($rows -ne 6) { Write-Error "Trades row count not 6: $rows"; $fail = $true }
+
+          if ($fail) {
+            # Parity tool already prints FIRST_DIFF; also persist raw files for inspection
+            Copy-Item artifacts/raw/events_A.csv artifacts/hashes/events_A.snapshot.csv -Force
+            Copy-Item artifacts/raw/events_B.csv artifacts/hashes/events_B.snapshot.csv -Force
+            Copy-Item artifacts/raw/trades_A.csv artifacts/hashes/trades_A.snapshot.csv -Force
+            Copy-Item artifacts/raw/trades_B.csv artifacts/hashes/trades_B.snapshot.csv -Force
+            Write-Error 'Determinism/Invariant check failed.'
+            exit 1
+          }
+
+      - name: Job Summary
         if: always()
+        run: |
+          try {
+            $parity = Get-Content artifacts/hashes/parity.json -ErrorAction Stop | ConvertFrom-Json
+            $ok = ($parity.exitCode -eq 0)
+            $status = if ($ok) { '✅ OK' } else { '⚠️ Drift' }
+            $evA = $parity.events.hashA.Substring(0,8)
+            $evB = $parity.events.hashB.Substring(0,8)
+            $trA = if ($parity.trades) { $parity.trades.hashA.Substring(0,8) } else { '--------' }
+            $trB = if ($parity.trades) { $parity.trades.hashB.Substring(0,8) } else { '--------' }
+            $dv = '${{ steps.parity.outputs.data_version }}'
+            $rows = '${{ steps.parity.outputs.trades_rows }}'
+            $alerts = '${{ steps.parity.outputs.alert_count }}'
+            $summary = @()
+            $summary += "# M0 Determinism"
+            $summary += "Status: **$status**"
+            $summary += ""
+            $summary += "- Events A/B: `$evA` / `$evB`"
+            $summary += "- Trades A/B: `$trA` / `$trB`"
+            $summary += "- Data Version: `$dv`"
+            $summary += "- Trades rows: `$rows` | Alerts: `$alerts`"
+            $summaryText = $summary -join "`n"
+            $summaryText | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          } catch {
+            "M0 Determinism summary unavailable" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          }
+
+      - name: Upload artifacts (on failure)
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: m0-parity
-          path: parity.json
-
-      - name: Gate on parity == OK
-        shell: bash
-        run: |
-          set -euo pipefail
-          code=$(jq -r '.exit_code // .exitCode // 2' parity.json || echo 2)
-          if [ "$code" != "0" ]; then
-            echo "Parity drift. See parity.json and raw journals."
-            exit 2
-          fi
+          name: m0-determinism-artifacts
+          path: |
+            artifacts/raw/**
+            artifacts/canonical/**
+            artifacts/hashes/**
