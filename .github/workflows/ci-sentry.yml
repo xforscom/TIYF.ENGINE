@@ -1,0 +1,107 @@
+name: CI Sentry
+
+on:
+  workflow_run:
+    workflows:
+      - m0-determinism
+      - nightly-canary
+      - verify-strict
+      - dataqa-tolerance
+    types: [completed]
+
+jobs:
+  sentry:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Inspect workflow outcome
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_NAME: ${{ github.event.workflow_run.name }}
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          RUN_HTML_URL: ${{ github.event.workflow_run.html_url }}
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          ARTIFACTS_URL: ${{ github.event.workflow_run.artifacts_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t prs < <(jq -r '.workflow_run.pull_requests[].number' "$GITHUB_EVENT_PATH")
+          if [ ${#prs[@]} -eq 0 ]; then
+            echo "No pull requests associated with run $RUN_ID."
+            exit 0
+          fi
+
+          conclusion="$RUN_CONCLUSION"
+          if [ "$conclusion" = "success" ]; then
+            for pr in "${prs[@]}"; do
+              gh pr edit "$pr" --repo "$REPO" --remove-label ci:red || true
+              gh pr edit "$pr" --repo "$REPO" --add-label ci:green || true
+            done
+            exit 0
+          fi
+
+          jobs_json=$(gh api repos/$REPO/actions/runs/$RUN_ID/jobs --paginate)
+          failing_job_b64=$(echo "$jobs_json" | jq -r '.jobs[] | select(.conclusion != "success") | @base64' | head -n1)
+          if [ -z "$failing_job_b64" ]; then
+            echo "Run reported failure but no failing job found."
+            failing_job_name="(unknown job)"
+            failing_job_url="$RUN_HTML_URL"
+            failing_step="(unknown step)"
+            snippet="Log extraction failed."
+          else
+            failing_job_json=$(echo "$failing_job_b64" | base64 --decode)
+            failing_job_name=$(echo "$failing_job_json" | jq -r '.name')
+            failing_job_url=$(echo "$failing_job_json" | jq -r '.html_url')
+            logs_url=$(echo "$failing_job_json" | jq -r '.logs_url')
+            failing_step=$(echo "$failing_job_json" | jq -r '.steps[] | select(.conclusion == "failure") | .name' | head -n1)
+            if [ -z "$failing_step" ]; then
+              failing_step="(unknown step)"
+            fi
+            export STEP_NAME="$failing_step"
+              curl -sSL -H "Authorization: Bearer $GH_TOKEN" "$logs_url" -o job.log.gz
+              if ! gunzip -c job.log.gz > job.log 2>/dev/null; then
+                cp job.log.gz job.log
+              fi
+              step_regex=$(printf '%s\n' "$failing_step" | sed -e 's/[][\\.^$*+?(){}|-]/\\&/g')
+              snippet=$(awk -v pat="$step_regex" '
+                BEGIN { capture=0; count=0 }
+                $0 ~ ("Run " pat) || $0 ~ ("##\\[group\\]Run " pat) || $0 ~ ("::group::Run " pat) {
+                  capture=1
+                  next
+                }
+                capture {
+                  print
+                  count++
+                  if (count >= 30) exit
+                }
+              ' job.log)
+              if [ -z "$snippet" ]; then
+                snippet="$(head -n 30 job.log)"
+              fi
+              printf '%s\n' "$snippet" > snippet.txt
+          fi
+          {
+            echo "⚠️ **${RUN_NAME}** failed (attempt ${RUN_ATTEMPT})."
+            echo ""
+            echo "- Workflow event: ${RUN_EVENT}"
+            echo "- Job: [${failing_job_name}](${failing_job_url})"
+            echo "- Step: ${failing_step}"
+            echo "- Run: [view run logs](${RUN_HTML_URL})"
+            echo "- Artifacts: ${ARTIFACTS_URL}"
+            echo ""
+            echo '```text'
+            cat snippet.txt
+            echo '```'
+          } > comment.md
+
+          for pr in "${prs[@]}"; do
+            gh pr comment "$pr" --repo "$REPO" --body-file comment.md || true
+            gh pr edit "$pr" --repo "$REPO" --add-label ci:red || true
+            gh pr edit "$pr" --repo "$REPO" --remove-label ci:green || true
+          done

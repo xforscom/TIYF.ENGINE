@@ -1,14 +1,36 @@
 name: dataqa-tolerance
 
 on:
-  push:
-    branches: [ fix/dataqa-tolerance-missing-bars ]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
+  pull_request:
+    branches: [ main, feat/**, fix/** ]
+  push:
+    branches: [ main ]
 
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build (Release)
+        run: dotnet build TiYf.Engine.sln -c Release --nologo
+      - name: Upload Release binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binaries
+          path: |
+            src/TiYf.Engine.Sim/bin/Release/net8.0
+            src/TiYf.Engine.Tools/bin/Release/net8.0
+
   matrix:
+    needs: build
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -27,8 +49,20 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Build (Release)
-        run: dotnet build -c Release
+      - name: Download Release binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: release-binaries
+          path: release-binaries
+
+      - name: Sync Release binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src/TiYf.Engine.Sim/bin/Release/net8.0
+          mkdir -p src/TiYf.Engine.Tools/bin/Release/net8.0
+          cp -r release-binaries/src/TiYf.Engine.Sim/bin/Release/net8.0/. src/TiYf.Engine.Sim/bin/Release/net8.0/
+          cp -r release-binaries/src/TiYf.Engine.Tools/bin/Release/net8.0/. src/TiYf.Engine.Tools/bin/Release/net8.0/
 
       - name: Prepare paths
         id: prep
@@ -36,21 +70,13 @@ jobs:
         run: |
           set -euo pipefail
           ROOT="$(pwd)"
+          SIM="$ROOT/src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"
+          TOOLS="$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
+          if [ ! -f "$SIM" ]; then echo "Sim DLL missing at $SIM" >&2; exit 1; fi
+          if [ ! -f "$TOOLS" ]; then echo "Tools DLL missing at $TOOLS" >&2; exit 1; fi
           echo "root=$ROOT" >> $GITHUB_OUTPUT
-          echo "sim=$ROOT/src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll" >> $GITHUB_OUTPUT
-          TOOLS_REL="$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
-          TOOLS_DBG="$ROOT/src/TiYf.Engine.Tools/bin/Debug/net8.0/TiYf.Engine.Tools.dll"
-          if [ -f "$TOOLS_REL" ]; then
-            echo "tools=$TOOLS_REL" >> $GITHUB_OUTPUT
-          elif [ -f "$TOOLS_DBG" ]; then
-            echo "tools=$TOOLS_DBG" >> $GITHUB_OUTPUT
-          else
-            echo "Tools DLL not found in Release or Debug. Listing candidates:" >&2
-            ls -la "$ROOT/src/TiYf.Engine.Tools/bin" || true
-            ls -la "$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0" || true
-            ls -la "$ROOT/src/TiYf.Engine.Tools/bin/Debug/net8.0" || true
-            exit 1
-          fi
+          echo "sim=$SIM" >> $GITHUB_OUTPUT
+          echo "tools=$TOOLS" >> $GITHUB_OUTPUT
           echo "cfg=$ROOT/tests/fixtures/backtest_m0/config.backtest-m0.json" >> $GITHUB_OUTPUT
 
       - name: Run K=1 (pass)
@@ -291,3 +317,23 @@ jobs:
             dotnet exec "$tools" verify strict --events "$J_EVENTS" --schema 1.3.0 --json || tools_out=$?
           fi
           if [ "$tools_out" -ne 0 ] && [ "$tools_out" -ne 2 ]; then exit 1; fi
+
+      - name: Summary
+        if: always()
+        env:
+          MATRIX_OS: ${{ matrix.os }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "### DataQA Tolerance ($MATRIX_OS)" >> "$GITHUB_STEP_SUMMARY"
+          echo "pass tmp: .tmp_k1_pass" >> "$GITHUB_STEP_SUMMARY"
+          echo "overflow tmp: .tmp_k1_over" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifacts (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dataqa-${{ matrix.os }}
+          path: |
+            .tmp_k1_pass
+            .tmp_k1_over

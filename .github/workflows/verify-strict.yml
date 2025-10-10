@@ -1,35 +1,59 @@
 name: verify-strict
 
 on:
-  push:
-    branches: [ main, feat/m4-seed ]
-  pull_request:
-    branches: [ main, feat/m4-seed ]
   workflow_dispatch:
+  pull_request:
+    branches: [ main, feat/**, fix/** ]
+  push:
+    branches: [ main ]
 
 jobs:
-  verify-strict:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - name: Build (Release)
+        run: dotnet build TiYf.Engine.sln -c Release --nologo
+      - name: Upload Release binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binaries
+          path: |
+            src/TiYf.Engine.Sim/bin/Release/net8.0
+            src/TiYf.Engine.Tools/bin/Release/net8.0
+
+  verify-strict:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Download Release binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: release-binaries
+          path: release-binaries
+      - name: Sync binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          rsync -a release-binaries/src/TiYf.Engine.Sim/bin/Release/net8.0/ src/TiYf.Engine.Sim/bin/Release/net8.0/
+          rsync -a release-binaries/src/TiYf.Engine.Tools/bin/Release/net8.0/ src/TiYf.Engine.Tools/bin/Release/net8.0/
       - name: Build + Generate + Verify (strict)
         shell: bash
         run: |
           set -euo pipefail
           ROOT="$GITHUB_WORKSPACE"
-          SLN="$ROOT/TiYf.Engine.sln"
-          # Prefer Release Tools dll; fall back to Debug if some project-specific setting produced Debug
-          TOOLS_R="$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
-          TOOLS_D="$ROOT/src/TiYf.Engine.Tools/bin/Debug/net8.0/TiYf.Engine.Tools.dll"
+          TOOLS="$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
           SIM="$ROOT/src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"
           CFG="$ROOT/tests/fixtures/backtest_m0/config.backtest-m0.json"
-          echo "[Step] Build solution"
-          dotnet build "$SLN" -c Release --nologo
-          # Resolve Tools path after build
-          if [ -f "$TOOLS_R" ]; then TOOLS="$TOOLS_R"; elif [ -f "$TOOLS_D" ]; then TOOLS="$TOOLS_D"; else echo "Tools dll not found in Release or Debug"; find "$ROOT/src/TiYf.Engine.Tools/bin" -maxdepth 3 -type f -name 'TiYf.Engine.Tools.dll' -print || true; exit 2; fi
+          if [ ! -f "$TOOLS" ]; then echo "Tools DLL missing at $TOOLS" >&2; exit 1; fi
+          if [ ! -f "$SIM" ]; then echo "Sim DLL missing at $SIM" >&2; exit 1; fi
           echo "[Step] Run Sim (fixture)"
           rm -rf "$ROOT/journals" || true
           dotnet exec "$SIM" --config "$CFG" --run-id STRICT-CI --quiet || { echo 'Sim run failed'; exit 2; }
@@ -39,9 +63,6 @@ jobs:
           EV="$RUN_DIR/events.csv"; TR="$RUN_DIR/trades.csv"
           test -f "$EV" && test -f "$TR" || { echo 'Missing events/trades'; ls -R "$RUN_DIR"; exit 2; }
           echo "Events size: $(wc -l < "$EV") lines"; echo "Trades size: $(wc -l < "$TR") lines"
-          echo "[Step] Locate parity artifact (if any)"
-          PARITY_HASH="$(find "$ROOT/artifacts/parity" -type f -name hashes.txt 2>/dev/null | sort | tail -n1 || true)"
-          if [ -f "$PARITY_HASH" ]; then echo "Found parity hashes: $PARITY_HASH"; cat "$PARITY_HASH"; else echo "No parity hashes.txt found (expected if parity feature not triggered)"; fi
           echo "[Step] Strict verify"
           set +e
           VERIFY_JSON=$(dotnet exec "$TOOLS" verify strict --events "$EV" --trades "$TR" --schema 1.3.0 --json)
@@ -52,6 +73,18 @@ jobs:
           cp "$EV" "$TR" artifacts/verify-strict/
           if [ $EC -ne 0 ]; then
             echo "Verifier exit code=$EC"; exit $EC
+          fi
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "### Verify Strict" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f artifacts/verify-strict/events.csv ]; then
+            echo "Events: $(wc -l < artifacts/verify-strict/events.csv) rows" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f artifacts/verify-strict/trades.csv ]; then
+            echo "Trades: $(wc -l < artifacts/verify-strict/trades.csv) rows" >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Upload artifacts (always)
         if: always()
