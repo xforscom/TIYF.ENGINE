@@ -82,6 +82,7 @@ jobs:
             EV="$RUN_DIR/events.csv"; TR="$RUN_DIR/trades.csv"
           fi
           test -f "$EV"; test -f "$TR"
+          echo "RUN_DIR_A=$RUN_DIR" >> "$GITHUB_ENV"
           mkdir -p artifacts/parity/$MODE
           # Normalize events: skip meta + header
           tail -n +3 "$EV" | sha256sum | awk '{print $1}' > artifacts/parity/$MODE/events.sha
@@ -125,6 +126,7 @@ jobs:
           echo "RUN_DIR_B=$RUN_DIR"; test -n "$RUN_DIR"
           EV_B="$RUN_DIR/events.csv"; TR_B="$RUN_DIR/trades.csv"
           test -f "$EV_B"; test -f "$TR_B"
+          echo "RUN_DIR_B=$RUN_DIR" >> "$GITHUB_ENV"
           echo "B events=$EV_B trades=$TR_B"
 
       - name: Verify parity (events + trades)
@@ -133,8 +135,12 @@ jobs:
           set -euo pipefail
           ROOT="$GITHUB_WORKSPACE"
           TOOLS="$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
-          A_DIR="$ROOT/journals/M0/CANARY-${{ matrix.mode }}-A"
-          B_DIR="$ROOT/journals/M0/CANARY-${{ matrix.mode }}-B"
+          A_DIR_REL="${RUN_DIR_A:-}"
+          B_DIR_REL="${RUN_DIR_B:-}"
+          test -n "$A_DIR_REL" && test -n "$B_DIR_REL"
+          A_DIR="$ROOT/$A_DIR_REL"
+          B_DIR="$ROOT/$B_DIR_REL"
+          test -d "$A_DIR" && test -d "$B_DIR"
           mkdir -p artifacts/parity/${{ matrix.mode }}
           set +e
           dotnet exec "$TOOLS" verify parity \
