@@ -110,7 +110,7 @@ jobs:
                 jq '.featureFlags.penalty="active"' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
                 ;;
               penalty-active)
-                jq '.featureFlags.penalty="active" | .penaltyConfig = (.penaltyConfig // {}) | .penaltyConfig.forcePenalty=true' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
+                jq '.featureFlags.penalty="active" | .penaltyConfig = (.penaltyConfig // {}) | .penaltyConfig.forcePenalty=true | .ciPenaltyScaffold=true' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
                 ;;
             esac
             RUN_ID="CANARY-${MODE^^}"
