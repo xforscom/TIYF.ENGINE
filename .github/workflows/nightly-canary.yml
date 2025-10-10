@@ -6,6 +6,8 @@ on:
   workflow_dispatch: {}
   push:
     branches: [ feat/m5-seed ]
+  pull_request:
+    branches: [ main, feat/m4-seed, feat/m5-seed ]
 
 concurrency:
   group: nightly-canary
@@ -60,8 +62,9 @@ jobs:
               ;;
           esac
           echo "Mutated config for mode=$MODE -> $OUTCFG"
+          echo "OUTCFG=$OUTCFG" >> "$GITHUB_ENV"
           rm -rf "$ROOT/journals" || true
-          RUN_ID=CANARY-$MODE-$RANDOM
+          RUN_ID=CANARY-$MODE-A
           OUT=$(mktemp)
           set +e
           dotnet exec "$SIM" --config "$OUTCFG" --quiet --run-id "$RUN_ID" | tee "$OUT"
@@ -90,7 +93,64 @@ jobs:
             echo "run_dir=$RUN_DIR"
           } > artifacts/parity/$MODE/hashes.txt
           cp artifacts/parity/$MODE/hashes.txt artifacts/parity/$MODE/hashes-$MODE.txt || true
-          echo "--- hashes ($MODE) ---"; cat artifacts/parity/$MODE/hashes.txt
+          echo "--- hashes ($MODE A) ---"; cat artifacts/parity/$MODE/hashes.txt
+
+      - name: Back-to-back run B (mode=${{ matrix.mode }})
+        env:
+          MODE: ${{ matrix.mode }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE"
+          SIM="$ROOT/src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"
+          BASE_CFG="$ROOT/tests/fixtures/backtest_m0/config.backtest-m0.json"
+          OUTCFG_B=$(mktemp)
+          cp "$OUTCFG" "$OUTCFG_B"
+          RUN_ID=CANARY-$MODE-B
+          OUT=$(mktemp)
+          dotnet exec "$SIM" --config "$OUTCFG_B" --quiet --run-id "$RUN_ID" | tee "$OUT"
+          RUN_DIR=$(ls -d "$ROOT"/journals/*"$RUN_ID"* 2>/dev/null | head -n1 || true)
+          echo "RUN_DIR_B=$RUN_DIR"; test -n "$RUN_DIR"
+          EV_B="$RUN_DIR/events.csv"; TR_B="$RUN_DIR/trades.csv"
+          test -f "$EV_B"; test -f "$TR_B"
+          echo "B events=$EV_B trades=$TR_B"
+
+      - name: Verify parity (events + trades)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE"
+          TOOLS="$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
+          A_DIR="$ROOT/journals/M0/CANARY-${{ matrix.mode }}-A"
+          B_DIR="$ROOT/journals/M0/CANARY-${{ matrix.mode }}-B"
+          mkdir -p artifacts/parity/${{ matrix.mode }}
+          set +e
+          dotnet exec "$TOOLS" verify parity \
+            --events-a "$A_DIR/events.csv" --events-b "$B_DIR/events.csv" \
+            --trades-a "$A_DIR/trades.csv" --trades-b "$B_DIR/trades.csv" --json | tee artifacts/parity/${{ matrix.mode }}/parity-parrot.json
+          code=$?
+          set -e
+          echo "parity_exit_code=$code"
+          exit $code
+
+      - name: Parity job summary (per-mode)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE="artifacts/parity/${{ matrix.mode }}/parity-parrot.json"
+          echo "# Nightly parity (${{ matrix.mode }})" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "$FILE" ]; then
+            # Quick check: exitCode 0 in JSON
+            ok=$(grep -c '"exitCode":0' "$FILE" || true)
+            if [ "$ok" -gt 0 ]; then
+              echo "✅ parity OK (mode=${{ matrix.mode }}) — events & trades match" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "❌ parity drift (mode=${{ matrix.mode }}) — see artifacts for first-diff diagnostics" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo "⚠️ parity-parrot.json not found for mode ${{ matrix.mode }}" >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Upload parity artifacts
         uses: actions/upload-artifact@v4
         with:
