@@ -41,65 +41,43 @@ jobs:
 
       - name: Run M0 — A
         run: |
-          if (Test-Path journals/M0/M0-RUN) { Remove-Item -Recurse -Force journals/M0/M0-RUN }
-          dotnet run --project src/TiYf.Engine.Sim -- --config tests/fixtures/backtest_m0/config.backtest-m0.json
-          Copy-Item journals/M0/M0-RUN/events.csv artifacts/raw/events_A.csv
-          Copy-Item journals/M0/M0-RUN/trades.csv artifacts/raw/trades_A.csv
+          # Clean any prior A run dir and execute with explicit run-id to avoid meta/run-id interference
+          if (Test-Path journals/M0/M0-RUN-A) { Remove-Item -Recurse -Force journals/M0/M0-RUN-A }
+          dotnet run --project src/TiYf.Engine.Sim -- --config tests/fixtures/backtest_m0/config.backtest-m0.json --run-id A
+          Copy-Item journals/M0/M0-RUN-A/events.csv artifacts/raw/events_A.csv
+          Copy-Item journals/M0/M0-RUN-A/trades.csv artifacts/raw/trades_A.csv
 
       - name: Run M0 — B
         run: |
-          if (Test-Path journals/M0/M0-RUN) { Remove-Item -Recurse -Force journals/M0/M0-RUN }
-          dotnet run --project src/TiYf.Engine.Sim -- --config tests/fixtures/backtest_m0/config.backtest-m0.json
-          Copy-Item journals/M0/M0-RUN/events.csv artifacts/raw/events_B.csv
-          Copy-Item journals/M0/M0-RUN/trades.csv artifacts/raw/trades_B.csv
+          # Clean any prior B run dir and execute with explicit run-id to avoid meta/run-id interference
+          if (Test-Path journals/M0/M0-RUN-B) { Remove-Item -Recurse -Force journals/M0/M0-RUN-B }
+          dotnet run --project src/TiYf.Engine.Sim -- --config tests/fixtures/backtest_m0/config.backtest-m0.json --run-id B
+          Copy-Item journals/M0/M0-RUN-B/events.csv artifacts/raw/events_B.csv
+          Copy-Item journals/M0/M0-RUN-B/trades.csv artifacts/raw/trades_B.csv
 
-      - name: Canonicalize + Hash
-        id: canon
+      - name: Verify parity (events + trades)
+        id: parity
         run: |
-          function Normalize-File($in, $out) {
-            $text = Get-Content -Raw -Encoding UTF8 $in
-            $text = ($text -split "`r?`n") | ForEach-Object { $_.TrimEnd(' ',"`t") } | Join-String -Separator "`n"
-            [System.IO.File]::WriteAllText($out, $text, [System.Text.UTF8Encoding]::new($false))
-          }
-          function Hash-File($path) { (Get-FileHash -Path $path -Algorithm SHA256).Hash.ToUpper() }
+          # Use Tools CLI verify parity for normalized hashing and first-diff diagnostics
+          $tools = 'src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll'
+          $parityJson = & dotnet exec $tools verify parity --events-a 'artifacts/raw/events_A.csv' --events-b 'artifacts/raw/events_B.csv' --trades-a 'artifacts/raw/trades_A.csv' --trades-b 'artifacts/raw/trades_B.csv' --json
+          $parityExit = $LASTEXITCODE
+          if ($null -ne $parityJson) { $parityJson | Set-Content -Path artifacts/hashes/parity.json -Encoding UTF8 }
+          "parity_exit=$parityExit" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-          $eventsA = 'artifacts/raw/events_A.csv'
-            $eventsB = 'artifacts/raw/events_B.csv'
-            $tradesA = 'artifacts/raw/trades_A.csv'
-            $tradesB = 'artifacts/raw/trades_B.csv'
-
-          Normalize-File $eventsA 'artifacts/canonical/events_A.csv'
-          Normalize-File $eventsB 'artifacts/canonical/events_B.csv'
-          Normalize-File $tradesA 'artifacts/canonical/trades_A.csv'
-          Normalize-File $tradesB 'artifacts/canonical/trades_B.csv'
-
-          $heA = Hash-File 'artifacts/canonical/events_A.csv'
-          $heB = Hash-File 'artifacts/canonical/events_B.csv'
-          $htA = Hash-File 'artifacts/canonical/trades_A.csv'
-          $htB = Hash-File 'artifacts/canonical/trades_B.csv'
-
-          Set-Content -NoNewline -Path artifacts/hashes/events_A.sha256 -Value $heA
-          Set-Content -NoNewline -Path artifacts/hashes/events_B.sha256 -Value $heB
-          Set-Content -NoNewline -Path artifacts/hashes/trades_A.sha256 -Value $htA
-          Set-Content -NoNewline -Path artifacts/hashes/trades_B.sha256 -Value $htB
-
-          # Extract invariants
-          $eventsMetaLine = (Get-Content artifacts/canonical/events_A.csv -First 1)
+          # Extract invariants from raw files (meta line and counts)
+          $eventsMetaLine = (Get-Content artifacts/raw/events_A.csv -First 1)
           $dataVersion = if ($eventsMetaLine -match 'data_version=([A-Fa-f0-9]{64})') { $Matches[1].ToUpper() } else { '' }
-          $alertCount = (Select-String -Path artifacts/canonical/events_A.csv -Pattern 'ALERT_BLOCK_' -SimpleMatch | Measure-Object).Count
-          $tradesLines = Get-Content artifacts/canonical/trades_A.csv
+          $alertCount = (Select-String -Path artifacts/raw/events_A.csv -Pattern 'ALERT_BLOCK_' -SimpleMatch | Measure-Object).Count
+          $tradesLines = Get-Content artifacts/raw/trades_A.csv
           $tradesRowCount = ($tradesLines.Length - 1)
 
           $manifest = [ordered]@{
-            events_A = $heA; events_B = $heB; trades_A = $htA; trades_B = $htB;
+            parity_exit = $parityExit;
             data_version = $dataVersion; alert_block_count = $alertCount; trades_rows = $tradesRowCount
           } | ConvertTo-Json -Depth 3
           $manifest | Set-Content -Path artifacts/hashes/manifest.json -Encoding UTF8
 
-          "events_hash_A=$heA" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "events_hash_B=$heB" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "trades_hash_A=$htA" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "trades_hash_B=$htB" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "data_version=$dataVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "trades_rows=$tradesRowCount" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "alert_count=$alertCount" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -107,42 +85,56 @@ jobs:
       - name: Assert Determinism & Invariants
         run: |
           $EXPECTED_DV = 'C531EDAA1B2B3EB9286B3EDA98B6443DD365C1A8DFEA2AFB4B77FC7DDD1D6122'
-          $ehA = '${{ steps.canon.outputs.events_hash_A }}'
-          $ehB = '${{ steps.canon.outputs.events_hash_B }}'
-          $thA = '${{ steps.canon.outputs.trades_hash_A }}'
-          $thB = '${{ steps.canon.outputs.trades_hash_B }}'
-          $dv  = '${{ steps.canon.outputs.data_version }}'
-          $rows = [int]'${{ steps.canon.outputs.trades_rows }}'
-          $alerts = [int]'${{ steps.canon.outputs.alert_count }}'
+          $parityExit = [int]'${{ steps.parity.outputs.parity_exit }}'
+          $dv  = '${{ steps.parity.outputs.data_version }}'
+          $rows = [int]'${{ steps.parity.outputs.trades_rows }}'
+          $alerts = [int]'${{ steps.parity.outputs.alert_count }}'
 
-          Write-Host "events_A=$ehA"; Write-Host "events_B=$ehB"
-          Write-Host "trades_A=$thA"; Write-Host "trades_B=$thB"
+          Write-Host "parity_exit=$parityExit"
           Write-Host "data_version=$dv"; Write-Host "trades_rows=$rows"; Write-Host "alert_block_count=$alerts"
 
           $fail = $false
-          if ($ehA -ne $ehB) { Write-Error 'Events hash mismatch'; $fail = $true }
-          if ($thA -ne $thB) { Write-Error 'Trades hash mismatch'; $fail = $true }
+          if ($parityExit -ne 0) { Write-Error 'Verify parity mismatch'; $fail = $true }
           if ($dv -ne $EXPECTED_DV) { Write-Error "Unexpected data_version: $dv"; $fail = $true }
           if ($alerts -ne 0) { Write-Error "ALERT_BLOCK_* count not zero: $alerts"; $fail = $true }
           if ($rows -ne 6) { Write-Error "Trades row count not 6: $rows"; $fail = $true }
 
           if ($fail) {
-            function Diff-Preview($a,$b,$out) {
-              $al = Get-Content $a
-              $bl = Get-Content $b
-              $limit = [Math]::Min([Math]::Max($al.Count,$bl.Count),2000)
-              $diffs = @()
-              for($i=0;$i -lt $limit;$i++){
-                $la = if ($i -lt $al.Count) { $al[$i] } else { '' }
-                $lb = if ($i -lt $bl.Count) { $bl[$i] } else { '' }
-                if ($la -ne $lb){ $diffs += "L$($i+1)`n A: $la`n B: $lb`n"; if($diffs.Count -ge 20){ break } }
-              }
-              $diffs | Set-Content $out
-            }
-            Diff-Preview artifacts/canonical/events_A.csv artifacts/canonical/events_B.csv artifacts/hashes/events.diff.txt
-            Diff-Preview artifacts/canonical/trades_A.csv artifacts/canonical/trades_B.csv artifacts/hashes/trades.diff.txt
+            # Parity tool already prints FIRST_DIFF; also persist raw files for inspection
+            Copy-Item artifacts/raw/events_A.csv artifacts/hashes/events_A.snapshot.csv -Force
+            Copy-Item artifacts/raw/events_B.csv artifacts/hashes/events_B.snapshot.csv -Force
+            Copy-Item artifacts/raw/trades_A.csv artifacts/hashes/trades_A.snapshot.csv -Force
+            Copy-Item artifacts/raw/trades_B.csv artifacts/hashes/trades_B.snapshot.csv -Force
             Write-Error 'Determinism/Invariant check failed.'
             exit 1
+          }
+
+      - name: Job Summary
+        if: always()
+        run: |
+          try {
+            $parity = Get-Content artifacts/hashes/parity.json -ErrorAction Stop | ConvertFrom-Json
+            $ok = ($parity.exitCode -eq 0)
+            $status = if ($ok) { '✅ OK' } else { '⚠️ Drift' }
+            $evA = $parity.events.hashA.Substring(0,8)
+            $evB = $parity.events.hashB.Substring(0,8)
+            $trA = if ($parity.trades) { $parity.trades.hashA.Substring(0,8) } else { '--------' }
+            $trB = if ($parity.trades) { $parity.trades.hashB.Substring(0,8) } else { '--------' }
+            $dv = '${{ steps.parity.outputs.data_version }}'
+            $rows = '${{ steps.parity.outputs.trades_rows }}'
+            $alerts = '${{ steps.parity.outputs.alert_count }}'
+            $summary = @()
+            $summary += "# M0 Determinism"
+            $summary += "Status: **$status**"
+            $summary += ""
+            $summary += "- Events A/B: `$evA` / `$evB`"
+            $summary += "- Trades A/B: `$trA` / `$trB`"
+            $summary += "- Data Version: `$dv`"
+            $summary += "- Trades rows: `$rows` | Alerts: `$alerts`"
+            $summaryText = $summary -join "`n"
+            $summaryText | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          } catch {
+            "M0 Determinism summary unavailable" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
           }
 
       - name: Upload artifacts (on failure)
