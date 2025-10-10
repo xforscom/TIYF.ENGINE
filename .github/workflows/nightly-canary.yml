@@ -46,13 +46,47 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rsync -a release-binaries/src/TiYf.Engine.Sim/bin/Release/net8.0/ src/TiYf.Engine.Sim/bin/Release/net8.0/
-          rsync -a release-binaries/src/TiYf.Engine.Tools/bin/Release/net8.0/ src/TiYf.Engine.Tools/bin/Release/net8.0/
+          mkdir -p src/TiYf.Engine.Sim/bin/Release/net8.0
+          mkdir -p src/TiYf.Engine.Tools/bin/Release/net8.0
+          SOURCE_ROOT="release-binaries/src"
+          if [ ! -d "$SOURCE_ROOT" ]; then
+            SOURCE_ROOT="release-binaries"
+          fi
+          if [ ! -d "$SOURCE_ROOT" ]; then
+            echo "Unable to locate Release binaries in artifact payload" >&2
+            ls -R release-binaries || true
+            exit 1
+          fi
+          rsync -a "$SOURCE_ROOT/" src/
       - name: Run canary modes
         id: modes
         shell: bash
         run: |
           set -euo pipefail
+          resolve_journal() {
+            local raw="$1"
+            local label="$2"
+            if [ -z "$raw" ]; then
+              echo "Missing $label journal path" >&2
+              exit 1
+            fi
+            if [ -f "$raw" ]; then
+              echo "$raw"
+              return 0
+            fi
+            if [ -d "$raw" ]; then
+              local candidate="$raw/${label}.csv"
+              if [ -f "$candidate" ]; then
+                echo "$candidate"
+                return 0
+              fi
+              echo "Directory $raw does not contain ${label}.csv" >&2
+              exit 1
+            fi
+            echo "Journal path $raw does not exist" >&2
+            exit 1
+          }
+
           ROOT="$GITHUB_WORKSPACE"
           SIM="$ROOT/src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"
           TOOLS="$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
@@ -85,24 +119,22 @@ jobs:
             EV=$(grep -m1 '^JOURNAL_DIR_EVENTS=' "$OUT" | cut -d= -f2-)
             TR=$(grep -m1 '^JOURNAL_DIR_TRADES=' "$OUT" | cut -d= -f2-)
             if [ -z "$EV" ] || [ -z "$TR" ]; then
-              echo "Failed to capture journal directories for mode $MODE" >&2
+              echo "Failed to capture journal paths for mode $MODE" >&2
               exit 1
             fi
-            if [ ! -d "$EV" ] || [ ! -d "$TR" ]; then
-              echo "Resolved journal path is not a directory (mode=$MODE)" >&2
-              exit 1
-            fi
+            EV_FILE=$(resolve_journal "$EV" events)
+            TR_FILE=$(resolve_journal "$TR" trades)
             KEY=${MODE//-/_}
-            echo "ev_${KEY}=$EV" >> "$GITHUB_OUTPUT"
-            echo "tr_${KEY}=$TR" >> "$GITHUB_OUTPUT"
+            echo "ev_${KEY}=$EV_FILE" >> "$GITHUB_OUTPUT"
+            echo "tr_${KEY}=$TR_FILE" >> "$GITHUB_OUTPUT"
             MODE_DIR="artifacts/parity/$MODE"
             mkdir -p "$MODE_DIR"
             set +e
             dotnet exec "$TOOLS" verify parity \
-              --events-a "$EV/events.csv" \
-              --events-b "$EV/events.csv" \
-              --trades-a "$TR/trades.csv" \
-              --trades-b "$TR/trades.csv" \
+              --events-a "$EV_FILE" \
+              --events-b "$EV_FILE" \
+              --trades-a "$TR_FILE" \
+              --trades-b "$TR_FILE" \
               --json | tee "$MODE_DIR/parity-parrot.json"
             CODE=$?
             set -e
@@ -116,14 +148,14 @@ jobs:
               echo "Unable to extract trades hash for mode $MODE" >&2
               exit 1
             fi
-            PENALTY_COUNT=$(grep -c 'PENALTY_APPLIED_V1' "$EV/events.csv" || true)
+            PENALTY_COUNT=$(grep -c 'PENALTY_APPLIED_V1' "$EV_FILE" || true)
             {
               echo "mode=$MODE"
               echo "events_hash=$EVENTS_HASH"
               echo "trades_hash=$TRADES_HASH"
               echo "penalty_count=$PENALTY_COUNT"
-              echo "events_dir=$EV"
-              echo "trades_dir=$TR"
+              echo "events_path=$EV_FILE"
+              echo "trades_path=$TR_FILE"
             } > "$MODE_DIR/hashes.txt"
             echo "$MODE,$TRADES_HASH,$PENALTY_COUNT" >> "$SUMMARY"
           done

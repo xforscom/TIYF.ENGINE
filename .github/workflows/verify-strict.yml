@@ -42,8 +42,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rsync -a release-binaries/src/TiYf.Engine.Sim/bin/Release/net8.0/ src/TiYf.Engine.Sim/bin/Release/net8.0/
-          rsync -a release-binaries/src/TiYf.Engine.Tools/bin/Release/net8.0/ src/TiYf.Engine.Tools/bin/Release/net8.0/
+          mkdir -p src/TiYf.Engine.Sim/bin/Release/net8.0
+          mkdir -p src/TiYf.Engine.Tools/bin/Release/net8.0
+          SOURCE_ROOT="release-binaries/src"
+          if [ ! -d "$SOURCE_ROOT" ]; then
+            SOURCE_ROOT="release-binaries"
+          fi
+          if [ ! -d "$SOURCE_ROOT" ]; then
+            echo "Unable to locate Release binaries in artifact payload" >&2
+            ls -R release-binaries || true
+            exit 1
+          fi
+          rsync -a "$SOURCE_ROOT/" src/
       - name: Build + Generate + Verify (strict)
         shell: bash
         run: |

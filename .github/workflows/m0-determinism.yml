@@ -31,44 +31,80 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          resolve_journal() {
+            local raw="$1"
+            local label="$2"
+            if [ -z "$raw" ]; then
+              echo "Missing $label journal path" >&2
+              exit 1
+            fi
+            if [ -f "$raw" ]; then
+              echo "$raw"
+              return 0
+            fi
+            if [ -d "$raw" ]; then
+              local candidate="$raw/${label}.csv"
+              if [ -f "$candidate" ]; then
+                echo "$candidate"
+                return 0
+              fi
+              echo "Directory $raw does not contain ${label}.csv" >&2
+              exit 1
+            fi
+            echo "Journal path $raw does not exist" >&2
+            exit 1
+          }
+
           LOG=run-A.log
           dotnet exec src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll \
             --config tests/fixtures/backtest_m0/config.backtest-m0.json \
             --run-id A --quiet | tee "$LOG"
           ev=$(awk -F= '/^JOURNAL_DIR_EVENTS=/{print $2}' "$LOG" | tail -n1)
           tr=$(awk -F= '/^JOURNAL_DIR_TRADES=/{print $2}' "$LOG" | tail -n1)
-          if [ -z "$ev" ] || [ ! -d "$ev" ]; then
-            echo "Failed to resolve events directory for run A" >&2
-            exit 1
-          fi
-          if [ -z "$tr" ] || [ ! -d "$tr" ]; then
-            echo "Failed to resolve trades directory for run A" >&2
-            exit 1
-          fi
-          echo "EV_A=$ev" >> "$GITHUB_OUTPUT"
-          echo "TR_A=$tr" >> "$GITHUB_OUTPUT"
+          ev_path=$(resolve_journal "$ev" events)
+          tr_path=$(resolve_journal "$tr" trades)
+          echo "EV_A=$ev_path" >> "$GITHUB_OUTPUT"
+          echo "TR_A=$tr_path" >> "$GITHUB_OUTPUT"
 
       - name: Run B (capture stdout)
         id: run_b
         shell: bash
         run: |
           set -euo pipefail
+          resolve_journal() {
+            local raw="$1"
+            local label="$2"
+            if [ -z "$raw" ]; then
+              echo "Missing $label journal path" >&2
+              exit 1
+            fi
+            if [ -f "$raw" ]; then
+              echo "$raw"
+              return 0
+            fi
+            if [ -d "$raw" ]; then
+              local candidate="$raw/${label}.csv"
+              if [ -f "$candidate" ]; then
+                echo "$candidate"
+                return 0
+              fi
+              echo "Directory $raw does not contain ${label}.csv" >&2
+              exit 1
+            fi
+            echo "Journal path $raw does not exist" >&2
+            exit 1
+          }
+
           LOG=run-B.log
           dotnet exec src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll \
             --config tests/fixtures/backtest_m0/config.backtest-m0.json \
             --run-id B --quiet | tee "$LOG"
           ev=$(awk -F= '/^JOURNAL_DIR_EVENTS=/{print $2}' "$LOG" | tail -n1)
           tr=$(awk -F= '/^JOURNAL_DIR_TRADES=/{print $2}' "$LOG" | tail -n1)
-          if [ -z "$ev" ] || [ ! -d "$ev" ]; then
-            echo "Failed to resolve events directory for run B" >&2
-            exit 1
-          fi
-          if [ -z "$tr" ] || [ ! -d "$tr" ]; then
-            echo "Failed to resolve trades directory for run B" >&2
-            exit 1
-          fi
-          echo "EV_B=$ev" >> "$GITHUB_OUTPUT"
-          echo "TR_B=$tr" >> "$GITHUB_OUTPUT"
+          ev_path=$(resolve_journal "$ev" events)
+          tr_path=$(resolve_journal "$tr" trades)
+          echo "EV_B=$ev_path" >> "$GITHUB_OUTPUT"
+          echo "TR_B=$tr_path" >> "$GITHUB_OUTPUT"
 
       - name: Verify parity (events + trades)
         shell: bash
@@ -77,10 +113,10 @@ jobs:
           tools="src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
           set +e
           dotnet exec "$tools" verify parity \
-            --events-a "${{ steps.run_a.outputs.EV_A }}/events.csv" \
-            --events-b "${{ steps.run_b.outputs.EV_B }}/events.csv" \
-            --trades-a "${{ steps.run_a.outputs.TR_A }}/trades.csv" \
-            --trades-b "${{ steps.run_b.outputs.TR_B }}/trades.csv" \
+            --events-a "${{ steps.run_a.outputs.EV_A }}" \
+            --events-b "${{ steps.run_b.outputs.EV_B }}" \
+            --trades-a "${{ steps.run_a.outputs.TR_A }}" \
+            --trades-b "${{ steps.run_b.outputs.TR_B }}" \
             --json | tee parity.json
           code=$?
           set -e

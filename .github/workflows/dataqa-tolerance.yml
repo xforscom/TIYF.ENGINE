@@ -61,8 +61,27 @@ jobs:
           set -euo pipefail
           mkdir -p src/TiYf.Engine.Sim/bin/Release/net8.0
           mkdir -p src/TiYf.Engine.Tools/bin/Release/net8.0
-          cp -r release-binaries/src/TiYf.Engine.Sim/bin/Release/net8.0/. src/TiYf.Engine.Sim/bin/Release/net8.0/
-          cp -r release-binaries/src/TiYf.Engine.Tools/bin/Release/net8.0/. src/TiYf.Engine.Tools/bin/Release/net8.0/
+          SOURCE_ROOT="release-binaries/src"
+          if [ ! -d "$SOURCE_ROOT" ]; then
+            SOURCE_ROOT="release-binaries"
+          fi
+          if [ ! -d "$SOURCE_ROOT" ]; then
+            echo "Unable to locate Release binaries in artifact payload" >&2
+            ls -R release-binaries || true
+            exit 1
+          fi
+          if [ ! -d "$SOURCE_ROOT/TiYf.Engine.Sim/bin/Release/net8.0" ]; then
+            echo "Sim binaries missing under $SOURCE_ROOT" >&2
+            ls -R "$SOURCE_ROOT" || true
+            exit 1
+          fi
+          if [ ! -d "$SOURCE_ROOT/TiYf.Engine.Tools/bin/Release/net8.0" ]; then
+            echo "Tools binaries missing under $SOURCE_ROOT" >&2
+            ls -R "$SOURCE_ROOT" || true
+            exit 1
+          fi
+          cp -r "$SOURCE_ROOT/TiYf.Engine.Sim/bin/Release/net8.0/." src/TiYf.Engine.Sim/bin/Release/net8.0/
+          cp -r "$SOURCE_ROOT/TiYf.Engine.Tools/bin/Release/net8.0/." src/TiYf.Engine.Tools/bin/Release/net8.0/
 
       - name: Prepare paths
         id: prep
