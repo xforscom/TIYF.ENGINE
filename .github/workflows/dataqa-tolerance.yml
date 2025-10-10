@@ -78,6 +78,16 @@ jobs:
           '
 
           dotnet exec "$SIM" --config "$CFG_OUT" --run-id K1-PASS
+          # Normalize journal directory name for artifact expectations
+          if [ -d "${PASS_ROOT}/journals" ]; then
+            for d in "${PASS_ROOT}/journals"/*; do
+              if [ -d "$d" ] && [ "${d}" != "${PASS_ROOT}/journals/K1-PASS" ]; then
+                rm -rf "${PASS_ROOT}/journals/K1-PASS"
+                mv "$d" "${PASS_ROOT}/journals/K1-PASS"
+                break
+              fi
+            done
+          fi
 
       - name: K=1 OVERFLOW – rewrite config & run sim
         run: |
@@ -112,6 +122,15 @@ jobs:
           '
 
           dotnet exec "$SIM" --config "$CFG_OUT" --run-id K1-OVERFLOW
+          if [ -d "${OVER_ROOT}/journals" ]; then
+            for d in "${OVER_ROOT}/journals"/*; do
+              if [ -d "$d" ] && [ "${d}" != "${OVER_ROOT}/journals/K1-OVERFLOW" ]; then
+                rm -rf "${OVER_ROOT}/journals/K1-OVERFLOW"
+                mv "$d" "${OVER_ROOT}/journals/K1-OVERFLOW"
+                break
+              fi
+            done
+          fi
 
       - name: Summaries (quick asserts)
         run: |
