@@ -72,6 +72,10 @@ jobs:
           set -e
           EV=$(grep -m1 '^JOURNAL_DIR_EVENTS=' "$OUT" | cut -d= -f2 || true)
           TR=$(grep -m1 '^JOURNAL_DIR_TRADES=' "$OUT" | cut -d= -f2 || true)
+          RUN_DIR=""
+          if [ -n "$EV" ] && [ -n "$TR" ]; then
+            RUN_DIR="$(dirname "$EV")"
+          fi
           if [ -z "$EV" ] || [ -z "$TR" ]; then
             RUN_DIR=$(ls -d "$ROOT"/journals/*"$RUN_ID"* 2>/dev/null | head -n1 || true)
             echo "RUN_DIR=$RUN_DIR"; test -n "$RUN_DIR"
