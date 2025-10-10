@@ -12,10 +12,10 @@ public class PromotionCliPenaltyTests
     private static string RepoRoot()
     {
         var dir = AppContext.BaseDirectory;
-        for (int i = 0; i < 12; i++)
+        for (int i=0;i<12;i++)
         {
             if (Directory.Exists(Path.Combine(dir, "src")) && File.Exists(Path.Combine(dir, "TiYf.Engine.sln"))) return dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var parent = Directory.GetParent(dir); if (parent == null) break; dir = parent.FullName;
+            var parent = Directory.GetParent(dir); if (parent==null) break; dir = parent.FullName;
         }
         throw new InvalidOperationException("Cannot resolve repo root");
     }
@@ -23,10 +23,10 @@ public class PromotionCliPenaltyTests
     private static CliResult RunPromote(string baselineCfg, string candidateCfg)
     {
         string root = RepoRoot();
-        string toolsDll = Path.Combine(root, "src", "TiYf.Engine.Tools", "bin", "Debug", "net8.0", "TiYf.Engine.Tools.dll");
+        string toolsDll = Path.Combine(root, "src","TiYf.Engine.Tools","bin","Debug","net8.0","TiYf.Engine.Tools.dll");
         if (!File.Exists(toolsDll))
         {
-            var build = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("dotnet", "build -c Debug --nologo") { WorkingDirectory = root });
+            var build = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("dotnet","build -c Debug --nologo") { WorkingDirectory = root });
             build!.WaitForExit();
         }
         Assert.True(File.Exists(toolsDll), $"Tools DLL missing after debug build: {toolsDll}");
@@ -41,13 +41,13 @@ public class PromotionCliPenaltyTests
         var proc = System.Diagnostics.Process.Start(psi)!;
         var stdout = proc.StandardOutput.ReadToEnd();
         var stderr = proc.StandardError.ReadToEnd();
-        if (!proc.WaitForExit(180_000)) { try { proc.Kill(entireProcessTree: true); } catch { }; Assert.Fail($"Promotion timeout STDOUT\n{stdout}\nSTDERR\n{stderr}"); }
+        if (!proc.WaitForExit(180_000)) { try { proc.Kill(entireProcessTree:true); } catch {}; Assert.Fail($"Promotion timeout STDOUT\n{stdout}\nSTDERR\n{stderr}"); }
         return new CliResult(proc.ExitCode, stdout, stderr);
     }
 
     private static JsonElement ExtractResult(string stdout)
     {
-        var line = stdout.Split('\n').FirstOrDefault(l => l.Contains("PROMOTION_RESULT_V1", StringComparison.Ordinal));
+        var line = stdout.Split('\n').FirstOrDefault(l=>l.Contains("PROMOTION_RESULT_V1", StringComparison.Ordinal));
         Assert.False(string.IsNullOrWhiteSpace(line), "PROMOTION_RESULT_V1 JSON line not found");
         using var doc = JsonDocument.Parse(line!);
         return doc.RootElement.Clone();
@@ -74,7 +74,7 @@ public class PromotionCliPenaltyTests
     public void Promotion_Accepts_ShadowToActive_WithZeroPenalties()
     {
         var root = RepoRoot();
-        var baseSrc = Path.Combine(root, "tests", "fixtures", "backtest_m0", "config.backtest-m0.json");
+        var baseSrc = Path.Combine(root, "tests","fixtures","backtest_m0","config.backtest-m0.json");
         var baseline = WritePenaltyConfig(baseSrc, penaltyMode: "shadow", forcePenalty: false, sentimentMode: "off");
         var candidate = WritePenaltyConfig(baseSrc, penaltyMode: "active", forcePenalty: false, sentimentMode: "off");
         var res = RunPromote(baseline, candidate);
@@ -90,7 +90,7 @@ public class PromotionCliPenaltyTests
     public void Promotion_Rejects_ActiveVsActive_OnPenaltyOrder()
     {
         var root = RepoRoot();
-        var baseSrc = Path.Combine(root, "tests", "fixtures", "backtest_m0", "config.backtest-m0.json");
+        var baseSrc = Path.Combine(root, "tests","fixtures","backtest_m0","config.backtest-m0.json");
         // Baseline: penalty active forced, sentiment off
         var baseline = WritePenaltyConfig(baseSrc, penaltyMode: "active", forcePenalty: true, sentimentMode: "off");
         // Candidate: penalty active forced, but sentiment shadow (inserts extra INFO_SENTIMENT_* before penalty; sequence differs)
@@ -99,6 +99,6 @@ public class PromotionCliPenaltyTests
         var result = ExtractResult(res.Stdout);
         Assert.Equal(2, res.ExitCode);
         Assert.False(result.GetProperty("accepted").GetBoolean());
-        Assert.Equal("parity_mismatch (events line=3)", result.GetProperty("reason").GetString());
+        Assert.Equal("penalty_mismatch", result.GetProperty("reason").GetString());
     }
 }
