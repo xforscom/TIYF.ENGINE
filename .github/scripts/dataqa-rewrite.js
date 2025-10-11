@@ -67,20 +67,37 @@ for (const [sym, srcRaw] of Object.entries(ticks)) {
   }
 
   if (isOverflow && sym === targetSymbol) {
-    const maxInteriorRemovable = Math.max(0, rowsAfter.length - 1);
-    const gapRemove = Math.min(Math.max(0, Math.floor(extraMissing)), maxInteriorRemovable);
-    if (gapRemove > 0) {
-      let start = Math.floor(rowsAfter.length / 2) - Math.floor(gapRemove / 2);
-      start = Math.max(1, start);
-      if (start + gapRemove >= rowsAfter.length) {
-        start = Math.max(1, rowsAfter.length - gapRemove - 1);
+    const parsed = rowsAfter.map((line) => {
+      const parts = line.split(',');
+      const ts = parts[0];
+      return {
+        minuteKey: ts.slice(0, 16), // YYYY-MM-DDTHH:MM
+        line
+      };
+    });
+    const minuteOrder = [];
+    const seenMinutes = new Set();
+    for (const { minuteKey } of parsed) {
+      if (!seenMinutes.has(minuteKey)) {
+        seenMinutes.add(minuteKey);
+        minuteOrder.push(minuteKey);
       }
-      const removeIdx = new Set();
-      for (let i = 0; i < gapRemove; i++) {
-        removeIdx.add(start + i);
+    }
+    const availableGap = Math.max(0, minuteOrder.length - 1);
+    const minutesToDrop = Math.min(Math.max(0, Math.floor(extraMissing)), availableGap);
+    if (minutesToDrop > 0) {
+      let startMinuteIdx = Math.floor(minuteOrder.length / 2) - Math.floor(minutesToDrop / 2);
+      startMinuteIdx = Math.max(1, startMinuteIdx);
+      if (startMinuteIdx + minutesToDrop >= minuteOrder.length) {
+        startMinuteIdx = Math.max(1, minuteOrder.length - minutesToDrop - 1);
       }
-      rowsAfter = rowsAfter.filter((_, idx) => !removeIdx.has(idx));
-      console.log(`[dataqa:${mode}] ${sym}: removed ${removeIdx.size} interior rows starting at index ${start} of ${rowsAfter.length + removeIdx.size}`);
+      const dropSet = new Set();
+      for (let i = 0; i < minutesToDrop; i++) {
+        dropSet.add(minuteOrder[startMinuteIdx + i]);
+      }
+      const beforeCount = rowsAfter.length;
+      rowsAfter = parsed.filter((entry) => !dropSet.has(entry.minuteKey)).map((entry) => entry.line);
+      console.log(`[dataqa:${mode}] ${sym}: removed ${beforeCount - rowsAfter.length} rows across ${dropSet.size} minute buckets starting at index ${startMinuteIdx}`);
     }
   }
 
