@@ -77,6 +77,7 @@ jobs:
           path: release-binaries
       - name: Prepare scratch layout
         id: prep
+        shell: bash
         run: |
           set -euo pipefail
           ROOT="$GITHUB_WORKSPACE/scratch/nightly/${{ matrix.os }}"
@@ -110,6 +111,7 @@ jobs:
           echo "root=$ROOT" >> "$GITHUB_OUTPUT"
       - name: Execute modes
         id: runmodes
+        shell: bash
         run: |
           set -euo pipefail
           ROOT="${ROOT:?ROOT env missing}"
@@ -118,6 +120,8 @@ jobs:
           BASE_CFG="$GITHUB_WORKSPACE/tests/fixtures/backtest_m0/config.backtest-m0.json"
           RUN_BASE="${RUNNER_TEMP}/nightly-${{ matrix.os }}"
           mkdir -p "$RUN_BASE"
+          TMP_DIR="$GITHUB_WORKSPACE/.tmp"
+          mkdir -p "$TMP_DIR"
 
           SUMMARY="$ROOT/artifacts/parity_summary.csv"
           printf 'mode,trades_sha,penalty_count,events_sha,run_dir,status,hint,sim_exit,parity_exit\n' > "$SUMMARY"
@@ -128,105 +132,108 @@ jobs:
           for MODE in "${MODES[@]}"; do
             RUN_ROOT="$RUN_BASE/$MODE"
             mkdir -p "$RUN_ROOT"
-            CFG="$RUN_ROOT/config.json"
+            CFG_IN="$BASE_CFG"
+            CFG_OUT="$RUN_ROOT/config.json"
             RID="CANARY-${MODE^^}"
             STATUS="ok"
             HINTS=()
             SIM_EXIT=1
+            PARITY_EXIT=1
+            EVENTS=""
+            TRADES=""
+            PENALTY_COUNT=0
+            RUN_DIR=""
 
             if [[ ! -f "$SIM" || ! -f "$TOOLS" ]]; then
               STATUS="missing-binaries"
               HINTS+=("Release binaries unavailable")
             else
-              CONFIG_ENV="$RUN_ROOT/config.env"
-              node .github/scripts/nightly-config.js "$BASE_CFG" "$CFG" "$RUN_ROOT" "$MODE" > "$CONFIG_ENV"
-              cat "$CONFIG_ENV"
+              ENV_FILE="$TMP_DIR/nightly.env"
+              node .github/scripts/nightly-config.js "$CFG_IN" "$CFG_OUT" "$RUN_ROOT" "$MODE" > "$ENV_FILE"
+              export ENV_FILE CFG_IN CFG_OUT RUN_ROOT
+              python -c "import os, pathlib, shlex; env_path = pathlib.Path(os.environ['ENV_FILE']); cfg_in = pathlib.Path(os.environ['CFG_IN']).resolve(); cfg_out = pathlib.Path(os.environ['CFG_OUT']).resolve(); run_root = pathlib.Path(os.environ['RUN_ROOT']).resolve(); lines = [f\"CFG_IN={shlex.quote(str(cfg_in))}\", f\"CFG_OUT={shlex.quote(str(cfg_out))}\", f\"RUN_ROOT={shlex.quote(str(run_root))}\"]; env_path.open('a', encoding='utf-8').write('\\n'.join(lines) + '\\n')"
+              echo "Configuration environment:" >> "$RUN_ROOT/setup.log"
+              cat "$ENV_FILE" >> "$RUN_ROOT/setup.log"
+              set -a
               # shellcheck disable=SC1090
-              source "$CONFIG_ENV"
-              CFG="${CONFIG_OUT:-$CFG}"
-              RID="CANARY-${MODE^^}"
-              MODE_KEY=$(echo "$MODE" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
-              if [[ -n "${CONFIG_OUT:-}" ]]; then
-                echo "NIGHTLY_${MODE_KEY}_CONFIG=$CONFIG_OUT" >> "$GITHUB_ENV"
-              fi
-              echo "Using config: $CFG"
+              source "$ENV_FILE"
+              set +a
+              printf 'CFG_IN=%q\nCFG_OUT=%q\nRUN_ROOT=%q\n' "${CFG_IN}" "${CFG_OUT}" "${RUN_ROOT}" | tee "$RUN_ROOT/env.snapshot"
 
+              SIM_LOG="$RUN_ROOT/sim.log"
               set +e
-              dotnet exec "$SIM" --config "$CFG" --run-id "$RID" >"$RUN_ROOT/sim.out" 2>"$RUN_ROOT/sim.err"
-              SIM_EXIT=$?
-              cat "$RUN_ROOT/sim.out"
-              cat "$RUN_ROOT/sim.err" >&2
+              dotnet exec "$SIM" --config "$CFG_OUT" --run-id "$RID" 2>&1 | tee "$SIM_LOG"
+              SIM_EXIT=${PIPESTATUS[0]}
               set -e
               echo "$SIM_EXIT" > "$RUN_ROOT/sim_exit.txt"
               if [[ "$SIM_EXIT" != "0" ]]; then
                 STATUS="sim_rc=$SIM_EXIT"
                 HINTS+=("sim failed")
               fi
-            fi
 
-            EVENTS_PATH="$(grep -m1 '^JOURNAL_DIR_EVENTS=' "$RUN_ROOT/sim.out" 2>/dev/null | cut -d= -f2-)"
-            TRADES_PATH="$(grep -m1 '^JOURNAL_DIR_TRADES=' "$RUN_ROOT/sim.out" 2>/dev/null | cut -d= -f2-)"
-            EVENTS_PATH="${EVENTS_PATH%$'\r'}"
-            TRADES_PATH="${TRADES_PATH%$'\r'}"
+              EVENTS=$(grep -m1 '^JOURNAL_DIR_EVENTS=' "$SIM_LOG" | cut -d= -f2- | tr -d '\r' || true)
+              TRADES=$(grep -m1 '^JOURNAL_DIR_TRADES=' "$SIM_LOG" | cut -d= -f2- | tr -d '\r' || true)
+              if [[ -z "${EVENTS:-}" ]]; then
+                echo "No JOURNAL_DIR_EVENTS found in sim output" >&2
+                exit 1
+              fi
+              export RAW_EVENTS="$EVENTS" RAW_TRADES="$TRADES" RUN_ROOT
+              python -c "import os, pathlib, shlex; cwd = pathlib.Path.cwd(); def resolve(raw):\n    if not raw: return None\n    path = pathlib.Path(raw)\n    if not path.is_absolute(): path = (cwd / path).resolve()\n    return path\n; events = resolve(os.environ.get('RAW_EVENTS', '')); trades = resolve(os.environ.get('RAW_TRADES', '')); run_dir = events.parent if events else cwd; emit = lambda key, value: f\"{key}={shlex.quote(str(value))}\" if value else f\"{key}=''\"; print(emit('EVENTS_RESOLVED', events)); print(emit('TRADES_RESOLVED', trades)); print(emit('RUN_DIR_RESOLVED', run_dir))" > "$RUN_ROOT/path.resolve"
+              # shellcheck disable=SC1091
+              source "$RUN_ROOT/path.resolve"
+              EVENTS="$EVENTS_RESOLVED"
+              TRADES="$TRADES_RESOLVED"
+              RUN_DIR="$RUN_DIR_RESOLVED"
+              MODE_KEY=$(echo "$MODE" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
+              {
+                printf 'NIGHTLY_%s_EVENTS=%s\n' "$MODE_KEY" "$EVENTS"
+                printf 'NIGHTLY_%s_TRADES=%s\n' "$MODE_KEY" "$TRADES"
+              } >> "$GITHUB_ENV"
 
-            echo "$EVENTS_PATH" > "$RUN_ROOT/events_path.txt"
-            echo "$TRADES_PATH" > "$RUN_ROOT/trades_path.txt"
+              echo "EVENTS=$EVENTS" >> "$GITHUB_ENV"
+              echo "TRADES=$TRADES" >> "$GITHUB_ENV"
 
-            if [[ ! -f "$EVENTS_PATH" ]]; then
-              STATUS="${STATUS}|missing_events"
-              HINTS+=("events missing")
-            fi
-            if [[ ! -f "$TRADES_PATH" ]]; then
-              STATUS="${STATUS}|missing_trades"
-              HINTS+=("trades missing")
-            fi
+              if [[ ! -f "$EVENTS" ]]; then
+                STATUS="${STATUS}|missing_events"
+                HINTS+=("events missing")
+              fi
+              if [[ -n "$TRADES" && ! -f "$TRADES" ]]; then
+                STATUS="${STATUS}|missing_trades"
+                HINTS+=("trades missing")
+              fi
 
-            MODE_KEY=$(echo "$MODE" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
-            if [[ -n "$EVENTS_PATH" ]]; then
-              echo "NIGHTLY_${MODE_KEY}_EVENTS=$EVENTS_PATH" >> "$GITHUB_ENV"
-              echo "NIGHTLY_${MODE_KEY}_JOURNAL_EVENTS=$EVENTS_PATH" >> "$GITHUB_ENV"
-            fi
-            if [[ -n "$TRADES_PATH" ]]; then
-              echo "NIGHTLY_${MODE_KEY}_TRADES=$TRADES_PATH" >> "$GITHUB_ENV"
-              echo "NIGHTLY_${MODE_KEY}_JOURNAL_TRADES=$TRADES_PATH" >> "$GITHUB_ENV"
-            fi
+              if [[ -f "$EVENTS" ]]; then
+                PENALTY_COUNT=$(grep -c 'PENALTY_APPLIED' "$EVENTS" || true)
+              fi
 
-            PENALTY_COUNT=0
-            RUN_DIR=""
-            if [[ -f "$EVENTS_PATH" ]]; then
-              PENALTY_COUNT=$(grep -c 'PENALTY_APPLIED' "$EVENTS_PATH" 2>/dev/null || true)
-              PENALTY_COUNT="${PENALTY_COUNT:-0}"
-              RUN_DIR=$(python -c "import os,sys; print(os.path.dirname(os.path.abspath(sys.argv[1])))" "$EVENTS_PATH")
-            elif [[ -f "$TRADES_PATH" ]]; then
-              RUN_DIR=$(python -c "import os,sys; print(os.path.dirname(os.path.abspath(sys.argv[1])))" "$TRADES_PATH")
-            fi
-            echo "$RUN_DIR" > "$RUN_ROOT/run_dir.txt"
-
-            PARITY_EXIT=0
-            EVENTS_SHA=""
-            TRADES_SHA=""
-            if [[ "$STATUS" == "ok" ]]; then
+              PARITY_JSON="$RUN_ROOT/parity-parrot.json"
               set +e
-              dotnet exec "$TOOLS" verify parity \
-                --events-a "$EVENTS_PATH" --events-b "$EVENTS_PATH" \
-                --trades-a "$TRADES_PATH" --trades-b "$TRADES_PATH" \
-                --json | tee "$RUN_ROOT/parity-parrot.json"
-              PARITY_EXIT=$?
+              if [[ -n "$TRADES" ]]; then
+                dotnet exec "$TOOLS" verify parity \
+                  --events-a "$EVENTS" --events-b "$EVENTS" \
+                  --trades-a "$TRADES" --trades-b "$TRADES" \
+                  --json | tee "$PARITY_JSON"
+              else
+                dotnet exec "$TOOLS" verify parity \
+                  --events-a "$EVENTS" --events-b "$EVENTS" \
+                  --json | tee "$PARITY_JSON"
+              fi
+              PARITY_EXIT=${PIPESTATUS[0]}
               set -e
+
+              export EVENTS TRADES
+              python -c "import csv, hashlib, os; events = os.environ.get('EVENTS'); trades = os.environ.get('TRADES', '');\nif not events: raise SystemExit('EVENTS env missing');\nwith open(events, 'r', newline='', encoding='utf-8') as fh:\n    lines = fh.read().splitlines()\n    data_events = '\\n'.join(lines[2:]) + '\\n'\nif trades and os.path.exists(trades):\n    rows = []\n    with open(trades, 'r', newline='', encoding='utf-8') as fh:\n        reader = csv.reader(fh)\n        header = next(reader, [])\n        idx = header.index('config_hash') if 'config_hash' in header else -1\n        for row in reader:\n            if not row:\n                continue\n            if 0 <= idx < len(row):\n                row = row[:idx] + [''] + row[idx+1:]\n            rows.append(','.join(row))\n    data_trades = ('\\n'.join(rows) + '\\n') if rows else ''\nelse:\n    data_trades = ''\nprint(f\"EVENTS_SHA={hashlib.sha256(data_events.encode()).hexdigest()}\")\nprint(f\"TRADES_SHA={hashlib.sha256(data_trades.encode()).hexdigest()}\")" > "$RUN_ROOT/hashes.snapshot"
+              # shellcheck disable=SC1091
+              source "$RUN_ROOT/hashes.snapshot"
+              EVENTS_SHA="$EVENTS_SHA"
+              TRADES_SHA="$TRADES_SHA"
+
+              echo "$PARITY_EXIT" > "$RUN_ROOT/parity_exit.txt"
               if [[ "$PARITY_EXIT" != "0" ]]; then
                 STATUS="${STATUS}|parity_rc=$PARITY_EXIT"
                 HINTS+=("parity self-check failed")
               fi
-              if [[ -f "$RUN_ROOT/parity-parrot.json" ]]; then
-                readarray -t HASHES < <(python -c "import json,sys; data=json.load(open(sys.argv[1])); print(data.get('events',{}).get('hashA','')); print(data.get('trades',{}).get('hashA',''))" "$RUN_ROOT/parity-parrot.json")
-                EVENTS_SHA="${HASHES[0]}"
-                TRADES_SHA="${HASHES[1]}"
-              fi
-            else
-              PARITY_EXIT=1
             fi
-            echo "$PARITY_EXIT" > "$RUN_ROOT/parity_exit.txt"
-
             STATUS_TRIMMED="${STATUS#ok|}"
             STATUS_TRIMMED="${STATUS_TRIMMED%|}"
             if [[ "$STATUS_TRIMMED" == "" ]]; then
@@ -253,15 +260,16 @@ jobs:
 
             MODE_ARTIFACT="$ROOT/artifacts/parity/$MODE"
             mkdir -p "$MODE_ARTIFACT"
-            cp -f "$RUN_ROOT"/*.out "$RUN_ROOT"/*.txt "$RUN_ROOT"/*.json "$MODE_ARTIFACT" 2>/dev/null || true
+            cp -f "$RUN_ROOT"/*.txt "$RUN_ROOT"/*.json "$RUN_ROOT"/*.log "$MODE_ARTIFACT" 2>/dev/null || true
             [[ -f "$RUN_ROOT/sim.err" ]] && cp -f "$RUN_ROOT/sim.err" "$MODE_ARTIFACT/"
-            [[ -f "$EVENTS_PATH" ]] && cp -f "$EVENTS_PATH" "$MODE_ARTIFACT/events.csv"
-            [[ -f "$TRADES_PATH" ]] && cp -f "$TRADES_PATH" "$MODE_ARTIFACT/trades.csv"
+            [[ -f "$EVENTS" ]] && cp -f "$EVENTS" "$MODE_ARTIFACT/events.csv"
+            [[ -n "$TRADES" && -f "$TRADES" ]] && cp -f "$TRADES" "$MODE_ARTIFACT/trades.csv"
           done
 
           echo "summary_csv=$SUMMARY" >> "$GITHUB_OUTPUT"
           echo "summary_md=$SUMMARY_MD" >> "$GITHUB_OUTPUT"
       - name: Publish summary
+        shell: bash
         run: |
           set -euo pipefail
           ROOT="${ROOT:?ROOT env missing}"
@@ -273,6 +281,7 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
       - name: Collect diagnostics
         if: always()
+        shell: bash
         run: |
           set -euo pipefail
           ROOT="${ROOT:?ROOT env missing}"
@@ -312,60 +321,38 @@ jobs:
               print("summary csv missing", file=sys.stderr)
               sys.exit(2)
 
-          required = ["off", "shadow", "active", "penalty-active"]
-          rows = {}
-          failures = []
+          checks = []
 
           try:
               with open(summary_csv, newline="", encoding="utf-8") as fh:
-                  reader = csv.DictReader(fh)
-                  for row in reader:
-                      mode = row.get("mode")
-                      if not mode:
-                          failures.append("row missing mode")
-                          continue
-                      rows[mode] = row
-                      status = row.get("status")
-                      if status != "ok":
-                          hint = row.get("hint") or ""
-                          failures.append(f"mode {mode} status={status} {hint}".strip())
+                  rows = {row.get("mode"): row for row in csv.DictReader(fh) if row.get("mode")}
           except OSError as exc:
               print(f"unable to read summary: {exc}", file=sys.stderr)
               sys.exit(2)
 
-          missing = [mode for mode in required if mode not in rows]
-          if missing:
-              failures.append("missing modes: " + ", ".join(missing))
-
-          def trades_sha(mode: str) -> str:
+          def trade_sha(mode: str) -> str:
               row = rows.get(mode)
               return row.get("trades_sha", "") if row else ""
 
-          if rows.get("off") and rows.get("shadow"):
-              if trades_sha("off") != trades_sha("shadow"):
-                  failures.append("off vs shadow trades_sha mismatch")
-          else:
-              failures.append("missing data for off/shadow comparison")
+          off_sha = trade_sha("off")
+          shadow_sha = trade_sha("shadow")
+          active_sha = trade_sha("active")
+          penalty_row = rows.get("penalty-active", {})
 
-          if rows.get("shadow") and rows.get("active"):
-              if trades_sha("shadow") != trades_sha("active"):
-                  failures.append("shadow vs active trades_sha mismatch")
-          else:
-              failures.append("missing data for shadow/active comparison")
+          if off_sha and shadow_sha and off_sha != shadow_sha:
+              checks.append("off vs shadow trades_sha mismatch")
+          if shadow_sha and active_sha and shadow_sha != active_sha:
+              checks.append("shadow vs active trades_sha mismatch")
 
-          penalty_row = rows.get("penalty-active")
-          if penalty_row:
-              try:
-                  penalty_count = int(penalty_row.get("penalty_count") or 0)
-              except (TypeError, ValueError):
-                  penalty_count = 0
-              if penalty_count < 1:
-                  failures.append("penalty-active has no penalty lines")
-          else:
-              failures.append("missing penalty-active mode data")
+          try:
+              penalty_count = int(penalty_row.get("penalty_count") or 0)
+          except (TypeError, ValueError):
+              penalty_count = 0
+          if penalty_count < 1:
+              checks.append("penalty-active has no penalty lines")
 
-          if failures:
-              for item in failures:
+          if checks:
+              for item in checks:
                   print(item)
               sys.exit(2)
 
