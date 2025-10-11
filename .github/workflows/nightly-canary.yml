@@ -23,6 +23,9 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
       - name: Build (Release)
         id: build_release
         run: |
@@ -115,6 +118,8 @@ jobs:
           SIM="${SIM:-}"
           TOOLS="${TOOLS:-}"
           BASE_CFG="$GITHUB_WORKSPACE/tests/fixtures/backtest_m0/config.backtest-m0.json"
+          RUN_BASE="${RUNNER_TEMP}/nightly-${{ matrix.os }}"
+          mkdir -p "$RUN_BASE"
 
           SUMMARY="$ROOT/artifacts/parity_summary.csv"
           printf 'mode,trades_sha,penalty_count,events_sha,run_dir,status,hint,sim_exit,parity_exit\n' > "$SUMMARY"
@@ -123,9 +128,9 @@ jobs:
 
           MODES=(off shadow active penalty-active)
           for MODE in "${MODES[@]}"; do
-            RUN_ROOT="$ROOT/runs/$MODE"
+            RUN_ROOT="$RUN_BASE/$MODE"
             mkdir -p "$RUN_ROOT"
-            CFG="$RUN_ROOT/config.${MODE}.json"
+            CFG="$RUN_ROOT/config.json"
             RID="CANARY-${MODE^^}"
             STATUS="ok"
             HINTS=()
@@ -135,7 +140,21 @@ jobs:
               STATUS="missing-binaries"
               HINTS+=("Release binaries unavailable")
             else
-              node -e "const fs=require('fs'),path=require('path');const mode=process.env.MODE;const cfg=JSON.parse(fs.readFileSync(process.env.CFG_IN,'utf8'));cfg.name=cfg.name||'backtest-m0';cfg.output=cfg.output||{};cfg.output.journalDir=path.resolve(process.env.RUN_ROOT,'journals');cfg.featureFlags=cfg.featureFlags||{};cfg.featureFlags.sentiment='off';cfg.featureFlags.risk='off';if(mode==='shadow')cfg.featureFlags.penalty='shadow';else if(mode==='active'||mode==='penalty-active')cfg.featureFlags.penalty='active';else cfg.featureFlags.penalty='off';cfg.penaltyConfig=cfg.penaltyConfig||{};if(mode==='penalty-active'){cfg.penaltyConfig.forcePenalty=true;cfg.ciPenaltyScaffold=true;}fs.mkdirSync(cfg.output.journalDir,{recursive:true});fs.writeFileSync(process.env.CFG_OUT,JSON.stringify(cfg,null,2)+'\n','utf8');" MODE="$MODE" CFG_IN="$BASE_CFG" CFG_OUT="$CFG" RUN_ROOT="$RUN_ROOT"
+              CONFIG_ENV="$RUN_ROOT/config.env"
+              node .github/scripts/nightly-config.js "$BASE_CFG" "$CFG" "$RUN_ROOT" "$MODE" > "$CONFIG_ENV"
+              cat "$CONFIG_ENV"
+              # shellcheck disable=SC1090
+              source "$CONFIG_ENV"
+              CFG="${CONFIG_OUT:-$CFG}"
+              RID="CANARY-${MODE^^}"
+              MODE_KEY=$(echo "$MODE" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
+              if [[ -n "${JOURNAL_DIR:-}" ]]; then
+                echo "NIGHTLY_${MODE_KEY}_JOURNAL_DIR=$JOURNAL_DIR" >> "$GITHUB_ENV"
+              fi
+              if [[ -n "${CONFIG_OUT:-}" ]]; then
+                echo "NIGHTLY_${MODE_KEY}_CONFIG=$CONFIG_OUT" >> "$GITHUB_ENV"
+              fi
+              echo "Using config: $CFG"
 
               set +e
               dotnet exec "$SIM" --config "$CFG" --run-id "$RID" >"$RUN_ROOT/sim.out" 2>"$RUN_ROOT/sim.err"
