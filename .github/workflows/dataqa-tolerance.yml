@@ -184,7 +184,10 @@ jobs:
             RUN_DIR=$(cat "$RUN_ROOT/run_dir.txt" 2>/dev/null || echo "")
             rm -rf "$DEST_DIR"/* 2>/dev/null || true
             if [[ -n "$RUN_DIR" && -d "$RUN_DIR" ]]; then
-              cp -R "$RUN_DIR/." "$DEST_DIR/"
+              DEST_ABS=$(cd "$DEST_DIR" && pwd)
+              if [[ "$DEST_ABS" != "$RUN_DIR" ]]; then
+                cp -R "$RUN_DIR/." "$DEST_DIR/"
+              fi
             fi
             touch "$DEST_DIR/.keep"
             for FILE in config_exit.txt sim_exit.txt events_path.txt trades_path.txt run_dir.txt verdict.json passed.txt aborted.txt gaps.txt sim.out; do
