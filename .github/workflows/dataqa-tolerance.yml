@@ -31,122 +31,204 @@ jobs:
           node-version: '20'
 
       - name: Build (Release)
-        run: dotnet build TiYf.Engine.sln -c Release --nologo
-
-      - name: Prepare temp roots
-        id: prep
         run: |
           set -euo pipefail
-          PASS_ROOT="${RUNNER_TEMP}/k1_pass"
-          OVER_ROOT="${RUNNER_TEMP}/k1_over"
-          mkdir -p "$PASS_ROOT" "$OVER_ROOT"
-          echo "PASS_ROOT=$PASS_ROOT" >> "$GITHUB_ENV"
-          echo "OVER_ROOT=$OVER_ROOT" >> "$GITHUB_ENV"
-          echo "pass_root=$PASS_ROOT" >> "$GITHUB_OUTPUT"
-          echo "over_root=$OVER_ROOT" >> "$GITHUB_OUTPUT"
+          mkdir -p scratch
+          set +e
+          dotnet build TiYf.Engine.sln -c Release --nologo | tee scratch/build.out
+          BUILD_EXIT=$?
+          set -e
+          echo "$BUILD_EXIT" > scratch/build_exit.txt
 
-      - name: K=1 PASS – rewrite config & run sim
+      - name: Prepare scratch roots
         run: |
           set -euo pipefail
+          mkdir -p scratch/K1-PASS scratch/K1-OVERFLOW journals/K1-PASS journals/K1-OVERFLOW
+
+      - name: K1 PASS – configure & run
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE"
+          RUN_ROOT="$ROOT/scratch/K1-PASS"
           SIM="src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"
           BASE_CFG="tests/fixtures/backtest_m0/config.backtest-m0.json"
-          CFG_OUT="${PASS_ROOT}/config.k1.pass.json"
+          CFG_OUT="$RUN_ROOT/config.k1.pass.json"
+          mkdir -p "$RUN_ROOT"
 
-          BASE_CFG="$BASE_CFG" CFG_OUT="$CFG_OUT" PASS_ROOT="$PASS_ROOT" node -e '
-            const fs=require("fs"), p=require("path");
-            const inPath=process.env.BASE_CFG, outPath=process.env.CFG_OUT, root=process.env.PASS_ROOT;
-            const cfg=JSON.parse(fs.readFileSync(inPath,"utf8"));
-            cfg.output ||= {}; cfg.output.journalDir = p.resolve(root,"journals");
-            cfg.featureFlags ||= {}; cfg.featureFlags.dataQa = "active";
-            cfg.dataQaConfig ||= {}; cfg.dataQaConfig.maxMissingBarsPerInstrument = 1;
-            const ticks = cfg?.data?.ticks || {};
-            const outTicks = {};
-            fs.mkdirSync(p.resolve(root,"ticks"), {recursive:true});
-            for(const [sym, src] of Object.entries(ticks)){
-              const abs = p.resolve(src);
-              const lines = fs.readFileSync(abs,"utf8").split(/\r?\n/);
-              const header = lines[0] ?? "";
-              const data = lines.slice(1).filter(l => l.trim().length>0);
-              const after = data.slice(1);
-              const dst = p.resolve(root,"ticks",`ticks_${sym}.csv`);
-              fs.writeFileSync(dst, [header,...after].join("\n")+"\n", "utf8");
-              outTicks[sym] = dst;
-            }
-            cfg.data ||= {}; cfg.data.ticks = outTicks;
-            fs.writeFileSync(outPath, JSON.stringify(cfg,null,2), "utf8");
-            console.log("CFG_OUT:", outPath);
-          '
+          set +e
+          BASE_CFG="$BASE_CFG" CFG_OUT="$CFG_OUT" RUN_ROOT="$RUN_ROOT" node -e "const fs=require('fs'), path=require('path'); const inPath=process.env.BASE_CFG, outPath=process.env.CFG_OUT, root=process.env.RUN_ROOT; const cfg=JSON.parse(fs.readFileSync(inPath,'utf8')); cfg.output=cfg.output||{}; cfg.output.journalDir=path.resolve(root,'journals'); cfg.featureFlags=cfg.featureFlags||{}; cfg.featureFlags.dataQa='active'; cfg.dataQaConfig=cfg.dataQaConfig||{}; cfg.dataQaConfig.maxMissingBarsPerInstrument=1; const dataCfg=cfg.data=cfg.data||{}; const ticks=dataCfg.ticks || {}; const outTicks={}; const ticksDir=path.resolve(root,'ticks'); fs.mkdirSync(ticksDir,{recursive:true}); for (const [sym, src] of Object.entries(ticks)) { const abs=path.resolve(src); const raw=fs.readFileSync(abs,'utf8').split(/\r?\n/).filter(l=>l.trim().length>0); if(!raw.length){continue;} const [header, ...rows]=raw; const after=rows.slice(1); const dst=path.resolve(ticksDir,`ticks_${sym}.csv`); fs.writeFileSync(dst,[header,...after].join('\n')+'\n','utf8'); outTicks[sym]=dst; } dataCfg.ticks=outTicks; fs.mkdirSync(path.dirname(outPath),{recursive:true}); fs.writeFileSync(outPath, JSON.stringify(cfg,null,2)+'\n','utf8');"
+          CFG_EXIT=$?
+          set -e
+          echo "$CFG_EXIT" > "$RUN_ROOT/config_exit.txt"
 
-          dotnet exec "$SIM" --config "$CFG_OUT" --run-id K1-PASS
-          # Normalize journal directory name for artifact expectations
-          if [ -d "${PASS_ROOT}/journals" ]; then
-            for d in "${PASS_ROOT}/journals"/*; do
-              if [ -d "$d" ] && [ "${d}" != "${PASS_ROOT}/journals/K1-PASS" ]; then
-                rm -rf "${PASS_ROOT}/journals/K1-PASS"
-                mv "$d" "${PASS_ROOT}/journals/K1-PASS"
-                break
-              fi
-            done
+          set +e
+          dotnet exec "$SIM" --config "$CFG_OUT" --run-id K1-PASS | tee "$RUN_ROOT/sim.out"
+          SIM_EXIT=$?
+          set -e
+          echo "$SIM_EXIT" > "$RUN_ROOT/sim_exit.txt"
+
+          EV_PATH=$(sed -n 's/^JOURNAL_DIR_EVENTS=//p' "$RUN_ROOT/sim.out" | head -1)
+          TR_PATH=$(sed -n 's/^JOURNAL_DIR_TRADES=//p' "$RUN_ROOT/sim.out" | head -1)
+          echo "$EV_PATH" > "$RUN_ROOT/events_path.txt"
+          echo "$TR_PATH" > "$RUN_ROOT/trades_path.txt"
+          if [[ -n "$EV_PATH" ]]; then
+            dirname "$EV_PATH" > "$RUN_ROOT/run_dir.txt"
+          else
+            echo "" > "$RUN_ROOT/run_dir.txt"
           fi
+          GAPS=0
+          if [[ -n "$EV_PATH" && -f "$EV_PATH" ]]; then
+            GAPS=$(grep -c 'MARKET_DATA_GAP' "$EV_PATH" || true)
+          fi
+          ABORT_LINE=$(grep -m1 '^ABORTED=' "$RUN_ROOT/sim.out" || true)
+          ABORT_BOOL=false
+          if [[ -n "$ABORT_LINE" ]]; then
+            VAL=$(echo "${ABORT_LINE#*=}" | tr '[:upper:]' '[:lower:]')
+            if [[ "$VAL" == "1" || "$VAL" == "true" ]]; then
+              ABORT_BOOL=true
+            fi
+          fi
+          PASSED_BOOL=false
+          if [[ "$SIM_EXIT" == "0" ]]; then
+            PASSED_BOOL=true
+          fi
+          echo "$PASSED_BOOL" > "$RUN_ROOT/passed.txt"
+          echo "$ABORT_BOOL" > "$RUN_ROOT/aborted.txt"
+          echo "$GAPS" > "$RUN_ROOT/gaps.txt"
+          PASSED_ENV=$(if [[ "$PASSED_BOOL" == "true" ]]; then echo "true"; else echo "false"; fi)
+          ABORT_ENV=$(if [[ "$ABORT_BOOL" == "true" ]]; then echo "true"; else echo "false"; fi)
+          GAPS_ENV="$GAPS"
+          printf '{\n  "mode": "%s",\n  "passed": %s,\n  "aborted": %s,\n  "gaps": %s\n}\n' "K1-PASS" "$PASSED_ENV" "$ABORT_ENV" "${GAPS_ENV:-0}" > "$RUN_ROOT/verdict.json"
 
-      - name: K=1 OVERFLOW – rewrite config & run sim
+      - name: K1 OVERFLOW – configure & run
         run: |
           set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE"
+          RUN_ROOT="$ROOT/scratch/K1-OVERFLOW"
           SIM="src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"
           BASE_CFG="tests/fixtures/backtest_m0/config.backtest-m0.json"
-          CFG_OUT="${OVER_ROOT}/config.k1.over.json"
+          CFG_OUT="$RUN_ROOT/config.k1.over.json"
+          mkdir -p "$RUN_ROOT"
 
-          BASE_CFG="$BASE_CFG" CFG_OUT="$CFG_OUT" OVER_ROOT="$OVER_ROOT" node -e '
-            const fs=require("fs"), p=require("path");
-            const inPath=process.env.BASE_CFG, outPath=process.env.CFG_OUT, root=process.env.OVER_ROOT;
-            const cfg=JSON.parse(fs.readFileSync(inPath,"utf8"));
-            cfg.output ||= {}; cfg.output.journalDir = p.resolve(root,"journals");
-            cfg.featureFlags ||= {}; cfg.featureFlags.dataQa = "active";
-            cfg.dataQaConfig ||= {}; cfg.dataQaConfig.maxMissingBarsPerInstrument = 1;
-            const ticks = cfg?.data?.ticks || {};
-            const outTicks = {};
-            fs.mkdirSync(p.resolve(root,"ticks"), {recursive:true});
-            for(const [sym, src] of Object.entries(ticks)){
-              const abs = p.resolve(src);
-              const lines = fs.readFileSync(abs,"utf8").split(/\r?\n/);
-              const header = lines[0] ?? "";
-              const data = lines.slice(1).filter(l => l.trim().length>0);
-              const after = data.slice(2);
-              const dst = p.resolve(root,"ticks",`ticks_${sym}.csv`);
-              fs.writeFileSync(dst, [header,...after].join("\n")+"\n", "utf8");
-              outTicks[sym] = dst;
-            }
-            cfg.data ||= {}; cfg.data.ticks = outTicks;
-            fs.writeFileSync(outPath, JSON.stringify(cfg,null,2), "utf8");
-            console.log("CFG_OUT:", outPath);
-          '
+          set +e
+          BASE_CFG="$BASE_CFG" CFG_OUT="$CFG_OUT" RUN_ROOT="$RUN_ROOT" node -e "const fs=require('fs'), path=require('path'); const inPath=process.env.BASE_CFG, outPath=process.env.CFG_OUT, root=process.env.RUN_ROOT; const cfg=JSON.parse(fs.readFileSync(inPath,'utf8')); cfg.output=cfg.output||{}; cfg.output.journalDir=path.resolve(root,'journals'); cfg.featureFlags=cfg.featureFlags||{}; cfg.featureFlags.dataQa='active'; cfg.dataQaConfig=cfg.dataQaConfig||{}; cfg.dataQaConfig.maxMissingBarsPerInstrument=1; const dataCfg=cfg.data=cfg.data||{}; const ticks=dataCfg.ticks || {}; const outTicks={}; const ticksDir=path.resolve(root,'ticks'); fs.mkdirSync(ticksDir,{recursive:true}); for (const [sym, src] of Object.entries(ticks)) { const abs=path.resolve(src); const raw=fs.readFileSync(abs,'utf8').split(/\r?\n/).filter(l=>l.trim().length>0); if(!raw.length){continue;} const [header, ...rows]=raw; const after=rows.slice(2); const dst=path.resolve(ticksDir,`ticks_${sym}.csv`); fs.writeFileSync(dst,[header,...after].join('\n')+'\n','utf8'); outTicks[sym]=dst; } dataCfg.ticks=outTicks; fs.mkdirSync(path.dirname(outPath),{recursive:true}); fs.writeFileSync(outPath, JSON.stringify(cfg,null,2)+'\n','utf8');"
+          CFG_EXIT=$?
+          set -e
+          echo "$CFG_EXIT" > "$RUN_ROOT/config_exit.txt"
 
-          dotnet exec "$SIM" --config "$CFG_OUT" --run-id K1-OVERFLOW
-          if [ -d "${OVER_ROOT}/journals" ]; then
-            for d in "${OVER_ROOT}/journals"/*; do
-              if [ -d "$d" ] && [ "${d}" != "${OVER_ROOT}/journals/K1-OVERFLOW" ]; then
-                rm -rf "${OVER_ROOT}/journals/K1-OVERFLOW"
-                mv "$d" "${OVER_ROOT}/journals/K1-OVERFLOW"
-                break
-              fi
-            done
+          set +e
+          dotnet exec "$SIM" --config "$CFG_OUT" --run-id K1-OVERFLOW | tee "$RUN_ROOT/sim.out"
+          SIM_EXIT=$?
+          set -e
+          echo "$SIM_EXIT" > "$RUN_ROOT/sim_exit.txt"
+
+          EV_PATH=$(sed -n 's/^JOURNAL_DIR_EVENTS=//p' "$RUN_ROOT/sim.out" | head -1)
+          TR_PATH=$(sed -n 's/^JOURNAL_DIR_TRADES=//p' "$RUN_ROOT/sim.out" | head -1)
+          echo "$EV_PATH" > "$RUN_ROOT/events_path.txt"
+          echo "$TR_PATH" > "$RUN_ROOT/trades_path.txt"
+          if [[ -n "$EV_PATH" ]]; then
+            dirname "$EV_PATH" > "$RUN_ROOT/run_dir.txt"
+          else
+            echo "" > "$RUN_ROOT/run_dir.txt"
           fi
+          GAPS=0
+          if [[ -n "$EV_PATH" && -f "$EV_PATH" ]]; then
+            GAPS=$(grep -c 'MARKET_DATA_GAP' "$EV_PATH" || true)
+          fi
+          ABORT_LINE=$(grep -m1 '^ABORTED=' "$RUN_ROOT/sim.out" || true)
+          ABORT_BOOL=false
+          if [[ -n "$ABORT_LINE" ]]; then
+            VAL=$(echo "${ABORT_LINE#*=}" | tr '[:upper:]' '[:lower:]')
+            if [[ "$VAL" == "1" || "$VAL" == "true" ]]; then
+              ABORT_BOOL=true
+            fi
+          fi
+          PASSED_BOOL=false
+          if [[ "$SIM_EXIT" == "0" ]]; then
+            PASSED_BOOL=true
+          fi
+          echo "$CFG_EXIT" > "$RUN_ROOT/config_exit.txt"
+          echo "$SIM_EXIT" > "$RUN_ROOT/sim_exit.txt"
+          echo "$PASSED_BOOL" > "$RUN_ROOT/passed.txt"
+          echo "$ABORT_BOOL" > "$RUN_ROOT/aborted.txt"
+          echo "$GAPS" > "$RUN_ROOT/gaps.txt"
+          PASSED_ENV=$(if [[ "$PASSED_BOOL" == "true" ]]; then echo "true"; else echo "false"; fi)
+          ABORT_ENV=$(if [[ "$ABORT_BOOL" == "true" ]]; then echo "true"; else echo "false"; fi)
+          GAPS_ENV="$GAPS"
+          printf '{\n  "mode": "%s",\n  "passed": %s,\n  "aborted": %s,\n  "gaps": %s\n}\n' "K1-OVERFLOW" "$PASSED_ENV" "$ABORT_ENV" "${GAPS_ENV:-0}" > "$RUN_ROOT/verdict.json"
 
-      - name: Summaries (quick asserts)
+      - name: Compose summary CSV
         run: |
           set -euo pipefail
-          echo "PASS_ROOT=$PASS_ROOT"
-          echo "OVER_ROOT=$OVER_ROOT"
-          echo "::group::Tree PASS_ROOT"
-          ls -la "$PASS_ROOT" || true
-          ls -la "$PASS_ROOT/journals" || true
-          ls -la "$PASS_ROOT/journals/K1-PASS" || true
-          echo "::endgroup::"
-          echo "::group::Tree OVER_ROOT"
-          ls -la "$OVER_ROOT" || true
-          ls -la "$OVER_ROOT/journals" || true
-          ls -la "$OVER_ROOT/journals/K1-OVERFLOW" || true
-          echo "::endgroup::"
+          ROOT="$GITHUB_WORKSPACE"
+          SUMMARY="$ROOT/scratch/dataqa-summary.csv"
+          printf "mode,passed,aborted,gaps\n" > "$SUMMARY"
+          for MODE in K1-PASS K1-OVERFLOW; do
+            RUN_ROOT="$ROOT/scratch/$MODE"
+            PASSED=$(cat "$RUN_ROOT/passed.txt" 2>/dev/null || echo "")
+            ABORTED=$(cat "$RUN_ROOT/aborted.txt" 2>/dev/null || echo "")
+            GAPS=$(cat "$RUN_ROOT/gaps.txt" 2>/dev/null || echo "")
+            printf "%s,%s,%s,%s\n" "$MODE" "$PASSED" "$ABORTED" "$GAPS" >> "$SUMMARY"
+          done
+
+      - name: Collect diagnostics
+        if: always()
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE"
+          mkdir -p artifacts/dataqa
+          for MODE in K1-PASS K1-OVERFLOW; do
+            RUN_ROOT="$ROOT/scratch/$MODE"
+            DEST_DIR="journals/$MODE"
+            mkdir -p "$DEST_DIR"
+            RUN_DIR=$(cat "$RUN_ROOT/run_dir.txt" 2>/dev/null || echo "")
+            rm -rf "$DEST_DIR"/* 2>/dev/null || true
+            if [[ -n "$RUN_DIR" && -d "$RUN_DIR" ]]; then
+              cp -R "$RUN_DIR/." "$DEST_DIR/"
+            fi
+            touch "$DEST_DIR/.keep"
+            for FILE in config_exit.txt sim_exit.txt events_path.txt trades_path.txt run_dir.txt verdict.json passed.txt aborted.txt gaps.txt sim.out; do
+              cp "$RUN_ROOT/$FILE" "artifacts/dataqa/${MODE}_$FILE" || true
+            done
+          done
+          cp scratch/build.out artifacts/dataqa/build.out || true
+          cp scratch/build_exit.txt artifacts/dataqa/build_exit.txt || true
+          cp scratch/dataqa-summary.csv artifacts/dataqa/dataqa-summary.csv || true
+
+      - name: Invariants (final gate)
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE"
+          BUILD_EXIT=$(cat scratch/build_exit.txt 2>/dev/null || echo 1)
+          if [[ "$BUILD_EXIT" != "0" ]]; then
+            echo "dotnet build exited with $BUILD_EXIT" >&2
+            exit 2
+          fi
+          for MODE in K1-PASS K1-OVERFLOW; do
+            RUN_ROOT="$ROOT/scratch/$MODE"
+            CFG_EXIT=$(cat "$RUN_ROOT/config_exit.txt" 2>/dev/null || echo 1)
+            if [[ "$CFG_EXIT" != "0" ]]; then
+              echo "$MODE config rewrite failed (exit $CFG_EXIT)" >&2
+              exit 2
+            fi
+          done
+          PASS_SIM_EXIT=$(cat scratch/K1-PASS/sim_exit.txt 2>/dev/null || echo 1)
+          OVER_SIM_EXIT=$(cat scratch/K1-OVERFLOW/sim_exit.txt 2>/dev/null || echo 1)
+          PASS_ABORTED=$(cat scratch/K1-PASS/aborted.txt 2>/dev/null || echo "")
+          OVER_ABORTED=$(cat scratch/K1-OVERFLOW/aborted.txt 2>/dev/null || echo "")
+          if [[ "$PASS_SIM_EXIT" != "0" ]]; then
+            echo "K1-PASS sim exited with $PASS_SIM_EXIT" >&2
+            exit 2
+          fi
+          if [[ "$PASS_ABORTED" != "false" ]]; then
+            echo "Expected K1-PASS run to avoid abort (found $PASS_ABORTED)" >&2
+            exit 2
+          fi
+          if [[ "$OVER_ABORTED" != "true" ]]; then
+            echo "Expected K1-OVERFLOW run to abort (found $OVER_ABORTED)" >&2
+            exit 2
+          fi
+          echo "dataqa invariants satisfied"
 
       - name: Upload artifacts (always)
         if: always()
@@ -154,7 +236,12 @@ jobs:
         with:
           name: dataqa-tolerance-${{ matrix.os }}
           path: |
-            ${{ steps.prep.outputs.pass_root }}/**
-            ${{ steps.prep.outputs.over_root }}/**
+            scratch/build.out
+            scratch/build_exit.txt
+            scratch/dataqa-summary.csv
+            scratch/K1-PASS/**
+            scratch/K1-OVERFLOW/**
+            journals/K1-PASS/**
+            journals/K1-OVERFLOW/**
           if-no-files-found: warn
           retention-days: 7

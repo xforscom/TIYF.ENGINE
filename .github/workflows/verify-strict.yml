@@ -3,102 +3,152 @@ name: verify-strict
 on:
   workflow_dispatch:
   pull_request:
-    branches: [ main, feat/**, fix/** ]
+    branches: [ main, "feat/**", "fix/**" ]
   push:
     branches: [ main ]
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-      - name: Build (Release)
-        run: dotnet build TiYf.Engine.sln -c Release --nologo
-      - name: Upload Release binaries
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-binaries
-          path: |
-            src/TiYf.Engine.Sim/bin/Release/net8.0
-            src/TiYf.Engine.Tools/bin/Release/net8.0
-
   verify-strict:
-    needs: build
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
-      - name: Download Release binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: release-binaries
-          path: release-binaries
-      - name: Sync binaries
-        shell: bash
+          dotnet-version: 8.0.x
+
+      - name: Build (Release)
         run: |
           set -euo pipefail
-          mkdir -p src/TiYf.Engine.Sim/bin/Release/net8.0
-          mkdir -p src/TiYf.Engine.Tools/bin/Release/net8.0
-          SOURCE_ROOT="release-binaries/src"
-          if [ ! -d "$SOURCE_ROOT" ]; then
-            SOURCE_ROOT="release-binaries"
-          fi
-          if [ ! -d "$SOURCE_ROOT" ]; then
-            echo "Unable to locate Release binaries in artifact payload" >&2
-            ls -R release-binaries || true
-            exit 1
-          fi
-          rsync -a "$SOURCE_ROOT/" src/
-      - name: Build + Generate + Verify (strict)
-        shell: bash
-        run: |
-          set -euo pipefail
-          ROOT="$GITHUB_WORKSPACE"
-          TOOLS="$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
-          SIM="$ROOT/src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"
-          CFG="$ROOT/tests/fixtures/backtest_m0/config.backtest-m0.json"
-          if [ ! -f "$TOOLS" ]; then echo "Tools DLL missing at $TOOLS" >&2; exit 1; fi
-          if [ ! -f "$SIM" ]; then echo "Sim DLL missing at $SIM" >&2; exit 1; fi
-          echo "[Step] Run Sim (fixture)"
-          rm -rf "$ROOT/journals" || true
-          dotnet exec "$SIM" --config "$CFG" --run-id STRICT-CI --quiet || { echo 'Sim run failed'; exit 2; }
-          RUN_DIR="$(find "$ROOT/journals" -type d -name '*STRICT-CI*' | sort | tail -n1)"
-          echo "RUN_DIR=$RUN_DIR"
-          test -n "$RUN_DIR" || { echo 'No run directory found'; ls -R "$ROOT/journals" || true; exit 2; }
-          EV="$RUN_DIR/events.csv"; TR="$RUN_DIR/trades.csv"
-          test -f "$EV" && test -f "$TR" || { echo 'Missing events/trades'; ls -R "$RUN_DIR"; exit 2; }
-          echo "Events size: $(wc -l < "$EV") lines"; echo "Trades size: $(wc -l < "$TR") lines"
-          echo "[Step] Strict verify"
+          mkdir -p scratch
           set +e
-          VERIFY_JSON=$(dotnet exec "$TOOLS" verify strict --events "$EV" --trades "$TR" --schema 1.3.0 --json)
-          EC=$?
+          dotnet build -c Release | tee scratch/build.out
+          BUILD_EXIT=$?
           set -e
-          echo "::group::STRICT VERIFY JSON"; echo "$VERIFY_JSON"; echo "::endgroup::"
-          mkdir -p artifacts/verify-strict
-          cp "$EV" "$TR" artifacts/verify-strict/
-          if [ $EC -ne 0 ]; then
-            echo "Verifier exit code=$EC"; exit $EC
-          fi
-      - name: Summary
-        if: always()
-        shell: bash
+          echo "$BUILD_EXIT" > scratch/build_exit.txt
+
+      - name: Run Sim (STRICT)
         run: |
           set -euo pipefail
-          echo "### Verify Strict" >> "$GITHUB_STEP_SUMMARY"
-          if [ -f artifacts/verify-strict/events.csv ]; then
-            echo "Events: $(wc -l < artifacts/verify-strict/events.csv) rows" >> "$GITHUB_STEP_SUMMARY"
+          SIM="src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"
+          CFG="tests/fixtures/backtest_m0/config.backtest-m0.json"
+          RUN_ID="M0-RUN-STRICT"
+          mkdir -p scratch
+          set +e
+          dotnet exec "$SIM" --config "$CFG" --run-id "$RUN_ID" | tee scratch/sim.out
+          SIM_EXIT=$?
+          set -e
+          echo "$SIM_EXIT" > scratch/sim_exit.txt
+          EV_PATH=$(sed -n 's/^JOURNAL_DIR_EVENTS=//p' scratch/sim.out | head -1)
+          TR_PATH=$(sed -n 's/^JOURNAL_DIR_TRADES=//p' scratch/sim.out | head -1)
+          echo "$EV_PATH" > scratch/events_path.txt
+          echo "$TR_PATH" > scratch/trades_path.txt
+          if [[ -n "$EV_PATH" ]]; then
+            dirname "$EV_PATH" > scratch/run_dir.txt
+          else
+            echo "" > scratch/run_dir.txt
           fi
-          if [ -f artifacts/verify-strict/trades.csv ]; then
-            echo "Trades: $(wc -l < artifacts/verify-strict/trades.csv) rows" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify strict (collect only)
+        run: |
+          set -euo pipefail
+          TOOLS="src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
+          EV_PATH=$(cat scratch/events_path.txt)
+          TR_PATH=$(cat scratch/trades_path.txt)
+          mkdir -p scratch
+          if [[ -z "$EV_PATH" || -z "$TR_PATH" ]]; then
+            echo "Missing events/trades paths from simulator output" >&2
+            echo "1" > scratch/strict_exit.txt
+            echo '{}' > scratch/strict.json
+          else
+            set +e
+            dotnet exec "$TOOLS" verify strict \
+              --events "$EV_PATH" \
+              --trades "$TR_PATH" \
+              --schema 1.3.0 \
+              --json | tee scratch/strict.json
+            STRICT_EXIT=$?
+            set -e
+            echo "$STRICT_EXIT" > scratch/strict_exit.txt
           fi
+
+      - name: Collect diagnostics
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/verify-strict
+          mkdir -p journals/STRICT
+          cp scratch/build.out artifacts/verify-strict/build.out || true
+          cp scratch/build_exit.txt artifacts/verify-strict/build_exit.txt || true
+          cp scratch/sim.out artifacts/verify-strict/sim.out || true
+          cp scratch/sim_exit.txt artifacts/verify-strict/sim_exit.txt || true
+          cp scratch/events_path.txt artifacts/verify-strict/events_path.txt || true
+          cp scratch/trades_path.txt artifacts/verify-strict/trades_path.txt || true
+          cp scratch/run_dir.txt artifacts/verify-strict/run_dir.txt || true
+          cp scratch/strict.json artifacts/verify-strict/strict.json || true
+          cp scratch/strict_exit.txt artifacts/verify-strict/strict_exit.txt || true
+          RUN_DIR=$(cat scratch/run_dir.txt 2>/dev/null || echo "")
+          if [[ -n "$RUN_DIR" && -d "$RUN_DIR" ]]; then
+            rsync -a "$RUN_DIR/" "journals/STRICT/"
+          fi
+          touch journals/STRICT/.keep
+
+      - name: Invariants (final gate)
+        run: |
+          set -euo pipefail
+          BUILD_EXIT=$(cat scratch/build_exit.txt 2>/dev/null || echo 1)
+          SIM_EXIT=$(cat scratch/sim_exit.txt 2>/dev/null || echo 1)
+          STRICT_EXIT=$(cat scratch/strict_exit.txt 2>/dev/null || echo 1)
+          EV_PATH=$(cat scratch/events_path.txt 2>/dev/null || echo "")
+          TR_PATH=$(cat scratch/trades_path.txt 2>/dev/null || echo "")
+          if [[ "$BUILD_EXIT" != "0" ]]; then
+            echo "dotnet build exited with $BUILD_EXIT" >&2
+            exit 2
+          fi
+          if [[ "$SIM_EXIT" != "0" ]]; then
+            echo "Simulator exited with $SIM_EXIT" >&2
+            exit 2
+          fi
+          if [[ "$STRICT_EXIT" != "0" ]]; then
+            echo "Strict verifier exited with $STRICT_EXIT" >&2
+            exit 2
+          fi
+          if [[ -z "$EV_PATH" || -z "$TR_PATH" ]]; then
+            echo "Missing events/trades paths" >&2
+            exit 2
+          fi
+          if [[ ! -f "$EV_PATH" || ! -f "$TR_PATH" ]]; then
+            echo "Events or trades CSV missing" >&2
+            exit 2
+          fi
+          ALERTS=$(grep -c '^ALERT_BLOCK_' "$EV_PATH" || true)
+          TR_ROWS=$(tail -n +2 "$TR_PATH" | wc -l | awk '{print $1}')
+          if [[ "$ALERTS" != "0" ]]; then
+            echo "Alerts found=$ALERTS" >&2
+            exit 2
+          fi
+          if [[ "$TR_ROWS" != "6" ]]; then
+            echo "Unexpected trades rows=$TR_ROWS" >&2
+            exit 2
+          fi
+          echo "verify-strict invariants satisfied"
+
       - name: Upload artifacts (always)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: verify-strict-artifacts
-          path: artifacts/verify-strict
+          name: verify-strict
+          path: |
+            scratch/build.out
+            scratch/build_exit.txt
+            scratch/sim.out
+            scratch/sim_exit.txt
+            scratch/events_path.txt
+            scratch/trades_path.txt
+            scratch/run_dir.txt
+            scratch/strict.json
+            scratch/strict_exit.txt
+            journals/STRICT/**
