@@ -277,8 +277,8 @@ jobs:
           ROOT="${ROOT:?ROOT env missing}"
           mkdir -p "$ROOT/artifacts/meta"
           cp "$ROOT/state/prep_exit.txt" "$ROOT/artifacts/meta/prep_exit.txt"
-          cp "${{ steps.runmodes.outputs.summary_csv }}" "$ROOT/artifacts/parity_summary.csv"
-          [[ -f "${{ steps.runmodes.outputs.summary_md }}" ]] && cp "${{ steps.runmodes.outputs.summary_md }}" "$ROOT/artifacts/summary.md"
+          cp "${{ steps.runmodes.outputs.summary_csv }}" "$ROOT/artifacts/meta/parity_summary.csv"
+          [[ -f "${{ steps.runmodes.outputs.summary_md }}" ]] && cp "${{ steps.runmodes.outputs.summary_md }}" "$ROOT/artifacts/meta/summary.md"
       - name: Invariants (final gate)
         shell: python
         env:
