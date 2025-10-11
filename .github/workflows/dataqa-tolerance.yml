@@ -56,7 +56,7 @@ jobs:
           mkdir -p "$RUN_ROOT"
 
           set +e
-          BASE_CFG="$BASE_CFG" CFG_OUT="$CFG_OUT" RUN_ROOT="$RUN_ROOT" node -e "const fs=require('fs'), path=require('path'); const inPath=process.env.BASE_CFG, outPath=process.env.CFG_OUT, root=process.env.RUN_ROOT; const cfg=JSON.parse(fs.readFileSync(inPath,'utf8')); cfg.output=cfg.output||{}; cfg.output.journalDir=path.resolve(root,'journals'); cfg.featureFlags=cfg.featureFlags||{}; cfg.featureFlags.dataQa='active'; cfg.dataQaConfig=cfg.dataQaConfig||{}; cfg.dataQaConfig.maxMissingBarsPerInstrument=1; const dataCfg=cfg.data=cfg.data||{}; const ticks=dataCfg.ticks || {}; const outTicks={}; const ticksDir=path.resolve(root,'ticks'); fs.mkdirSync(ticksDir,{recursive:true}); for (const [sym, src] of Object.entries(ticks)) { const abs=path.resolve(src); const raw=fs.readFileSync(abs,'utf8').split(/\r?\n/).filter(l=>l.trim().length>0); if(!raw.length){continue;} const [header, ...rows]=raw; const after=rows.slice(1); const dst=path.resolve(ticksDir,`ticks_${sym}.csv`); fs.writeFileSync(dst,[header,...after].join('\n')+'\n','utf8'); outTicks[sym]=dst; } dataCfg.ticks=outTicks; fs.mkdirSync(path.dirname(outPath),{recursive:true}); fs.writeFileSync(outPath, JSON.stringify(cfg,null,2)+'\n','utf8');"
+          BASE_CFG="$BASE_CFG" CFG_OUT="$CFG_OUT" RUN_ROOT="$RUN_ROOT" node -e "const fs=require('fs'), path=require('path'); const inPath=process.env.BASE_CFG, outPath=process.env.CFG_OUT, root=process.env.RUN_ROOT; const cfg=JSON.parse(fs.readFileSync(inPath,'utf8')); cfg.output=cfg.output||{}; cfg.output.journalDir=path.resolve(root,'journals'); cfg.featureFlags=cfg.featureFlags||{}; cfg.featureFlags.dataQa='active'; cfg.dataQaConfig=cfg.dataQaConfig||{}; cfg.dataQaConfig.maxMissingBarsPerInstrument=1; const dataCfg=cfg.data=cfg.data||{}; const ticks=dataCfg.ticks || {}; const outTicks={}; const ticksDir=path.resolve(root,'ticks'); fs.mkdirSync(ticksDir,{recursive:true}); for (const [sym, src] of Object.entries(ticks)) { const abs=path.resolve(src); const raw=fs.readFileSync(abs,'utf8').split(/\\r?\\n/).filter(l=>l.trim().length>0); if(!raw.length){continue;} const [header, ...rows]=raw; const after=rows.slice(1); const dst=path.resolve(ticksDir,'ticks_'+ sym +'.csv'); fs.writeFileSync(dst,[header,...after].join('\\n')+'\\n','utf8'); outTicks[sym]=dst; } dataCfg.ticks=outTicks; fs.mkdirSync(path.dirname(outPath),{recursive:true}); fs.writeFileSync(outPath, JSON.stringify(cfg,null,2)+'\\n','utf8');"
           CFG_EXIT=$?
           set -e
           echo "$CFG_EXIT" > "$RUN_ROOT/config_exit.txt"
@@ -111,7 +111,7 @@ jobs:
           mkdir -p "$RUN_ROOT"
 
           set +e
-          BASE_CFG="$BASE_CFG" CFG_OUT="$CFG_OUT" RUN_ROOT="$RUN_ROOT" node -e "const fs=require('fs'), path=require('path'); const inPath=process.env.BASE_CFG, outPath=process.env.CFG_OUT, root=process.env.RUN_ROOT; const cfg=JSON.parse(fs.readFileSync(inPath,'utf8')); cfg.output=cfg.output||{}; cfg.output.journalDir=path.resolve(root,'journals'); cfg.featureFlags=cfg.featureFlags||{}; cfg.featureFlags.dataQa='active'; cfg.dataQaConfig=cfg.dataQaConfig||{}; cfg.dataQaConfig.maxMissingBarsPerInstrument=1; const dataCfg=cfg.data=cfg.data||{}; const ticks=dataCfg.ticks || {}; const outTicks={}; const ticksDir=path.resolve(root,'ticks'); fs.mkdirSync(ticksDir,{recursive:true}); for (const [sym, src] of Object.entries(ticks)) { const abs=path.resolve(src); const raw=fs.readFileSync(abs,'utf8').split(/\r?\n/).filter(l=>l.trim().length>0); if(!raw.length){continue;} const [header, ...rows]=raw; const after=rows.slice(2); const dst=path.resolve(ticksDir,`ticks_${sym}.csv`); fs.writeFileSync(dst,[header,...after].join('\n')+'\n','utf8'); outTicks[sym]=dst; } dataCfg.ticks=outTicks; fs.mkdirSync(path.dirname(outPath),{recursive:true}); fs.writeFileSync(outPath, JSON.stringify(cfg,null,2)+'\n','utf8');"
+          BASE_CFG="$BASE_CFG" CFG_OUT="$CFG_OUT" RUN_ROOT="$RUN_ROOT" node -e "const fs=require('fs'), path=require('path'); const inPath=process.env.BASE_CFG, outPath=process.env.CFG_OUT, root=process.env.RUN_ROOT; const cfg=JSON.parse(fs.readFileSync(inPath,'utf8')); cfg.output=cfg.output||{}; cfg.output.journalDir=path.resolve(root,'journals'); cfg.featureFlags=cfg.featureFlags||{}; cfg.featureFlags.dataQa='active'; cfg.dataQaConfig=cfg.dataQaConfig||{}; cfg.dataQaConfig.maxMissingBarsPerInstrument=1; const dataCfg=cfg.data=cfg.data||{}; const ticks=dataCfg.ticks || {}; const outTicks={}; const ticksDir=path.resolve(root,'ticks'); fs.mkdirSync(ticksDir,{recursive:true}); for (const [sym, src] of Object.entries(ticks)) { const abs=path.resolve(src); const raw=fs.readFileSync(abs,'utf8').split(/\\r?\\n/).filter(l=>l.trim().length>0); if(!raw.length){continue;} const [header, ...rows]=raw; const after=rows.slice(2); const dst=path.resolve(ticksDir,'ticks_'+ sym +'.csv'); fs.writeFileSync(dst,[header,...after].join('\\n')+'\\n','utf8'); outTicks[sym]=dst; } dataCfg.ticks=outTicks; fs.mkdirSync(path.dirname(outPath),{recursive:true}); fs.writeFileSync(outPath, JSON.stringify(cfg,null,2)+'\\n','utf8');"
           CFG_EXIT=$?
           set -e
           echo "$CFG_EXIT" > "$RUN_ROOT/config_exit.txt"
@@ -181,12 +181,17 @@ jobs:
             RUN_ROOT="$ROOT/scratch/$MODE"
             DEST_DIR="journals/$MODE"
             mkdir -p "$DEST_DIR"
-            RUN_DIR=$(cat "$RUN_ROOT/run_dir.txt" 2>/dev/null || echo "")
+            RUN_DIR_RAW=$(cat "$RUN_ROOT/run_dir.txt" 2>/dev/null || echo "")
             rm -rf "$DEST_DIR"/* 2>/dev/null || true
-            if [[ -n "$RUN_DIR" && -d "$RUN_DIR" ]]; then
-              DEST_ABS=$(cd "$DEST_DIR" && pwd)
-              if [[ "$DEST_ABS" != "$RUN_DIR" ]]; then
-                cp -R "$RUN_DIR/." "$DEST_DIR/"
+            DEST_ABS=$(cd "$DEST_DIR" && pwd)
+            RUN_DIR_POSIX="${RUN_DIR_RAW//\\//}"
+            if [[ -n "$RUN_DIR_POSIX" && -d "$RUN_DIR_POSIX" ]]; then
+              if RUN_ABS=$(cd "$RUN_DIR_POSIX" && pwd); then
+                if [[ "$DEST_ABS" != "$RUN_ABS" ]]; then
+                  cp -R "$RUN_DIR_POSIX/." "$DEST_DIR/"
+                fi
+              else
+                cp -R "$RUN_DIR_POSIX/." "$DEST_DIR/"
               fi
             fi
             touch "$DEST_DIR/.keep"
