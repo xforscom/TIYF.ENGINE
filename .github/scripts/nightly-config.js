@@ -61,6 +61,12 @@ fs.mkdirSync(path.dirname(outCfgPath), { recursive: true });
 fs.mkdirSync(journalDir, { recursive: true });
 fs.writeFileSync(outCfgPath, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
 
-process.stdout.write(`CONFIG_OUT=${outCfgPath}\n`);
-process.stdout.write(`JOURNAL_DIR=${journalDir}\n`);
-process.stdout.write(`MODE=${mode}\n`);
+function emitEnv(key, value) {
+  const str = String(value ?? '');
+  const quoted = `'${str.replace(/'/g, "'\\''")}'`;
+  process.stdout.write(`${key}=${quoted}\n`);
+}
+
+emitEnv('CONFIG_OUT', outCfgPath);
+emitEnv('JOURNAL_DIR', journalDir);
+emitEnv('MODE', mode);
