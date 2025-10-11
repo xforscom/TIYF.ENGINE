@@ -222,7 +222,11 @@ jobs:
               set -e
 
               export EVENTS TRADES
-              python -c "import csv, hashlib, os; events = os.environ.get('EVENTS'); trades = os.environ.get('TRADES', '');\nif not events: raise SystemExit('EVENTS env missing');\nwith open(events, 'r', newline='', encoding='utf-8') as fh:\n    lines = fh.read().splitlines()\n    data_events = '\\n'.join(lines[2:]) + '\\n'\nif trades and os.path.exists(trades):\n    rows = []\n    with open(trades, 'r', newline='', encoding='utf-8') as fh:\n        reader = csv.reader(fh)\n        header = next(reader, [])\n        idx = header.index('config_hash') if 'config_hash' in header else -1\n        for row in reader:\n            if not row:\n                continue\n            if 0 <= idx < len(row):\n                row = row[:idx] + [''] + row[idx+1:]\n            rows.append(','.join(row))\n    data_trades = ('\\n'.join(rows) + '\\n') if rows else ''\nelse:\n    data_trades = ''\nprint(f\"EVENTS_SHA={hashlib.sha256(data_events.encode()).hexdigest()}\")\nprint(f\"TRADES_SHA={hashlib.sha256(data_trades.encode()).hexdigest()}\")" > "$RUN_ROOT/hashes.snapshot"
+              if [[ -n "$TRADES" ]]; then
+                python .github/scripts/nightly-hash-snapshot.py "$RUN_ROOT/hashes.snapshot" "$EVENTS" "$TRADES"
+              else
+                python .github/scripts/nightly-hash-snapshot.py "$RUN_ROOT/hashes.snapshot" "$EVENTS"
+              fi
               # shellcheck disable=SC1091
               source "$RUN_ROOT/hashes.snapshot"
               EVENTS_SHA="$EVENTS_SHA"
