@@ -26,12 +26,8 @@ def _read_events(path: Path) -> str:
     except OSError as exc:  # pragma: no cover - surfaced in workflow logs
         raise SystemExit(f"unable to read events file: {path}: {exc}") from exc
 
-    if len(lines) <= 2:
-        # Preserve legacy behavior: drop the first two metadata lines.
-        payload = "\n".join(lines[2:])
-    else:
-        payload = "\n".join(lines[2:])
-    return f"{payload}\n" if payload else ""
+    payload = "\n".join(lines[2:])
+    return payload + "\n" if payload else ""
 
 
 def _normalize_trades(rows: Iterable[list[str]], idx: int) -> str:
@@ -42,7 +38,9 @@ def _normalize_trades(rows: Iterable[list[str]], idx: int) -> str:
         if 0 <= idx < len(row):
             row = row[:idx] + [""] + row[idx + 1 :]
         result.append(",".join(row))
-    return f"{'\n'.join(result)}\n" if result else ""
+    if not result:
+        return ""
+    return "\n".join(result) + "\n"
 
 
 def _read_trades(path: Path) -> str:
