@@ -30,6 +30,28 @@ const toleranceRaw = Number(cfg.dataQaConfig.maxMissingBarsPerInstrument ?? 0);
 const tolerance = Number.isFinite(toleranceRaw) ? toleranceRaw : 0;
 const extraMissing = Number.isFinite(extraMissingRaw) ? extraMissingRaw : 0;
 
+const qaDefaults = isOverflow
+  ? {
+      enabled: true,
+      maxMissingBarsPerInstrument: Math.max(0, Math.floor(tolerance)),
+      allowDuplicates: false,
+      spikeZ: 5,
+      repair: { forwardFillBars: 0, dropSpikes: true }
+    }
+  : {
+      enabled: true,
+      maxMissingBarsPerInstrument: 999,
+      allowDuplicates: true,
+      spikeZ: 50,
+      repair: { forwardFillBars: 1, dropSpikes: false }
+    };
+
+const currentQa = cfg.dataQA && typeof cfg.dataQA === 'object' ? cfg.dataQA : {};
+cfg.dataQA = {
+  ...currentQa,
+  ...qaDefaults
+};
+
 const data = cfg.data = cfg.data || {};
 const ticks = data.ticks || {};
 const symbols = Object.keys(ticks);
