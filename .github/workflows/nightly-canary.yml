@@ -178,7 +178,7 @@ jobs:
                 exit 1
               fi
               export RAW_EVENTS="$EVENTS" RAW_TRADES="$TRADES" RUN_ROOT
-              python -c "import os, pathlib, shlex; cwd = pathlib.Path.cwd(); def resolve(raw):\n    if not raw: return None\n    path = pathlib.Path(raw)\n    if not path.is_absolute(): path = (cwd / path).resolve()\n    return path\n; events = resolve(os.environ.get('RAW_EVENTS', '')); trades = resolve(os.environ.get('RAW_TRADES', '')); run_dir = events.parent if events else cwd; emit = lambda key, value: f\"{key}={shlex.quote(str(value))}\" if value else f\"{key}=''\"; print(emit('EVENTS_RESOLVED', events)); print(emit('TRADES_RESOLVED', trades)); print(emit('RUN_DIR_RESOLVED', run_dir))" > "$RUN_ROOT/path.resolve"
+              python .github/scripts/nightly-path-resolve.py "$RUN_ROOT/path.resolve"
               # shellcheck disable=SC1091
               source "$RUN_ROOT/path.resolve"
               EVENTS="$EVENTS_RESOLVED"
