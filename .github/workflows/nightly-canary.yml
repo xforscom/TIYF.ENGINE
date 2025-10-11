@@ -194,7 +194,8 @@ jobs:
             PENALTY_COUNT=0
             RUN_DIR=""
             if [[ -f "$EVENTS_PATH" ]]; then
-              PENALTY_COUNT=$(grep -c 'PENALTY_APPLIED' "$EVENTS_PATH" 2>/dev/null || echo 0)
+              PENALTY_COUNT=$(grep -c 'PENALTY_APPLIED' "$EVENTS_PATH" 2>/dev/null || true)
+              PENALTY_COUNT="${PENALTY_COUNT:-0}"
               RUN_DIR=$(python -c "import os,sys; print(os.path.dirname(os.path.abspath(sys.argv[1])))" "$EVENTS_PATH")
             elif [[ -f "$TRADES_PATH" ]]; then
               RUN_DIR=$(python -c "import os,sys; print(os.path.dirname(os.path.abspath(sys.argv[1])))" "$TRADES_PATH")
