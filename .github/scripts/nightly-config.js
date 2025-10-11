@@ -35,6 +35,9 @@ cfg.featureFlags.sentiment = 'off';
 cfg.featureFlags.risk = 'off';
 
 cfg.penaltyConfig = { ...(cfg.penaltyConfig || {}) };
+cfg.penaltyConfig.forcePenalty = false;
+cfg.forcePenalty = false;
+cfg.ciPenaltyScaffold = false;
 
 switch (mode) {
   case 'shadow':
@@ -46,6 +49,7 @@ switch (mode) {
   case 'penalty-active':
     cfg.featureFlags.penalty = 'active';
     cfg.penaltyConfig.forcePenalty = true;
+    cfg.forcePenalty = true;
     cfg.ciPenaltyScaffold = true;
     break;
   default:

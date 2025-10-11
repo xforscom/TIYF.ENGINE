@@ -3,8 +3,6 @@ name: nightly-canary
 on:
   schedule:
     - cron: '0 5 * * *'
-  push:
-    branches: [ main, feat/**, fix/** ]
   pull_request:
     branches: [ main, feat/**, fix/** ]
   workflow_dispatch:
@@ -148,9 +146,6 @@ jobs:
               CFG="${CONFIG_OUT:-$CFG}"
               RID="CANARY-${MODE^^}"
               MODE_KEY=$(echo "$MODE" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
-              if [[ -n "${JOURNAL_DIR:-}" ]]; then
-                echo "NIGHTLY_${MODE_KEY}_JOURNAL_DIR=$JOURNAL_DIR" >> "$GITHUB_ENV"
-              fi
               if [[ -n "${CONFIG_OUT:-}" ]]; then
                 echo "NIGHTLY_${MODE_KEY}_CONFIG=$CONFIG_OUT" >> "$GITHUB_ENV"
               fi
@@ -174,13 +169,6 @@ jobs:
             EVENTS_PATH="${EVENTS_PATH%$'\r'}"
             TRADES_PATH="${TRADES_PATH%$'\r'}"
 
-            if [[ -z "$EVENTS_PATH" || ! -f "$EVENTS_PATH" ]]; then
-              EVENTS_PATH="$RUN_ROOT/journals/$RID/events.csv"
-            fi
-            if [[ -z "$TRADES_PATH" || ! -f "$TRADES_PATH" ]]; then
-              TRADES_PATH="$RUN_ROOT/journals/$RID/trades.csv"
-            fi
-
             echo "$EVENTS_PATH" > "$RUN_ROOT/events_path.txt"
             echo "$TRADES_PATH" > "$RUN_ROOT/trades_path.txt"
 
@@ -191,6 +179,16 @@ jobs:
             if [[ ! -f "$TRADES_PATH" ]]; then
               STATUS="${STATUS}|missing_trades"
               HINTS+=("trades missing")
+            fi
+
+            MODE_KEY=$(echo "$MODE" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
+            if [[ -n "$EVENTS_PATH" ]]; then
+              echo "NIGHTLY_${MODE_KEY}_EVENTS=$EVENTS_PATH" >> "$GITHUB_ENV"
+              echo "NIGHTLY_${MODE_KEY}_JOURNAL_EVENTS=$EVENTS_PATH" >> "$GITHUB_ENV"
+            fi
+            if [[ -n "$TRADES_PATH" ]]; then
+              echo "NIGHTLY_${MODE_KEY}_TRADES=$TRADES_PATH" >> "$GITHUB_ENV"
+              echo "NIGHTLY_${MODE_KEY}_JOURNAL_TRADES=$TRADES_PATH" >> "$GITHUB_ENV"
             fi
 
             PENALTY_COUNT=0
@@ -211,15 +209,15 @@ jobs:
               dotnet exec "$TOOLS" verify parity \
                 --events-a "$EVENTS_PATH" --events-b "$EVENTS_PATH" \
                 --trades-a "$TRADES_PATH" --trades-b "$TRADES_PATH" \
-                --json | tee "$RUN_ROOT/parity.json"
+                --json | tee "$RUN_ROOT/parity-parrot.json"
               PARITY_EXIT=$?
               set -e
               if [[ "$PARITY_EXIT" != "0" ]]; then
                 STATUS="${STATUS}|parity_rc=$PARITY_EXIT"
                 HINTS+=("parity self-check failed")
               fi
-              if [[ -f "$RUN_ROOT/parity.json" ]]; then
-                readarray -t HASHES < <(python -c "import json,sys; data=json.load(open(sys.argv[1])); print(data.get('events',{}).get('hashA','')); print(data.get('trades',{}).get('hashA',''))" "$RUN_ROOT/parity.json")
+              if [[ -f "$RUN_ROOT/parity-parrot.json" ]]; then
+                readarray -t HASHES < <(python -c "import json,sys; data=json.load(open(sys.argv[1])); print(data.get('events',{}).get('hashA','')); print(data.get('trades',{}).get('hashA',''))" "$RUN_ROOT/parity-parrot.json")
                 EVENTS_SHA="${HASHES[0]}"
                 TRADES_SHA="${HASHES[1]}"
               fi
@@ -242,14 +240,14 @@ jobs:
             fi
             echo "$STATUS_LABEL" > "$RUN_ROOT/status.txt"
             echo "$HINT" > "$RUN_ROOT/hint.txt"
-            printf 'mode=%s\ntrades_sha=%s\nevents_sha=%s\npenalty_count=%s\nrun_dir=%s\n' "$MODE" "$TRADES_SHA" "$EVENTS_SHA" "$PENALTY_COUNT" "$RUN_DIR" > "$RUN_ROOT/hashes.txt"
+            printf 'events_sha=%s\ntrades_sha=%s\npenalty_count=%s\nrun_dir=%s\n' "$EVENTS_SHA" "$TRADES_SHA" "$PENALTY_COUNT" "$RUN_DIR" > "$RUN_ROOT/hashes.txt"
 
             printf '%s,%s,%s,%s,%s,%s,%s,%s,%s\n' "$MODE" "$TRADES_SHA" "$PENALTY_COUNT" "$EVENTS_SHA" "$RUN_DIR" "$STATUS_LABEL" "$HINT" "${SIM_EXIT:-1}" "$PARITY_EXIT" >> "$SUMMARY"
 
             if [[ "$STATUS_LABEL" == "ok" ]]; then
-              printf '✅ **%s** — parity OK (trades_sha=%s)\n' "$MODE" "$TRADES_SHA" >> "$SUMMARY_MD"
+              printf '✅ parity OK (mode=%s)\n' "$MODE" >> "$SUMMARY_MD"
             else
-              printf '❌ **%s** — %s %s\n' "$MODE" "$STATUS_LABEL" "$HINT" >> "$SUMMARY_MD"
+              printf '❌ parity drift (mode=%s) — %s %s\n' "$MODE" "$STATUS_LABEL" "$HINT" >> "$SUMMARY_MD"
             fi
 
             MODE_ARTIFACT="$ROOT/artifacts/parity/$MODE"
