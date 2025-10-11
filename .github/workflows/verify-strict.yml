@@ -1,11 +1,11 @@
 name: verify-strict
 
 on:
-  workflow_dispatch:
-  pull_request:
-    branches: [ main, "feat/**", "fix/**" ]
   push:
-    branches: [ main ]
+    branches: [ main, feat/**, fix/** ]
+  pull_request:
+    branches: [ main, feat/**, fix/** ]
+  workflow_dispatch:
 
 jobs:
   verify-strict:

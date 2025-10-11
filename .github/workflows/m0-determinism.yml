@@ -1,9 +1,11 @@
 ﻿name: m0-determinism
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [ main, feat/**, fix/** ]
   pull_request:
-    branches: [ main, "feat/**", "fix/**" ]
+    branches: [ main, feat/**, fix/** ]
+  workflow_dispatch:
 
 jobs:
   determinism:

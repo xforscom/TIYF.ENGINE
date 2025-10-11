@@ -1,11 +1,13 @@
 name: nightly-canary
 
 on:
-  workflow_dispatch:
   schedule:
     - cron: '0 5 * * *'
+  push:
+    branches: [ main, feat/**, fix/** ]
   pull_request:
     branches: [ main, feat/**, fix/** ]
+  workflow_dispatch:
 
 concurrency:
   group: nightly-canary
