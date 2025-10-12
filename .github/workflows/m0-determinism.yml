@@ -5,6 +5,7 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch: {}
 
 jobs:
   m0-determinism:
@@ -21,37 +22,111 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Restore & Build
+      - name: Restore solution
+        shell: bash
         run: |
+          set -euo pipefail
           dotnet restore TiYf.Engine.sln
-          dotnet build TiYf.Engine.sln -c Release -warnaserror
+
+      - name: Build solution (Release)
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet build TiYf.Engine.sln -c Release --nologo --no-restore
+
+      - name: Build Tools CLI (Release)
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet build src/TiYf.Engine.Tools/TiYf.Engine.Tools.csproj -c Release --nologo --no-restore
 
       - name: Run Tests (Engine)
-        run: dotnet test tests/TiYf.Engine.Tests -c Release --logger "trx;LogFileName=tests.trx"
+        run: dotnet test tests/TiYf.Engine.Tests -c Release --no-build --logger "trx;LogFileName=tests.trx"
 
-      - name: Run Tests (Tools)
-        run: dotnet test tests/TiYf.Engine.Tools.Tests -c Release --logger "trx;LogFileName=tests-tools.trx"
+      - name: Resolve binaries
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE"
+          SIM_DLL="$ROOT/src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"
+          TOOLS_DLL="$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
+          test -f "$SIM_DLL" || { echo "Sim Release DLL missing"; exit 2; }
+          test -f "$TOOLS_DLL" || { echo "Tools Release DLL missing"; exit 2; }
+          echo "SIM_DLL=$SIM_DLL" >> "$GITHUB_ENV"
+          echo "TOOLS_DLL=$TOOLS_DLL" >> "$GITHUB_ENV"
+          echo "sim=$SIM_DLL" >> "$GITHUB_OUTPUT"
+          echo "tools=$TOOLS_DLL" >> "$GITHUB_OUTPUT"
 
       - name: Prepare artifact dirs
+        shell: bash
         run: |
-          Remove-Item -Recurse -Force artifacts -ErrorAction SilentlyContinue
-          New-Item -Force -ItemType Directory -Path artifacts/raw | Out-Null
-          New-Item -Force -ItemType Directory -Path artifacts/canonical | Out-Null
-          New-Item -Force -ItemType Directory -Path artifacts/hashes | Out-Null
+          set -euo pipefail
+          rm -rf artifacts || true
+          mkdir -p artifacts/raw artifacts/canonical artifacts/hashes artifacts/logs artifacts/env
+
+      - name: Capture environment snapshot
+        run: |
+          Get-ChildItem Env:* | Sort-Object Name | Out-String | Set-Content -Encoding UTF8 artifacts/env/env.snapshot.txt
+          "GITHUB_SHA=$Env:GITHUB_SHA`nGITHUB_REF=$Env:GITHUB_REF`nRUN_ATTEMPT=$Env:GITHUB_RUN_ATTEMPT" | Set-Content -Encoding UTF8 artifacts/env/env.sanity.txt
 
       - name: Run M0 — A
+        id: run_a
+        shell: bash
         run: |
-          if (Test-Path journals/M0/M0-RUN) { Remove-Item -Recurse -Force journals/M0/M0-RUN }
-          dotnet run --project src/TiYf.Engine.Sim -- --config tests/fixtures/backtest_m0/config.backtest-m0.json
-          Copy-Item journals/M0/M0-RUN/events.csv artifacts/raw/events_A.csv
-          Copy-Item journals/M0/M0-RUN/trades.csv artifacts/raw/trades_A.csv
+          set -euo pipefail
+          CFG="tests/fixtures/backtest_m0/config.backtest-m0.json"
+          RUN_ID="M0-RUN-A-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          rm -rf journals || true
+          OUT=$(mktemp)
+          set +e
+          dotnet exec "$SIM_DLL" --config "$CFG" --run-id "$RUN_ID" --quiet | tee "$OUT"
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          cp "$OUT" artifacts/logs/sim_A.log
+          if [ $STATUS -ne 0 ]; then echo "Sim run A exited with $STATUS" >&2; exit $STATUS; fi
+          EV=$(grep -m1 '^JOURNAL_DIR_EVENTS=' "$OUT" | cut -d= -f2 || true)
+          TR=$(grep -m1 '^JOURNAL_DIR_TRADES=' "$OUT" | cut -d= -f2 || true)
+          if [ -z "$EV" ] || [ -z "$TR" ]; then
+            RUN_DIR=$(ls -d journals/*M0-RUN-A* 2>/dev/null | head -n1 || true)
+            echo "RUN_DIR=$RUN_DIR"
+            test -n "$RUN_DIR"
+            EV="$RUN_DIR/events.csv"; TR="$RUN_DIR/trades.csv"
+          fi
+          test -f "$EV" && test -f "$TR"
+          cp "$EV" artifacts/raw/events_A.csv
+          cp "$TR" artifacts/raw/trades_A.csv
+          echo "events=$EV" >> "$GITHUB_OUTPUT"
+          echo "trades=$TR" >> "$GITHUB_OUTPUT"
 
       - name: Run M0 — B
+        id: run_b
+        shell: bash
         run: |
-          if (Test-Path journals/M0/M0-RUN) { Remove-Item -Recurse -Force journals/M0/M0-RUN }
-          dotnet run --project src/TiYf.Engine.Sim -- --config tests/fixtures/backtest_m0/config.backtest-m0.json
-          Copy-Item journals/M0/M0-RUN/events.csv artifacts/raw/events_B.csv
-          Copy-Item journals/M0/M0-RUN/trades.csv artifacts/raw/trades_B.csv
+          set -euo pipefail
+          CFG="tests/fixtures/backtest_m0/config.backtest-m0.json"
+          RUN_ID="M0-RUN-B-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          rm -rf journals || true
+          OUT=$(mktemp)
+          set +e
+          dotnet exec "$SIM_DLL" --config "$CFG" --run-id "$RUN_ID" --quiet | tee "$OUT"
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          cp "$OUT" artifacts/logs/sim_B.log
+          if [ $STATUS -ne 0 ]; then echo "Sim run B exited with $STATUS" >&2; exit $STATUS; fi
+          EV=$(grep -m1 '^JOURNAL_DIR_EVENTS=' "$OUT" | cut -d= -f2 || true)
+          TR=$(grep -m1 '^JOURNAL_DIR_TRADES=' "$OUT" | cut -d= -f2 || true)
+          if [ -z "$EV" ] || [ -z "$TR" ]; then
+            RUN_DIR=$(ls -d journals/*M0-RUN-B* 2>/dev/null | head -n1 || true)
+            echo "RUN_DIR=$RUN_DIR"
+            test -n "$RUN_DIR"
+            EV="$RUN_DIR/events.csv"; TR="$RUN_DIR/trades.csv"
+          fi
+          test -f "$EV" && test -f "$TR"
+          cp "$EV" artifacts/raw/events_B.csv
+          cp "$TR" artifacts/raw/trades_B.csv
+          echo "events=$EV" >> "$GITHUB_OUTPUT"
+          echo "trades=$TR" >> "$GITHUB_OUTPUT"
 
       - name: Canonicalize + Hash
         id: canon
@@ -90,11 +165,17 @@ jobs:
           $tradesLines = Get-Content artifacts/canonical/trades_A.csv
           $tradesRowCount = ($tradesLines.Length - 1)
 
+          $strictReport = & dotnet exec $env:TOOLS_DLL verify strict --events 'artifacts/canonical/events_A.csv' --trades 'artifacts/canonical/trades_A.csv' --schema 1.3.0 --json
+          $strictExit = $LASTEXITCODE
+          $strictReport | Set-Content -Path artifacts/hashes/strict-report.json -Encoding UTF8
+
           $manifest = [ordered]@{
             events_A = $heA; events_B = $heB; trades_A = $htA; trades_B = $htB;
-            data_version = $dataVersion; alert_block_count = $alertCount; trades_rows = $tradesRowCount
+            data_version = $dataVersion; alert_block_count = $alertCount; trades_rows = $tradesRowCount;
+            strict_exit = $strictExit
           } | ConvertTo-Json -Depth 3
           $manifest | Set-Content -Path artifacts/hashes/manifest.json -Encoding UTF8
+          $manifest | Set-Content -Path artifacts/hashes/parity.json -Encoding UTF8
 
           "events_hash_A=$heA" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "events_hash_B=$heB" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -103,6 +184,7 @@ jobs:
           "data_version=$dataVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "trades_rows=$tradesRowCount" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "alert_count=$alertCount" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "strict_exit=$strictExit" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Assert Determinism & Invariants
         run: |
@@ -114,10 +196,11 @@ jobs:
           $dv  = '${{ steps.canon.outputs.data_version }}'
           $rows = [int]'${{ steps.canon.outputs.trades_rows }}'
           $alerts = [int]'${{ steps.canon.outputs.alert_count }}'
+          $strictExit = [int]'${{ steps.canon.outputs.strict_exit }}'
 
           Write-Host "events_A=$ehA"; Write-Host "events_B=$ehB"
           Write-Host "trades_A=$thA"; Write-Host "trades_B=$thB"
-          Write-Host "data_version=$dv"; Write-Host "trades_rows=$rows"; Write-Host "alert_block_count=$alerts"
+          Write-Host "data_version=$dv"; Write-Host "trades_rows=$rows"; Write-Host "alert_block_count=$alerts"; Write-Host "strict_exit=$strictExit"
 
           $fail = $false
           if ($ehA -ne $ehB) { Write-Error 'Events hash mismatch'; $fail = $true }
@@ -125,6 +208,7 @@ jobs:
           if ($dv -ne $EXPECTED_DV) { Write-Error "Unexpected data_version: $dv"; $fail = $true }
           if ($alerts -ne 0) { Write-Error "ALERT_BLOCK_* count not zero: $alerts"; $fail = $true }
           if ($rows -ne 6) { Write-Error "Trades row count not 6: $rows"; $fail = $true }
+          if ($strictExit -ne 0) { Write-Error "verify strict exit code $strictExit"; $fail = $true }
 
           if ($fail) {
             function Diff-Preview($a,$b,$out) {
@@ -145,8 +229,8 @@ jobs:
             exit 1
           }
 
-      - name: Upload artifacts (on failure)
-        if: failure()
+      - name: Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: m0-determinism-artifacts
@@ -154,3 +238,5 @@ jobs:
             artifacts/raw/**
             artifacts/canonical/**
             artifacts/hashes/**
+            artifacts/logs/**
+            artifacts/env/**
