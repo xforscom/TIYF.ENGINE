@@ -1,0 +1,205 @@
+# actionlint: allow-secrets ADMIN_TOKEN
+name: Lint
+
+on:
+  push:
+    branches: [ main, feat/**, fix/** ]
+  pull_request:
+    branches: [ main, feat/**, fix/** ]
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}@${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install lint toolchain
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          ACTIONLINT_VERSION="1.7.1"
+          ACTIONLINT_TARBALL="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          ACTIONLINT_CHECKSUMS="actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+          curl -sSL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${ACTIONLINT_CHECKSUMS}" -o "/tmp/${ACTIONLINT_CHECKSUMS}"
+          curl -sSL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${ACTIONLINT_TARBALL}" -o "/tmp/${ACTIONLINT_TARBALL}"
+          grep "${ACTIONLINT_TARBALL}" "/tmp/${ACTIONLINT_CHECKSUMS}" > /tmp/actionlint.sha256
+          (cd /tmp && sha256sum --check --status actionlint.sha256)
+          tar -xzf "/tmp/${ACTIONLINT_TARBALL}" --directory "$HOME/.local/bin" actionlint
+          chmod +x "$HOME/.local/bin/actionlint"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          python3 -m pip install --user --no-cache-dir yamllint
+          echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
+
+      - name: Restore solution
+        run: |
+          set -euo pipefail
+          dotnet restore TiYf.Engine.sln
+
+      - name: Run actionlint
+        id: actionlint
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p scratch
+          set +e
+          actionlint -color never --trusted-secrets ADMIN_TOKEN > scratch/actionlint.log 2>&1
+          STATUS=$?
+          set -e
+          echo "$STATUS" > scratch/actionlint.exit
+          echo "ACTIONLINT_STATUS=$STATUS" >> "$GITHUB_ENV"
+          if [ "$STATUS" -ne 0 ]; then
+            exit "$STATUS"
+          fi
+
+      - name: dotnet build (warn as error)
+        id: dotnet_build
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p scratch
+          set +e
+          dotnet build TiYf.Engine.sln -c Release --nologo --no-restore -warnaserror | tee scratch/dotnet-build.log
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          echo "$STATUS" > scratch/dotnet-build.exit
+          echo "DOTNET_BUILD_STATUS=$STATUS" >> "$GITHUB_ENV"
+          if [ "$STATUS" -ne 0 ]; then
+            exit "$STATUS"
+          fi
+
+      - name: dotnet format (verify)
+        id: dotnet_format
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p scratch
+          set +e
+          dotnet format TiYf.Engine.sln --verify-no-changes --no-restore | tee scratch/dotnet-format.log
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          echo "$STATUS" > scratch/dotnet-format.exit
+          echo "DOTNET_FORMAT_STATUS=$STATUS" >> "$GITHUB_ENV"
+          if [ "$STATUS" -ne 0 ]; then
+            exit "$STATUS"
+          fi
+
+      - name: YAML lint (non-workflow)
+        id: yaml_lint
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p scratch
+          mapfile -t YAML_FILES < <(git ls-files '*.yml' '*.yaml' | grep -v '^.github/workflows/' || true)
+          if [ "${#YAML_FILES[@]}" -eq 0 ]; then
+            printf 'No YAML files outside workflows.\n' | tee scratch/yamllint.log
+            STATUS=0
+          else
+            set +e
+            yamllint -f parsable "${YAML_FILES[@]}" | tee scratch/yamllint.log
+            STATUS=${PIPESTATUS[0]}
+            set -e
+          fi
+          echo "$STATUS" > scratch/yamllint.exit
+          echo "YAMLLINT_STATUS=$STATUS" >> "$GITHUB_ENV"
+          if [ "$STATUS" -ne 0 ]; then
+            exit "$STATUS"
+          fi
+
+      - name: JSON validation
+        id: json_validate
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p scratch
+          set +e
+          mapfile -t JSON_FILES < <(git ls-files '*.json')
+          : > scratch/json-validate.log
+          STATUS=0
+          if [ "${#JSON_FILES[@]}" -eq 0 ]; then
+            printf 'No JSON files detected.\n' >> scratch/json-validate.log
+          else
+            for file in "${JSON_FILES[@]}"; do
+              if jq empty "$file" >/dev/null 2>&1; then
+                continue
+              else
+                STATUS=1
+                {
+                  printf 'Failed to parse %s\n' "$file"
+                  jq empty "$file"
+                } >> scratch/json-validate.log 2>&1
+              fi
+            done
+            if [ "$STATUS" -eq 0 ]; then
+              printf 'All JSON files parsed successfully.\n' > scratch/json-validate.log
+            fi
+          fi
+          set -e
+          echo "$STATUS" > scratch/json-validate.exit
+          echo "JSON_VALIDATE_STATUS=$STATUS" >> "$GITHUB_ENV"
+          if [ "$STATUS" -ne 0 ]; then
+            exit "$STATUS"
+          fi
+
+      - name: Summarize lint results
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p scratch
+          SUMMARY_FILE="$GITHUB_STEP_SUMMARY"
+          printf '## Lint summary\n' >> "$SUMMARY_FILE"
+          declare -a CHECKS=(
+            "ACTIONLINT|Actionlint|actionlint"
+            "DOTNET_BUILD|dotnet build (warn as error)|dotnet-build"
+            "DOTNET_FORMAT|dotnet format (verify)|dotnet-format"
+            "YAMLLINT|YAML lint (non-workflow)|yamllint"
+            "JSON_VALIDATE|JSON validation|json-validate"
+          )
+          OVERALL=0
+          for entry in "${CHECKS[@]}"; do
+            IFS='|' read -r VAR TITLE LOG_BASENAME <<< "$entry"
+            STATUS_VAR="${VAR}_STATUS"
+            STATUS=${!STATUS_VAR:-0}
+            if [ "$STATUS" != "0" ]; then
+              OVERALL=1
+              printf '\n### %s\n' "$TITLE" >> "$SUMMARY_FILE"
+              printf '- ❌ Failed (exit %s)\n' "$STATUS" >> "$SUMMARY_FILE"
+              if [ -s "scratch/${LOG_BASENAME}.log" ]; then
+                printf '\n```\n' >> "$SUMMARY_FILE"
+                head -n 30 "scratch/${LOG_BASENAME}.log" >> "$SUMMARY_FILE"
+                printf '\n```\n' >> "$SUMMARY_FILE"
+              fi
+            else
+              printf '\n### %s\n' "$TITLE" >> "$SUMMARY_FILE"
+              printf '- ✅ Passed\n' >> "$SUMMARY_FILE"
+            fi
+          done
+          if [ "$OVERALL" -ne 0 ]; then
+            printf 'Lint checks failed. See artifact for full logs.\n' >> "$SUMMARY_FILE"
+            exit 1
+          fi
+
+      - name: Upload lint logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-logs-${{ github.run_id }}
+          path: scratch
+          retention-days: 7
+
