@@ -59,7 +59,7 @@ jobs:
           set -euo pipefail
           mkdir -p scratch
           set +e
-          actionlint -color=never -trusted-secrets ADMIN_TOKEN > scratch/actionlint.log 2>&1
+          actionlint -no-color -trusted-secrets ADMIN_TOKEN > scratch/actionlint.log 2>&1
           STATUS=$?
           set -e
           echo "$STATUS" > scratch/actionlint.exit
