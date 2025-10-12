@@ -27,6 +27,8 @@ jobs:
           CFG="$ROOT/tests/fixtures/backtest_m0/config.backtest-m0.json"
           echo "[Step] Build solution"
           dotnet build "$SLN" -c Release --nologo
+          echo "[Step] Build Tools (Release explicit)"
+          dotnet build "$ROOT/src/TiYf.Engine.Tools/TiYf.Engine.Tools.csproj" -c Release --nologo --no-restore
           # Resolve Tools path after build (Release only)
           if [ ! -f "$TOOLS_R" ]; then
             echo "Release Tools dll not found: $TOOLS_R" >&2
