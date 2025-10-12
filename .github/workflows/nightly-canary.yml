@@ -75,6 +75,7 @@ jobs:
             EV="$RUN_DIR/events.csv"; TR="$RUN_DIR/trades.csv"
           fi
           test -f "$EV"; test -f "$TR"
+          RUN_DIR=${RUN_DIR:-$(dirname "$EV")}
           mkdir -p artifacts/parity/$MODE
           # Normalize events: skip meta + header
           tail -n +3 "$EV" | sha256sum | awk '{print $1}' > artifacts/parity/$MODE/events.sha
