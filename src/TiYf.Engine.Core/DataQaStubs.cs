@@ -14,7 +14,7 @@ public static class DataQaAnalyzer
     //  - Identifies per-symbol missing minute bars (kind = "missing_bar") within the first->last tick window.
     //  - Ignores duplicates & spikes (future extension) – tests currently exercise only missing_bar paths.
     //  - Does not apply tolerance (handled in Sim.Program ApplyTolerance())
-    public static DataQaResult Run(DataQaConfig cfg, System.Collections.Generic.Dictionary<string,System.Collections.Generic.List<(System.DateTime,decimal)>> ticks)
+    public static DataQaResult Run(DataQaConfig cfg, System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<(System.DateTime, decimal)>> ticks)
     {
         var issues = new System.Collections.Generic.List<DataQaIssue>();
         int symbolsChecked = 0;
@@ -24,7 +24,7 @@ public static class DataQaAnalyzer
             if (list == null || list.Count == 0) continue;
             symbolsChecked++;
             // Ensure sorted (input order already chronological in fixture, but enforce for safety)
-            list.Sort((a,b)=> a.Item1.CompareTo(b.Item1));
+            list.Sort((a, b) => a.Item1.CompareTo(b.Item1));
             var firstMinute = new System.DateTime(list[0].Item1.Year, list[0].Item1.Month, list[0].Item1.Day,
                 list[0].Item1.Hour, list[0].Item1.Minute, 0, System.DateTimeKind.Utc);
             var lastMinute = new System.DateTime(list[^1].Item1.Year, list[^1].Item1.Month, list[^1].Item1.Day,
@@ -59,9 +59,10 @@ public sealed class SentimentVolatilityGuard
         if (window.Count >= cfg.Window) window.Dequeue();
         window.Enqueue(price); added = true;
         // Simple rolling mean/std (population) -- deterministic, minimal math for tests
-    decimal mean = 0m; int n = window.Count; foreach (var v in window) { mean += v; } mean /= n == 0 ? 1 : n;
-        decimal var = 0m; foreach (var v in window) { var += (v-mean)*(v-mean); }
-        decimal sigma = n>1 ? (decimal)System.Math.Sqrt((double)(var / n)) : cfg.VolGuardSigma;
+        decimal mean = 0m; int n = window.Count; foreach (var v in window) { mean += v; }
+        mean /= n == 0 ? 1 : n;
+        decimal var = 0m; foreach (var v in window) { var += (v - mean) * (v - mean); }
+        decimal sigma = n > 1 ? (decimal)System.Math.Sqrt((double)(var / n)) : cfg.VolGuardSigma;
         if (sigma <= 0m) sigma = cfg.VolGuardSigma; // fallback
         var z = sigma > 0m ? (price - mean) / sigma : 0m;
         bool clamped = false;

@@ -70,7 +70,7 @@ public sealed class RiskConfig
     public decimal MarginUsageCapPct { get; init; } = 80.0m;
     public decimal PerPositionRiskCapPct { get; init; } = 1.0m;
     public string BasketMode { get; init; } = "Base"; // Base|Quote|UsdProxy|InstrumentBucket
-    public Dictionary<string,string> InstrumentBuckets { get; init; } = new();
+    public Dictionary<string, string> InstrumentBuckets { get; init; } = new();
     public bool EnableScaleToFit { get; init; } = false;
     public bool EnforcementEnabled { get; init; } = true;
     public decimal LotStep { get; init; } = 0.01m; // minimal lot step (vol rounding)
@@ -81,7 +81,7 @@ public sealed class RiskConfig
     public bool EmitEvaluations { get; init; } = true; // control INFO_RISK_EVAL_V1 emission
     // Test/diagnostic hook: per-symbol map of evaluation ordinal -> force drawdown on that evaluation (1-based).
     // Example: { "EURUSD": 1 } => on first EURUSD risk eval, equity is dropped to exceed MaxRunDrawdownCCY.
-    public Dictionary<string,int>? ForceDrawdownAfterEvals { get; init; } = null;
+    public Dictionary<string, int>? ForceDrawdownAfterEvals { get; init; } = null;
 }
 
 public static class AlertTypes
@@ -194,7 +194,7 @@ public sealed class RiskEnforcer : IRiskEnforcer
             _schemaVersion,
             _configHash
         );
-        return new EnforcementResult(true, scaledBefore, scaledRounded, obs2, new []{ infoAlert });
+        return new EnforcementResult(true, scaledBefore, scaledRounded, obs2, new[] { infoAlert });
     }
 
     private IReadOnlyList<AlertEvent> BuildBlockAlerts(Proposal p, RiskContext ctx, bool breachLeverage, bool breachMargin, bool breachPerPos, bool breachBasket, RiskObservations obs)
@@ -209,7 +209,7 @@ public sealed class RiskEnforcer : IRiskEnforcer
 
     private static BasketMode ParseBasketMode(string mode) => Enum.TryParse<BasketMode>(mode, true, out var m) ? m : BasketMode.Base;
     private static decimal SafeDiv(decimal a, decimal b) => b == 0m ? 0m : decimal.Round(a / b, 6, MidpointRounding.AwayFromZero);
-    private static decimal Min(params decimal[] values) { decimal m = values[0]; for (int i=1;i<values.Length;i++) if (values[i] < m) m = values[i]; return m; }
+    private static decimal Min(params decimal[] values) { decimal m = values[0]; for (int i = 1; i < values.Length; i++) if (values[i] < m) m = values[i]; return m; }
     private static decimal RoundDownToStep(decimal value, decimal step) => step <= 0 ? value : Math.Floor(value / step) * step;
 }
 

@@ -4,7 +4,7 @@ using System.Linq;
 
 public class DiffEngineTests
 {
-    private static readonly string[] Keys = new[]{"instrumentId","intervalSeconds","openTimeUtc","eventType"};
+    private static readonly string[] Keys = new[] { "instrumentId", "intervalSeconds", "openTimeUtc", "eventType" };
 
     [Fact]
     public void Diff_Identical_ReturnsNoDiff()
@@ -15,7 +15,7 @@ public class DiffEngineTests
         };
         var a = JournalTestHelper.CreateBarJournal(bars);
         var b = JournalTestHelper.CreateBarJournal(bars);
-        var outcome = DiffEngine.Run(a,b, Keys, reportDuplicates:false);
+        var outcome = DiffEngine.Run(a, b, Keys, reportDuplicates: false);
         Assert.False(outcome.HasDiff);
         Assert.Empty(outcome.OnlyInA);
         Assert.Empty(outcome.OnlyInB);
@@ -26,12 +26,12 @@ public class DiffEngineTests
     public void Diff_SingleFieldChange_ReportsPayloadMismatch()
     {
         var start = DateTime.UtcNow.AddMinutes(-3).ToString("O");
-        var baseBars = new[]{ ("INST1", start, 100.0,101.0,99.5,100.5,5.5,60) };
+        var baseBars = new[] { ("INST1", start, 100.0, 101.0, 99.5, 100.5, 5.5, 60) };
         var a = JournalTestHelper.CreateBarJournal(baseBars);
         // modify close
-        var changedBars = new[]{ ("INST1", start, 100.0,101.0,99.5,100.7,5.5,60) };
+        var changedBars = new[] { ("INST1", start, 100.0, 101.0, 99.5, 100.7, 5.5, 60) };
         var b = JournalTestHelper.CreateBarJournal(changedBars);
-        var outcome = DiffEngine.Run(a,b, Keys, reportDuplicates:false);
+        var outcome = DiffEngine.Run(a, b, Keys, reportDuplicates: false);
         Assert.True(outcome.HasDiff);
         Assert.Contains(outcome.PayloadMismatch, k => k.Contains("INST1"));
     }
@@ -47,7 +47,7 @@ public class DiffEngineTests
         var barsB = barsA.Take(1).ToArray();
         var a = JournalTestHelper.CreateBarJournal(barsA);
         var b = JournalTestHelper.CreateBarJournal(barsB);
-        var outcome = DiffEngine.Run(a,b, Keys, reportDuplicates:false);
+        var outcome = DiffEngine.Run(a, b, Keys, reportDuplicates: false);
         Assert.True(outcome.HasDiff);
         Assert.Contains(outcome.OnlyInA, k => k.Contains(barsA[1].Item2));
     }
@@ -58,7 +58,7 @@ public class DiffEngineTests
         var start = DateTime.UtcNow.AddMinutes(-10).ToString("O");
         var dup = JournalTestHelper.DuplicateBarJournal("INSTX", start, 60);
         // Compare file to itself to trigger duplicate detection
-        var outcome = DiffEngine.Run(dup, dup, Keys, reportDuplicates:true);
+        var outcome = DiffEngine.Run(dup, dup, Keys, reportDuplicates: true);
         Assert.True(outcome.HasDiff); // duplicates recorded
         Assert.Contains(outcome.OnlyInA, k => k.StartsWith("DUP(A):"));
     }

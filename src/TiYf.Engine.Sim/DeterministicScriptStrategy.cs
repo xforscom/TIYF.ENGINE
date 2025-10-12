@@ -61,7 +61,7 @@ public sealed class DeterministicScriptStrategy
         }
     }
 
-    public IReadOnlyDictionary<string,List<ScheduledAction>> DebugAll() => _actionsBySymbol;
+    public IReadOnlyDictionary<string, List<ScheduledAction>> DebugAll() => _actionsBySymbol;
 
     public sealed class ScheduledAction
     {

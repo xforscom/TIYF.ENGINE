@@ -9,7 +9,7 @@ public class BarBuilderTests
     {
         var builder = new IntervalBarBuilder(BarInterval.OneMinute);
         var inst = new InstrumentId("I1");
-        var t0 = new DateTime(2025,10,5,12,0,5, DateTimeKind.Utc);
+        var t0 = new DateTime(2025, 10, 5, 12, 0, 5, DateTimeKind.Utc);
         var t1 = t0.AddSeconds(30);
         var t2 = t0.AddMinutes(1); // boundary
         Bar? b0 = builder.OnTick(new PriceTick(inst, t0, 100m, 1m));
@@ -30,7 +30,7 @@ public class BarBuilderTests
     {
         var builder = new IntervalBarBuilder(BarInterval.OneHour);
         var inst = new InstrumentId("I1");
-        var baseTime = new DateTime(2025,10,5,9,15,0, DateTimeKind.Utc);
+        var baseTime = new DateTime(2025, 10, 5, 9, 15, 0, DateTimeKind.Utc);
         builder.OnTick(new PriceTick(inst, baseTime, 100m, 1m));
         builder.OnTick(new PriceTick(inst, baseTime.AddMinutes(30), 105m, 2m));
         var flushed = builder.OnTick(new PriceTick(inst, baseTime.AddHours(1), 104m, 1m));
@@ -47,7 +47,7 @@ public class BarBuilderTests
     {
         var builder = new IntervalBarBuilder(BarInterval.OneDay);
         var inst = new InstrumentId("I1");
-        var day = new DateTime(2025,10,5,10,0,0, DateTimeKind.Utc);
+        var day = new DateTime(2025, 10, 5, 10, 0, 0, DateTimeKind.Utc);
         builder.OnTick(new PriceTick(inst, day.AddHours(1), 10m, 1m));
         builder.OnTick(new PriceTick(inst, day.AddHours(5), 12m, 2m));
         var flushed = builder.OnTick(new PriceTick(inst, day.AddDays(1), 11m, 3m));

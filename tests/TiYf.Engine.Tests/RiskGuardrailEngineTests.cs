@@ -10,12 +10,12 @@ namespace TiYf.Engine.Tests;
 public class RiskGuardrailEngineTests
 {
     private string SolutionRoot => FindSolutionRoot();
-    private string SimDll => Path.Combine(SolutionRoot, "src","TiYf.Engine.Sim","bin","Release","net8.0","TiYf.Engine.Sim.dll");
+    private string SimDll => Path.Combine(SolutionRoot, "src", "TiYf.Engine.Sim", "bin", "Release", "net8.0", "TiYf.Engine.Sim.dll");
 
     [Fact]
     public void Risk_Shadow_ParityWithOff()
     {
-        var baseConfig = Path.Combine(SolutionRoot, "tests","fixtures","backtest_m0","config.backtest-m0.json");
+        var baseConfig = Path.Combine(SolutionRoot, "tests", "fixtures", "backtest_m0", "config.backtest-m0.json");
         Assert.True(File.Exists(baseConfig));
         string cfgOff = TempConfigWithRisk(baseConfig, "off", null);
         string cfgShadow = TempConfigWithRisk(baseConfig, "shadow", null);
@@ -27,8 +27,8 @@ public class RiskGuardrailEngineTests
         var offTrades = NormalizeTrades(File.ReadAllLines(offRun.trades));
         var shadowTrades = NormalizeTrades(File.ReadAllLines(shadowRun.trades));
         Assert.Equal(offTrades, shadowTrades);
-        bool OffHasEval = offEvents.Any(l=> l.Contains(",INFO_RISK_EVAL_V1,"));
-        bool ShadowHasEval = shadowEvents.Any(l=> l.Contains(",INFO_RISK_EVAL_V1,"));
+        bool OffHasEval = offEvents.Any(l => l.Contains(",INFO_RISK_EVAL_V1,"));
+        bool ShadowHasEval = shadowEvents.Any(l => l.Contains(",INFO_RISK_EVAL_V1,"));
         Assert.False(OffHasEval);
         Assert.True(ShadowHasEval);
         Assert.DoesNotContain(offEvents, l => l.Contains("ALERT_BLOCK_"));
@@ -38,8 +38,8 @@ public class RiskGuardrailEngineTests
     [Fact]
     public void Risk_Active_NetExposure_BlocksTrade()
     {
-        var baseConfig = Path.Combine(SolutionRoot, "tests","fixtures","backtest_m0","config.backtest-m0.json");
-    string cfgActive = TempConfigWithRisk(baseConfig, "active", null); // helper sets EURUSD cap=0 guaranteeing breach
+        var baseConfig = Path.Combine(SolutionRoot, "tests", "fixtures", "backtest_m0", "config.backtest-m0.json");
+        string cfgActive = TempConfigWithRisk(baseConfig, "active", null); // helper sets EURUSD cap=0 guaranteeing breach
         var run = RunSim(cfgActive);
         var events = File.ReadAllLines(run.events);
         Assert.Contains(events, l => l.Contains("ALERT_BLOCK_NET_EXPOSURE"));
@@ -51,9 +51,9 @@ public class RiskGuardrailEngineTests
     [Fact]
     public void Risk_Active_Drawdown_BlocksTrade()
     {
-        var baseConfig = Path.Combine(SolutionRoot, "tests","fixtures","backtest_m0","config.backtest-m0.json");
+        var baseConfig = Path.Combine(SolutionRoot, "tests", "fixtures", "backtest_m0", "config.backtest-m0.json");
         // Configure tiny drawdown cap and force hook after 1 evaluation so second evaluation triggers breach
-    string extra = "\"maxRunDrawdownCCY\":5,\"forceDrawdownAfterEvals\":{\"EURUSD\":1}"; // trigger on first EURUSD eval
+        string extra = "\"maxRunDrawdownCCY\":5,\"forceDrawdownAfterEvals\":{\"EURUSD\":1}"; // trigger on first EURUSD eval
         string cfgActive = TempConfigWithRisk(baseConfig, "active", extra);
         var run = RunSim(cfgActive);
         var events = File.ReadAllLines(run.events);
@@ -66,7 +66,7 @@ public class RiskGuardrailEngineTests
     [Fact]
     public void Risk_EventOrdering_EvalBeforeAlert_AlertBeforeTrade()
     {
-        var baseConfig = Path.Combine(SolutionRoot, "tests","fixtures","backtest_m0","config.backtest-m0.json");
+        var baseConfig = Path.Combine(SolutionRoot, "tests", "fixtures", "backtest_m0", "config.backtest-m0.json");
         // Force immediate exposure breach (EURUSD cap = 0) to get a deterministic ALERT_BLOCK_NET_EXPOSURE
         string cfgActive = TempConfigWithRisk(baseConfig, "active", null);
         var run = RunSim(cfgActive);
@@ -81,21 +81,21 @@ public class RiskGuardrailEngineTests
         Assert.True(trades.Length < 7, "Trade suppression expected after alert");
     }
 
-    private (string events,string trades) RunSim(string cfg)
+    private (string events, string trades) RunSim(string cfg)
     {
         Assert.True(File.Exists(SimDll), "Sim DLL missing. Build Release first.");
         var psi = new ProcessStartInfo("dotnet", $"exec \"{SimDll}\" --config \"{cfg}\" --quiet")
-        { RedirectStandardOutput=true, RedirectStandardError=true, UseShellExecute=false, WorkingDirectory = SolutionRoot };
+        { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, WorkingDirectory = SolutionRoot };
         var p = Process.Start(psi)!; p.WaitForExit(60000);
         if (!p.HasExited) { try { p.Kill(); } catch { } throw new Exception("Sim timeout"); }
         Assert.Equal(0, p.ExitCode);
         var stdout = p.StandardOutput.ReadToEnd();
-        var runIdLine = stdout.Split('\n').FirstOrDefault(l=>l.StartsWith("RUN_ID=", StringComparison.OrdinalIgnoreCase));
+        var runIdLine = stdout.Split('\n').FirstOrDefault(l => l.StartsWith("RUN_ID=", StringComparison.OrdinalIgnoreCase));
         Assert.False(string.IsNullOrWhiteSpace(runIdLine));
         var runId = runIdLine!.Substring("RUN_ID=".Length).Trim();
-        var jDir = Path.Combine(SolutionRoot, "journals","M0", runId);
+        var jDir = Path.Combine(SolutionRoot, "journals", "M0", runId);
         Assert.True(Directory.Exists(jDir), $"Run dir not found: {jDir}\nSTDOUT:{stdout}\nSTDERR:{p.StandardError.ReadToEnd()}");
-        return (Path.Combine(jDir,"events.csv"), Path.Combine(jDir,"trades.csv"));
+        return (Path.Combine(jDir, "events.csv"), Path.Combine(jDir, "trades.csv"));
     }
 
     private string TempConfigWithRisk(string baseConfig, string riskMode, string? extraRiskFields)
@@ -108,8 +108,8 @@ public class RiskGuardrailEngineTests
         var rc = root["riskConfig"] as System.Text.Json.Nodes.JsonObject ?? new System.Text.Json.Nodes.JsonObject();
         rc["emitEvaluations"] = true;
         rc["blockOnBreach"] = true;
-    if (!rc.ContainsKey("maxRunDrawdownCCY")) rc["maxRunDrawdownCCY"] = 999999.0; // large so drawdown never trips unless overridden by extra
-        if (riskMode=="active")
+        if (!rc.ContainsKey("maxRunDrawdownCCY")) rc["maxRunDrawdownCCY"] = 999999.0; // large so drawdown never trips unless overridden by extra
+        if (riskMode == "active")
         {
             var caps = rc["maxNetExposureBySymbol"] as System.Text.Json.Nodes.JsonObject ?? new System.Text.Json.Nodes.JsonObject();
             if (caps["EURUSD"] == null) caps["EURUSD"] = 0; // guarantee breach
@@ -127,7 +127,7 @@ public class RiskGuardrailEngineTests
         }
         root["riskConfig"] = rc;
         var outPath = Path.Combine(Path.GetTempPath(), $"riskcfg_{Guid.NewGuid():N}.json");
-        File.WriteAllText(outPath, root.ToJsonString(new System.Text.Json.JsonSerializerOptions{WriteIndented=false}));
+        File.WriteAllText(outPath, root.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = false }));
         var confirm = File.ReadAllText(outPath);
         Assert.Contains("\"risk\":\"" + riskMode + "\"", confirm);
         Assert.Contains("\"emitEvaluations\":true", confirm);
@@ -136,14 +136,14 @@ public class RiskGuardrailEngineTests
 
     private static string[] NormalizeTrades(string[] raw)
     {
-        if (raw.Length==0) return raw;
+        if (raw.Length == 0) return raw;
         var header = raw[0].Split(',');
         int cfgIdx = Array.FindIndex(header, h => h.Equals("config_hash", StringComparison.OrdinalIgnoreCase));
         string Rebuild(string line)
         {
             var parts = line.Split(',');
             if (cfgIdx < 0 || parts.Length != header.Length) return line.TrimEnd();
-            var kept = parts.Where((p,i)=> i!=cfgIdx);
+            var kept = parts.Where((p, i) => i != cfgIdx);
             return string.Join(',', kept).TrimEnd();
         }
         return raw.Select(Rebuild).ToArray();
@@ -152,7 +152,7 @@ public class RiskGuardrailEngineTests
     [Fact]
     public void TempConfigWithRisk_WritesExpectedFlags()
     {
-        var tmp = TempConfigWithRisk(Path.Combine(SolutionRoot, "tests","fixtures","backtest_m0","config.backtest-m0.json"), "shadow", null);
+        var tmp = TempConfigWithRisk(Path.Combine(SolutionRoot, "tests", "fixtures", "backtest_m0", "config.backtest-m0.json"), "shadow", null);
         var text = File.ReadAllText(tmp);
         Assert.Contains("\"featureFlags\":{", text);
         Assert.Contains("\"risk\":\"shadow\"", text);
@@ -162,7 +162,7 @@ public class RiskGuardrailEngineTests
     [Fact]
     public void RiskConfigParsing_RespectsFeatureFlag()
     {
-        var tmp = TempConfigWithRisk(Path.Combine(SolutionRoot, "tests","fixtures","backtest_m0","config.backtest-m0.json"), "shadow", null);
+        var tmp = TempConfigWithRisk(Path.Combine(SolutionRoot, "tests", "fixtures", "backtest_m0", "config.backtest-m0.json"), "shadow", null);
         var raw = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(tmp));
         var mode = TiYf.Engine.Sim.RiskParsing.ParseRiskMode(raw.RootElement);
         Assert.Equal(TiYf.Engine.Sim.RiskMode.Shadow, mode);

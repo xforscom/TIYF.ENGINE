@@ -8,11 +8,11 @@ public class RiskEnforcementTests
     private sealed class StubCatalog : IInstrumentCatalog
     {
         private readonly Instrument _inst;
-        public StubCatalog(string id="INST1") => _inst = new Instrument(new InstrumentId(id), id, 2);
+        public StubCatalog(string id = "INST1") => _inst = new Instrument(new InstrumentId(id), id, 2);
         public bool TryGet(InstrumentId id, out Instrument instrument) { instrument = _inst; return true; }
         public IEnumerable<Instrument> All() { yield return _inst; }
     }
-    private sealed class StubFx : ICurrencyConversionService { public decimal Convert(Currency from, Currency to, decimal amount)=>amount; }
+    private sealed class StubFx : ICurrencyConversionService { public decimal Convert(Currency from, Currency to, decimal amount) => amount; }
 
     private static RiskContext MakeCtx(decimal equity, RiskConfig cfg, IReadOnlyList<(string instrumentId, decimal initialRiskMoney)>? basketPositions = null)
     {
@@ -20,7 +20,7 @@ public class RiskEnforcementTests
         var snap = new BasketSnapshot(basketPositions.Select(p => (p.instrumentId, p.initialRiskMoney)).ToList());
         return new RiskContext(equity, snap, cfg, new StubCatalog(), new StubFx());
     }
-    private static Proposal MakeProposal(string instrumentId, decimal requestedVol, decimal notional, decimal usedMarginAfter, decimal initialRiskMoney, string decisionId="D-1")
+    private static Proposal MakeProposal(string instrumentId, decimal requestedVol, decimal notional, decimal usedMarginAfter, decimal initialRiskMoney, string decisionId = "D-1")
         => new Proposal(instrumentId, requestedVol, notional, usedMarginAfter, initialRiskMoney, decisionId);
 
     private static RiskEnforcer MakeEnforcer(RiskConfig cfg) => new RiskEnforcer(new RiskFormulas(), new BasketRiskAggregator(), TiYf.Engine.Core.Infrastructure.Schema.Version, "HASH123");
@@ -34,7 +34,7 @@ public class RiskEnforcementTests
         var enforcer = MakeEnforcer(cfg);
         var result = enforcer.Enforce(proposal, ctx);
         Assert.False(result.Allowed);
-        var alert = Assert.Single(result.Alerts.Where(a=>a.EventType==AlertTypes.BLOCK_RISK_CAP));
+        var alert = Assert.Single(result.Alerts.Where(a => a.EventType == AlertTypes.BLOCK_RISK_CAP));
         Assert.InRange(alert.Observed, 1.99m, 2.01m);
         Assert.Equal(1m, alert.Cap);
     }
@@ -49,7 +49,7 @@ public class RiskEnforcementTests
         var enforcer = MakeEnforcer(cfg);
         var result = enforcer.Enforce(proposal, ctx);
         Assert.True(result.Allowed);
-        var info = Assert.Single(result.Alerts.Where(a=>a.EventType==AlertTypes.INFO_SCALE));
+        var info = Assert.Single(result.Alerts.Where(a => a.EventType == AlertTypes.INFO_SCALE));
         Assert.NotNull(result.ScaledVolumeBeforeRound);
         Assert.NotNull(result.ScaledVolumeRounded);
         // Theoretical scale = 5/7 ~= 0.714 -> rounded down to 0.7
@@ -68,7 +68,7 @@ public class RiskEnforcementTests
         var enforcer = MakeEnforcer(cfg);
         var result = enforcer.Enforce(proposal, ctx);
         Assert.False(result.Allowed);
-        Assert.Contains(result.Alerts, a=>a.EventType==AlertTypes.BLOCK_MARGIN && a.Observed >=59.9m && a.Observed <=60.1m);
+        Assert.Contains(result.Alerts, a => a.EventType == AlertTypes.BLOCK_MARGIN && a.Observed >= 59.9m && a.Observed <= 60.1m);
     }
 
     [Fact]
@@ -76,13 +76,13 @@ public class RiskEnforcementTests
     {
         var cfg = new RiskConfig { PerPositionRiskCapPct = 1m, EnableScaleToFit = true, EnforcementEnabled = true, LotStep = 0.5m };
         // Basket positions total risk money = 120 -> 1.2% of equity
-        var ctx = MakeCtx(10_000m, cfg, new[]{ ("EURUSD", 80m), ("GBPUSD", 40m)});
+        var ctx = MakeCtx(10_000m, cfg, new[] { ("EURUSD", 80m), ("GBPUSD", 40m) });
         // Additional proposal risk 0 to simplify linear scaling of basket remainder; leverage/margin not relevant
         var proposal = MakeProposal("EURUSD", 1m, notional: 1_000m, usedMarginAfter: 100m, initialRiskMoney: 120m);
         var enforcer = MakeEnforcer(cfg);
         var result = enforcer.Enforce(proposal, ctx);
         // Because lot step coarse, scaling reduces to 0.5 volume ratio -> basket risk still >1% so block
-        if (result.Allowed && result.Alerts.Any(a=>a.EventType==AlertTypes.INFO_SCALE))
+        if (result.Allowed && result.Alerts.Any(a => a.EventType == AlertTypes.INFO_SCALE))
         {
             // If due to numeric rounding it passed, assert basket metric within cap
             Assert.True(result.Observed.PostRoundProjectedLeverage <= cfg.RealLeverageCap);
@@ -90,7 +90,7 @@ public class RiskEnforcementTests
         else
         {
             Assert.False(result.Allowed);
-            Assert.Contains(result.Alerts, a=>a.EventType==AlertTypes.BLOCK_BASKET);
+            Assert.Contains(result.Alerts, a => a.EventType == AlertTypes.BLOCK_BASKET);
         }
     }
 
@@ -119,7 +119,7 @@ public class RiskEnforcementTests
         var enforcer = MakeEnforcer(cfg);
         var result = enforcer.Enforce(proposal, ctx);
         Assert.False(result.Allowed);
-        var alert = Assert.Single(result.Alerts.Where(a=>a.EventType==AlertTypes.BLOCK_LEVERAGE));
+        var alert = Assert.Single(result.Alerts.Where(a => a.EventType == AlertTypes.BLOCK_LEVERAGE));
         Assert.Equal("D-INV", alert.DecisionId);
         // Culture invariant check: ToString with invariant must parse back
         var observedStr = alert.Observed.ToString(CultureInfo.InvariantCulture);
@@ -130,7 +130,7 @@ public class RiskEnforcementTests
     public void Alerts_SerializedJson_IsCultureInvariant_EndToEnd()
     {
         // Create synthetic journal file mimicking produced alert event
-        var work = Path.Combine(Path.GetTempPath(), "RISK-ALE2-"+Guid.NewGuid().ToString("N"));
+        var work = Path.Combine(Path.GetTempPath(), "RISK-ALE2-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(work);
         var file = Path.Combine(work, "events.csv");
         var meta = $"schema_version={TiYf.Engine.Core.Infrastructure.Schema.Version},config_hash=HASHXYZ";
@@ -144,7 +144,8 @@ public class RiskEnforcementTests
         decimal equity = 10000m;
         decimal notional = 72500m;
         decimal usedMarginAfter = 3000m;
-        var payloadObj = new {
+        var payloadObj = new
+        {
             DecisionId = decisionId,
             InstrumentId = "EURUSD",
             Reason = "Leverage cap breach",
@@ -158,7 +159,7 @@ public class RiskEnforcementTests
         };
         // Serialize with System.Text.Json (default invariant formatting for numbers)
         var payload = System.Text.Json.JsonSerializer.Serialize(payloadObj);
-        File.WriteAllLines(file, new[]{ meta, header, $"1,{now},ALERT_BLOCK_LEVERAGE,{payload}"});
+        File.WriteAllLines(file, new[] { meta, header, $"1,{now},ALERT_BLOCK_LEVERAGE,{payload}" });
         using var doc = System.Text.Json.JsonDocument.Parse(payload);
         var root = doc.RootElement;
         // Basic presence

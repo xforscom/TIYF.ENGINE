@@ -11,7 +11,7 @@ public class MultiInstrumentTests
     {
         var instA = new InstrumentId("EURUSD");
         var instB = new InstrumentId("GBPUSD");
-        var baseTime = new DateTime(2025,10,5,10,0,0, DateTimeKind.Utc);
+        var baseTime = new DateTime(2025, 10, 5, 10, 0, 0, DateTimeKind.Utc);
         return new List<PriceTick>
         {
             new(instA, baseTime.AddSeconds(5), 1.1000m, 1000),

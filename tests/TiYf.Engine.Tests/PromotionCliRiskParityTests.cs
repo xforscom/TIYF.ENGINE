@@ -12,10 +12,10 @@ public class PromotionCliRiskParityTests
     private static string RepoRoot()
     {
         var dir = AppContext.BaseDirectory;
-        for (int i=0;i<12;i++)
+        for (int i = 0; i < 12; i++)
         {
             if (Directory.Exists(Path.Combine(dir, "src")) && File.Exists(Path.Combine(dir, "TiYf.Engine.sln"))) return dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var parent = Directory.GetParent(dir); if (parent==null) break; dir = parent.FullName;
+            var parent = Directory.GetParent(dir); if (parent == null) break; dir = parent.FullName;
         }
         throw new InvalidOperationException("Cannot resolve repo root");
     }
@@ -23,10 +23,10 @@ public class PromotionCliRiskParityTests
     private static CliResult RunPromote(string baselineCfg, string candidateCfg)
     {
         string root = RepoRoot();
-        string toolsDll = Path.Combine(root, "src","TiYf.Engine.Tools","bin","Debug","net8.0","TiYf.Engine.Tools.dll");
+        string toolsDll = Path.Combine(root, "src", "TiYf.Engine.Tools", "bin", "Debug", "net8.0", "TiYf.Engine.Tools.dll");
         if (!File.Exists(toolsDll))
         {
-            var build = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("dotnet","build -c Debug --nologo") { WorkingDirectory = root });
+            var build = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("dotnet", "build -c Debug --nologo") { WorkingDirectory = root });
             build!.WaitForExit();
         }
         Assert.True(File.Exists(toolsDll), $"Tools DLL missing after debug build: {toolsDll}");
@@ -41,19 +41,19 @@ public class PromotionCliRiskParityTests
         var proc = System.Diagnostics.Process.Start(psi)!;
         var stdout = proc.StandardOutput.ReadToEnd();
         var stderr = proc.StandardError.ReadToEnd();
-        if (!proc.WaitForExit(180_000)) { try { proc.Kill(entireProcessTree:true); } catch {}; Assert.Fail($"Promotion timeout STDOUT\n{stdout}\nSTDERR\n{stderr}"); }
+        if (!proc.WaitForExit(180_000)) { try { proc.Kill(entireProcessTree: true); } catch { }; Assert.Fail($"Promotion timeout STDOUT\n{stdout}\nSTDERR\n{stderr}"); }
         return new CliResult(proc.ExitCode, stdout, stderr);
     }
 
     private static JsonElement ExtractResult(string stdout)
     {
-        var line = stdout.Split('\n').FirstOrDefault(l=>l.Contains("PROMOTION_RESULT_V1", StringComparison.Ordinal));
+        var line = stdout.Split('\n').FirstOrDefault(l => l.Contains("PROMOTION_RESULT_V1", StringComparison.Ordinal));
         Assert.False(string.IsNullOrWhiteSpace(line), "PROMOTION_RESULT_V1 JSON line not found");
         using var doc = JsonDocument.Parse(line!);
         return doc.RootElement.Clone();
     }
 
-    private static string WriteConfig(string srcCfg, string riskMode, bool injectExposureBreach=false)
+    private static string WriteConfig(string srcCfg, string riskMode, bool injectExposureBreach = false)
     {
         var json = File.ReadAllText(srcCfg);
         var node = System.Text.Json.Nodes.JsonNode.Parse(json)!.AsObject();
@@ -98,9 +98,9 @@ public class PromotionCliRiskParityTests
     public void Promotion_Accepts_Benign_ShadowToActive_NoAlerts()
     {
         var root = RepoRoot();
-        var baseSrc = Path.Combine(root, "tests","fixtures","backtest_m0","config.backtest-m0.json");
-        var baseline = WriteConfig(baseSrc, "shadow", injectExposureBreach:false);
-        var candidate = WriteConfig(baseSrc, "active", injectExposureBreach:false);
+        var baseSrc = Path.Combine(root, "tests", "fixtures", "backtest_m0", "config.backtest-m0.json");
+        var baseline = WriteConfig(baseSrc, "shadow", injectExposureBreach: false);
+        var candidate = WriteConfig(baseSrc, "active", injectExposureBreach: false);
         var res = RunPromote(baseline, candidate);
         var result = ExtractResult(res.Stdout);
         Assert.Equal(0, res.ExitCode);
@@ -118,36 +118,36 @@ public class PromotionCliRiskParityTests
     public void Promotion_Rejects_Mode_Downgrade_ActiveToShadow()
     {
         var root = RepoRoot();
-        var baseSrc = Path.Combine(root, "tests","fixtures","backtest_m0","config.backtest-m0.json");
-        var baseline = WriteConfig(baseSrc, "active", injectExposureBreach:false);
-        var candidate = WriteConfig(baseSrc, "shadow", injectExposureBreach:false);
+        var baseSrc = Path.Combine(root, "tests", "fixtures", "backtest_m0", "config.backtest-m0.json");
+        var baseline = WriteConfig(baseSrc, "active", injectExposureBreach: false);
+        var candidate = WriteConfig(baseSrc, "shadow", injectExposureBreach: false);
         var res = RunPromote(baseline, candidate);
         var result = ExtractResult(res.Stdout);
         Assert.Equal(2, res.ExitCode);
         Assert.False(result.GetProperty("accepted").GetBoolean());
-    Assert.Equal("risk_mismatch", result.GetProperty("reason").GetString());
+        Assert.Equal("risk_mismatch", result.GetProperty("reason").GetString());
     }
 
     [Fact]
     public void Promotion_Rejects_ShadowToActive_WithUnexpectedAlerts()
     {
         var root = RepoRoot();
-        var baseSrc = Path.Combine(root, "tests","fixtures","backtest_m0","config.backtest-m0.json");
-        var baseline = WriteConfig(baseSrc, "shadow", injectExposureBreach:false);
-        var candidate = WriteConfig(baseSrc, "active", injectExposureBreach:true); // inject breach
+        var baseSrc = Path.Combine(root, "tests", "fixtures", "backtest_m0", "config.backtest-m0.json");
+        var baseline = WriteConfig(baseSrc, "shadow", injectExposureBreach: false);
+        var candidate = WriteConfig(baseSrc, "active", injectExposureBreach: true); // inject breach
         var res = RunPromote(baseline, candidate);
         var result = ExtractResult(res.Stdout);
         if (res.ExitCode != 2)
         {
             // Attempt to locate candidate run dir (hash of candidate config hash present in stdout? Not exposed yet)
             // Best effort: print stdout for manual inspection
-            Console.WriteLine("PROMOTION_STDOUT:\n"+res.Stdout);
-            Console.WriteLine("PROMOTION_STDERR:\n"+res.Stderr);
+            Console.WriteLine("PROMOTION_STDOUT:\n" + res.Stdout);
+            Console.WriteLine("PROMOTION_STDERR:\n" + res.Stderr);
         }
         Assert.Equal(2, res.ExitCode);
         var risk = result.GetProperty("risk");
         Assert.False(result.GetProperty("accepted").GetBoolean());
-    Assert.Equal("risk_mismatch", result.GetProperty("reason").GetString());
-    // diff_hint may be 'unexpected_active_alerts' or 'exception' depending on alert parsing; only require risk mismatch.
+        Assert.Equal("risk_mismatch", result.GetProperty("reason").GetString());
+        // diff_hint may be 'unexpected_active_alerts' or 'exception' depending on alert parsing; only require risk mismatch.
     }
 }

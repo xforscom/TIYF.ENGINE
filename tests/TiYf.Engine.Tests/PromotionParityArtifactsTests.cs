@@ -9,7 +9,7 @@ public class PromotionParityArtifactsTests
         {
             var dir = Directory.GetCurrentDirectory();
             // Walk up until we find the solution file
-            for (int i=0;i<10;i++)
+            for (int i = 0; i < 10; i++)
             {
                 Console.WriteLine($"DEBUG RepoRoot probe level {i} dir={dir}");
                 if (Directory.GetFiles(dir, "TiYf.Engine.sln", SearchOption.TopDirectoryOnly).Any()) return dir;
@@ -26,15 +26,15 @@ public class PromotionParityArtifactsTests
         {
             // Search up to repo root for Release/net8.0/TiYf.Engine.Sim.dll
             var start = Directory.GetCurrentDirectory();
-            for (int i=0;i<10;i++)
+            for (int i = 0; i < 10; i++)
             {
                 var candidates = Directory.GetFiles(start, "TiYf.Engine.Sim.dll", SearchOption.AllDirectories)
-                    .Where(p => p.Contains(Path.Combine("bin","Release"), StringComparison.OrdinalIgnoreCase) && p.EndsWith(Path.Combine("net8.0","TiYf.Engine.Sim.dll"), StringComparison.OrdinalIgnoreCase))
+                    .Where(p => p.Contains(Path.Combine("bin", "Release"), StringComparison.OrdinalIgnoreCase) && p.EndsWith(Path.Combine("net8.0", "TiYf.Engine.Sim.dll"), StringComparison.OrdinalIgnoreCase))
                     .ToList();
-                if (candidates.Count>0) return candidates[0];
-                var parent = Directory.GetParent(start); if (parent==null) break; start = parent.FullName;
+                if (candidates.Count > 0) return candidates[0];
+                var parent = Directory.GetParent(start); if (parent == null) break; start = parent.FullName;
             }
-            return Path.Combine(RepoRoot, "src","TiYf.Engine.Sim","bin","Release","net8.0","TiYf.Engine.Sim.dll");
+            return Path.Combine(RepoRoot, "src", "TiYf.Engine.Sim", "bin", "Release", "net8.0", "TiYf.Engine.Sim.dll");
         }
     }
 
@@ -43,7 +43,7 @@ public class PromotionParityArtifactsTests
         var buildProj = Path.Combine(RepoRoot, "src", "TiYf.Engine.Sim", "TiYf.Engine.Sim.csproj");
         Assert.True(File.Exists(buildProj), $"Sim project not found at {buildProj}");
         // Ensure Release build
-        var build = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("dotnet", $"build \"{buildProj}\" -c Release --no-restore") { WorkingDirectory = RepoRoot, RedirectStandardOutput=true, RedirectStandardError=true, UseShellExecute=false });
+        var build = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("dotnet", $"build \"{buildProj}\" -c Release --no-restore") { WorkingDirectory = RepoRoot, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false });
         build!.WaitForExit(60000);
         // Proceed with run via 'dotnet run'
         string tmpCfg = Path.GetTempFileName();
@@ -104,25 +104,25 @@ public class PromotionParityArtifactsTests
             json = System.Text.Encoding.UTF8.GetString(ms.ToArray());
         }
         File.WriteAllText(tmpCfg, json);
-        string runId = "TEST-" + runTag + "-" + Guid.NewGuid().ToString("N").Substring(0,8);
-    var psi = new System.Diagnostics.ProcessStartInfo("dotnet", $"run --project \"{buildProj}\" -c Release -- --config \"{tmpCfg}\" --run-id {runId}")
+        string runId = "TEST-" + runTag + "-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        var psi = new System.Diagnostics.ProcessStartInfo("dotnet", $"run --project \"{buildProj}\" -c Release -- --config \"{tmpCfg}\" --run-id {runId}")
         {
-            RedirectStandardOutput=true,
-            RedirectStandardError=true,
-            UseShellExecute=false,
-            CreateNoWindow=true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
             WorkingDirectory = RepoRoot
         };
         var proc = System.Diagnostics.Process.Start(psi)!;
         string stdout = proc.StandardOutput.ReadToEnd();
         string stderr = proc.StandardError.ReadToEnd();
         proc.WaitForExit(60000);
-        if (!proc.HasExited) { try { proc.Kill(entireProcessTree:true);} catch{} }
+        if (!proc.HasExited) { try { proc.Kill(entireProcessTree: true); } catch { } }
         int exit = proc.ExitCode;
         if (exit != 0)
         {
-            Console.WriteLine("SIM_STDOUT:\n"+stdout);
-            Console.WriteLine("SIM_STDERR:\n"+stderr);
+            Console.WriteLine("SIM_STDOUT:\n" + stdout);
+            Console.WriteLine("SIM_STDERR:\n" + stderr);
         }
         string runDir = System.IO.Path.Combine(RepoRoot, "journals", "M0", $"M0-RUN-{runId}");
         return (exit, runDir, runId);
@@ -135,17 +135,17 @@ public class PromotionParityArtifactsTests
         var config = Path.Combine(RepoRoot, "tests", "fixtures", "backtest_m0", "config.backtest-m0.json");
         Assert.True(File.Exists(config), $"Fixture config missing at {config}");
         var off = RunSim(config, "off", "off");
-    Assert.True(off.Exit==0, $"Off run failed exit={off.Exit}");
+        Assert.True(off.Exit == 0, $"Off run failed exit={off.Exit}");
         var shadow = RunSim(config, "shadow", "shadow");
-    Assert.True(shadow.Exit==0, $"Shadow run failed exit={shadow.Exit}");
+        Assert.True(shadow.Exit == 0, $"Shadow run failed exit={shadow.Exit}");
         var active = RunSim(config, "active", "active");
-    Assert.True(active.Exit==0, $"Active run failed exit={active.Exit}");
+        Assert.True(active.Exit == 0, $"Active run failed exit={active.Exit}");
 
         void AssertHashes(string runDir, out string eventsSha, out string tradesSha, out int applied, out int penalty)
         {
             var hashFile = Path.Combine(RepoRoot, "artifacts", "parity", Path.GetFileName(runDir).Replace("M0-RUN-", string.Empty), "hashes.txt");
             Assert.True(File.Exists(hashFile), $"hashes.txt missing for {runDir}");
-            var dict = File.ReadAllLines(hashFile).Where(l=>l.Contains('=')).Select(l=>l.Split('=')).ToDictionary(p=>p[0], p=>p[1]);
+            var dict = File.ReadAllLines(hashFile).Where(l => l.Contains('=')).Select(l => l.Split('=')).ToDictionary(p => p[0], p => p[1]);
             eventsSha = dict.GetValueOrDefault("events_sha", string.Empty);
             tradesSha = dict.GetValueOrDefault("trades_sha", string.Empty);
             applied = int.Parse(dict.GetValueOrDefault("applied_count", "0"));

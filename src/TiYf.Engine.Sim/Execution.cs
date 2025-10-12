@@ -169,7 +169,7 @@ public sealed class TradesJournalWriter : IAsyncDisposable
             await sw.WriteLineAsync("utc_ts_open,utc_ts_close,symbol,direction,entry_price,exit_price,volume_units,pnl_ccy,pnl_r,decision_id,schema_version,config_hash,data_version");
             bool isM0 = _buffer.Any(bt => bt.DecisionId.StartsWith("M0-", StringComparison.Ordinal));
             // map symbol->price decimals inferred from observed entry/exit scale if needed (fallback)
-            var priceDecimals = new Dictionary<string,int>(StringComparer.OrdinalIgnoreCase);
+            var priceDecimals = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             if (isM0)
             {
                 foreach (var t in _buffer)
@@ -179,11 +179,11 @@ public sealed class TradesJournalWriter : IAsyncDisposable
                         // infer decimals by counting digits after decimal in entry price string representation
                         var s = t.EntryPrice.ToString(CultureInfo.InvariantCulture);
                         var idx = s.IndexOf('.');
-                        priceDecimals[t.Symbol] = idx >=0 ? s.Length - idx -1 : 0;
+                        priceDecimals[t.Symbol] = idx >= 0 ? s.Length - idx - 1 : 0;
                     }
                 }
             }
-            foreach (var t in _buffer.OrderBy(t=>t.UtcTsOpen).ThenBy(t=>t.Symbol))
+            foreach (var t in _buffer.OrderBy(t => t.UtcTsOpen).ThenBy(t => t.Symbol))
             {
                 string PriceFmt(decimal d, string symbol)
                 {

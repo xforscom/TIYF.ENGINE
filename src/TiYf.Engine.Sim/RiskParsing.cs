@@ -26,9 +26,9 @@ public static class RiskParsing
     {
         try
         {
-            if (element.ValueKind!=JsonValueKind.Object) return RiskMode.Off;
-            if (!element.TryGetProperty("featureFlags", out var ff) || ff.ValueKind!=JsonValueKind.Object) return RiskMode.Off;
-            if (!ff.TryGetProperty("risk", out var r) || r.ValueKind!=JsonValueKind.String) return RiskMode.Off;
+            if (element.ValueKind != JsonValueKind.Object) return RiskMode.Off;
+            if (!element.TryGetProperty("featureFlags", out var ff) || ff.ValueKind != JsonValueKind.Object) return RiskMode.Off;
+            if (!ff.TryGetProperty("risk", out var r) || r.ValueKind != JsonValueKind.String) return RiskMode.Off;
             return Map(r.GetString() ?? string.Empty);
         }
         catch { return RiskMode.Off; }

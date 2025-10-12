@@ -19,10 +19,10 @@ public static class RiskConfigParser
             if (TryString(riskEl, snake, out var v) && v is not null) return v;
             return fallback;
         }
-        var buckets = new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
+        var buckets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (TryObject(riskEl, "instrument_buckets", out var bEl))
         {
-            foreach (var p in bEl.EnumerateObject()) if (p.Value.ValueKind==JsonValueKind.String) buckets[p.Name]=p.Value.GetString()??string.Empty;
+            foreach (var p in bEl.EnumerateObject()) if (p.Value.ValueKind == JsonValueKind.String) buckets[p.Name] = p.Value.GetString() ?? string.Empty;
         }
         return new RiskConfig
         {
@@ -43,35 +43,35 @@ public static class RiskConfigParser
 
     private static bool TryNumber(JsonElement parent, string snake, out decimal value)
     {
-        if (TryProperty(parent, snake, out var el) && el.ValueKind==JsonValueKind.Number) { value = el.GetDecimal(); return true; }
-        if (TryProperty(parent, SnakeToCamel(snake), out var camel) && camel.ValueKind==JsonValueKind.Number) { value = camel.GetDecimal(); return true; }
+        if (TryProperty(parent, snake, out var el) && el.ValueKind == JsonValueKind.Number) { value = el.GetDecimal(); return true; }
+        if (TryProperty(parent, SnakeToCamel(snake), out var camel) && camel.ValueKind == JsonValueKind.Number) { value = camel.GetDecimal(); return true; }
         value = 0; return false;
     }
     private static bool TryBool(JsonElement parent, string snake, out bool value)
     {
-        if (TryProperty(parent, snake, out var el) && (el.ValueKind==JsonValueKind.True||el.ValueKind==JsonValueKind.False)) { value = el.GetBoolean(); return true; }
-        if (TryProperty(parent, SnakeToCamel(snake), out var camel) && (camel.ValueKind==JsonValueKind.True||camel.ValueKind==JsonValueKind.False)) { value = camel.GetBoolean(); return true; }
-        value=false; return false;
+        if (TryProperty(parent, snake, out var el) && (el.ValueKind == JsonValueKind.True || el.ValueKind == JsonValueKind.False)) { value = el.GetBoolean(); return true; }
+        if (TryProperty(parent, SnakeToCamel(snake), out var camel) && (camel.ValueKind == JsonValueKind.True || camel.ValueKind == JsonValueKind.False)) { value = camel.GetBoolean(); return true; }
+        value = false; return false;
     }
     private static bool TryString(JsonElement parent, string snake, out string? value)
     {
-        if (TryProperty(parent, snake, out var el) && el.ValueKind==JsonValueKind.String){ value = el.GetString(); return true; }
-        if (TryProperty(parent, SnakeToCamel(snake), out var camel) && camel.ValueKind==JsonValueKind.String){ value = camel.GetString(); return true; }
-        value=null; return false;
+        if (TryProperty(parent, snake, out var el) && el.ValueKind == JsonValueKind.String) { value = el.GetString(); return true; }
+        if (TryProperty(parent, SnakeToCamel(snake), out var camel) && camel.ValueKind == JsonValueKind.String) { value = camel.GetString(); return true; }
+        value = null; return false;
     }
     private static bool TryObject(JsonElement parent, string snake, out JsonElement obj)
     {
-        if (TryProperty(parent, snake, out var el) && el.ValueKind==JsonValueKind.Object){ obj=el; return true; }
-        if (TryProperty(parent, SnakeToCamel(snake), out var camel) && camel.ValueKind==JsonValueKind.Object){ obj=camel; return true; }
+        if (TryProperty(parent, snake, out var el) && el.ValueKind == JsonValueKind.Object) { obj = el; return true; }
+        if (TryProperty(parent, SnakeToCamel(snake), out var camel) && camel.ValueKind == JsonValueKind.Object) { obj = camel; return true; }
         obj = default; return false;
     }
     private static bool TryProperty(JsonElement parent, string name, out JsonElement el)
     {
-        if (parent.TryGetProperty(name, out el)) return true; el=default; return false;
+        if (parent.TryGetProperty(name, out el)) return true; el = default; return false;
     }
     private static string SnakeToCamel(string snake)
     {
-        return string.Concat(snake.Split('_', StringSplitOptions.RemoveEmptyEntries).Select((s,i)=> i==0? s: char.ToUpperInvariant(s[0])+s.Substring(1)));
+        return string.Concat(snake.Split('_', StringSplitOptions.RemoveEmptyEntries).Select((s, i) => i == 0 ? s : char.ToUpperInvariant(s[0]) + s.Substring(1)));
     }
 
     private static Dictionary<string, decimal>? ParseExposureCaps(JsonElement parent)
@@ -79,14 +79,14 @@ public static class RiskConfigParser
         if (TryObject(parent, "max_net_exposure_by_symbol", out var obj))
         {
             var dict = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
-            foreach (var p in obj.EnumerateObject()) if (p.Value.ValueKind==JsonValueKind.Number) dict[p.Name] = p.Value.GetDecimal();
-            return dict.Count>0? dict : null;
+            foreach (var p in obj.EnumerateObject()) if (p.Value.ValueKind == JsonValueKind.Number) dict[p.Name] = p.Value.GetDecimal();
+            return dict.Count > 0 ? dict : null;
         }
         if (TryObject(parent, "maxNetExposureBySymbol", out var camel))
         {
             var dict = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
-            foreach (var p in camel.EnumerateObject()) if (p.Value.ValueKind==JsonValueKind.Number) dict[p.Name] = p.Value.GetDecimal();
-            return dict.Count>0? dict : null;
+            foreach (var p in camel.EnumerateObject()) if (p.Value.ValueKind == JsonValueKind.Number) dict[p.Name] = p.Value.GetDecimal();
+            return dict.Count > 0 ? dict : null;
         }
         return null;
     }

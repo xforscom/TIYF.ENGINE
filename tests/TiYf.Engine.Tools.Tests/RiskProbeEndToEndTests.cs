@@ -11,6 +11,6 @@ using Xunit;
 
 public class RiskProbeEndToEndTests
 {
-    [Fact(Skip="Pending VerifyEngine integration in Tools test context; skipped to keep pipeline green.")]
+    [Fact(Skip = "Pending VerifyEngine integration in Tools test context; skipped to keep pipeline green.")]
     public void Verify_RiskProbe_EndToEnd_Passes_Pending() { /* intentionally skipped */ }
 }

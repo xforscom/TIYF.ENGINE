@@ -7,13 +7,13 @@ namespace TiYf.Engine.Tests;
 public class RiskExposureClearsOnCloseTests
 {
     private string SolutionRoot => FindSolutionRoot();
-    private string SimDll => Path.Combine(SolutionRoot, "src","TiYf.Engine.Sim","bin","Release","net8.0","TiYf.Engine.Sim.dll");
+    private string SimDll => Path.Combine(SolutionRoot, "src", "TiYf.Engine.Sim", "bin", "Release", "net8.0", "TiYf.Engine.Sim.dll");
 
     [Fact]
     public void NetExposure_Resets_ToZero_After_Closes()
     {
         // Use shadow mode to emit INFO_RISK_EVAL_V1 evaluations without blocking trades
-        var baseConfig = Path.Combine(SolutionRoot, "tests","fixtures","backtest_m0","config.backtest-m0.json");
+        var baseConfig = Path.Combine(SolutionRoot, "tests", "fixtures", "backtest_m0", "config.backtest-m0.json");
         Assert.True(File.Exists(baseConfig));
 
         var tmp = TempConfigWithRisk(baseConfig, "shadow");
@@ -97,7 +97,7 @@ public class RiskExposureClearsOnCloseTests
     private static (string root, string events, string trades) RunSimInternal(string cfg)
     {
         var solutionRoot = FindSolutionRoot();
-        var dll = Path.Combine(solutionRoot, "src","TiYf.Engine.Sim","bin","Release","net8.0","TiYf.Engine.Sim.dll");
+        var dll = Path.Combine(solutionRoot, "src", "TiYf.Engine.Sim", "bin", "Release", "net8.0", "TiYf.Engine.Sim.dll");
         Assert.True(File.Exists(dll), "Sim DLL missing. Build Release first.");
         var psi = new ProcessStartInfo("dotnet", $"exec \"{dll}\" --config \"{cfg}\" --quiet")
         { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, WorkingDirectory = solutionRoot };

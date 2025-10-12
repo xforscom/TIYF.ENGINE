@@ -59,7 +59,7 @@ jobs:
           set -euo pipefail
           mkdir -p scratch
           set +e
-          actionlint -color never --trusted-secrets ADMIN_TOKEN > scratch/actionlint.log 2>&1
+          actionlint --color never --trusted-secrets ADMIN_TOKEN > scratch/actionlint.log 2>&1
           STATUS=$?
           set -e
           echo "$STATUS" > scratch/actionlint.exit
@@ -179,7 +179,7 @@ jobs:
             if [ "$STATUS" != "0" ]; then
               OVERALL=1
               printf '\n### %s\n' "$TITLE" >> "$SUMMARY_FILE"
-              printf '- ❌ Failed (exit %s)\n' "$STATUS" >> "$SUMMARY_FILE"
+              printf -- '- ❌ Failed (exit %s)\n' "$STATUS" >> "$SUMMARY_FILE"
               if [ -s "scratch/${LOG_BASENAME}.log" ]; then
                 printf '\n```\n' >> "$SUMMARY_FILE"
                 head -n 30 "scratch/${LOG_BASENAME}.log" >> "$SUMMARY_FILE"
@@ -187,7 +187,7 @@ jobs:
               fi
             else
               printf '\n### %s\n' "$TITLE" >> "$SUMMARY_FILE"
-              printf '- ✅ Passed\n' >> "$SUMMARY_FILE"
+              printf -- '- ✅ Passed\n' >> "$SUMMARY_FILE"
             fi
           done
           if [ "$OVERALL" -ne 0 ]; then
