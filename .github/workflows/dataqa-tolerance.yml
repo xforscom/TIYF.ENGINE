@@ -28,7 +28,10 @@ jobs:
           node-version: '20'
 
       - name: Build (Release)
-        run: dotnet build -c Release
+        run: |
+          set -euo pipefail
+          dotnet build TiYf.Engine.sln -c Release
+          dotnet build src/TiYf.Engine.Tools/TiYf.Engine.Tools.csproj -c Release --no-restore
 
       - name: Prepare paths
         id: prep
