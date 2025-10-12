@@ -29,7 +29,6 @@ jobs:
 
       - name: Build (Release)
         run: |
-          set -euo pipefail
           dotnet build TiYf.Engine.sln -c Release
           dotnet build src/TiYf.Engine.Tools/TiYf.Engine.Tools.csproj -c Release --no-restore
 
