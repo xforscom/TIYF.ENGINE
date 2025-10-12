@@ -67,28 +67,51 @@ jobs:
           dotnet exec "$SIM" --config "$OUTCFG" --quiet --run-id "$RUN_ID" | tee "$OUT"
           CODE=$?
           set -e
+          if [ $CODE -ne 0 ]; then
+            echo "Simulator exited with code $CODE" >&2
+            exit $CODE
+          fi
           EV=$(grep -m1 '^JOURNAL_DIR_EVENTS=' "$OUT" | cut -d= -f2 || true)
           TR=$(grep -m1 '^JOURNAL_DIR_TRADES=' "$OUT" | cut -d= -f2 || true)
           if [ -z "$EV" ] || [ -z "$TR" ]; then
-            RUN_DIR=$(ls -d "$ROOT"/journals/*"$RUN_ID"* 2>/dev/null | head -n1 || true)
-            echo "RUN_DIR=$RUN_DIR"; test -n "$RUN_DIR"
-            EV="$RUN_DIR/events.csv"; TR="$RUN_DIR/trades.csv"
+            echo "Missing JOURNAL_DIR entries in simulator output" >&2
+            echo '--- simulator stdout ---'
+            cat "$OUT"
+            exit 2
           fi
-          test -f "$EV"; test -f "$TR"
-          RUN_DIR=${RUN_DIR:-$(dirname "$EV")}
-          mkdir -p artifacts/parity/$MODE
+          test -f "$EV" && test -f "$TR"
+          RUN_DIR=$(dirname "$EV")
+          mkdir -p artifacts/parity/$MODE artifacts/parity/$MODE/env artifacts/parity/$MODE/journals
+          {
+            echo "RUN_DIR=$RUN_DIR"
+            echo "EVENTS=$EV"
+            echo "TRADES=$TR"
+          } >> "$GITHUB_ENV"
+          ENV_SANITY=artifacts/parity/$MODE/env.sanity
+          {
+            echo "mode=$MODE"
+            echo "run_dir=$RUN_DIR"
+            echo "events=$EV"
+            echo "trades=$TR"
+          } >> "$ENV_SANITY"
+          cp "$OUT" artifacts/parity/$MODE/sim.log || true
+          cp "$EV" artifacts/parity/$MODE/journals/events.csv
+          cp "$TR" artifacts/parity/$MODE/journals/trades.csv
           # Normalize events: skip meta + header
           tail -n +3 "$EV" | sha256sum | awk '{print $1}' > artifacts/parity/$MODE/events.sha
           # Normalize trades: remove header + strip config_hash column if present
           awk -F, 'NR==1 {for (i=1;i<=NF;i++){if($i=="config_hash") c=i} next} {out=""; for(i=1;i<=NF;i++){ if(i==c) continue; if(out!="") out=out","; out=out $i;} print out}' "$TR" | sha256sum | awk '{print $1}' > artifacts/parity/$MODE/trades.sha
           EVENTS_SHA=$(cat artifacts/parity/$MODE/events.sha)
           TRADES_SHA=$(cat artifacts/parity/$MODE/trades.sha)
-          PEN_CNT=$(grep -c 'PENALTY_APPLIED_V1' "$EV" || true)
+          PEN_CNT=$(grep -c ',PENALTY_APPLIED_V1,' "$EV" || true)
           {
+            echo "mode=$MODE"
             echo "events_sha=$EVENTS_SHA"
             echo "trades_sha=$TRADES_SHA"
             echo "penalty_count=$PEN_CNT"
             echo "run_dir=$RUN_DIR"
+            echo "events=$EV"
+            echo "trades=$TR"
           } > artifacts/parity/$MODE/hashes.txt
           cp artifacts/parity/$MODE/hashes.txt artifacts/parity/$MODE/hashes-$MODE.txt || true
           echo "--- hashes ($MODE) ---"; cat artifacts/parity/$MODE/hashes.txt

@@ -37,21 +37,27 @@ jobs:
           set -euo pipefail
           ROOT="$(pwd)"
           echo "root=$ROOT" >> $GITHUB_OUTPUT
-          echo "sim=$ROOT/src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll" >> $GITHUB_OUTPUT
+          SIM_DLL="$ROOT/src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"
           TOOLS_REL="$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
-          TOOLS_DBG="$ROOT/src/TiYf.Engine.Tools/bin/Debug/net8.0/TiYf.Engine.Tools.dll"
-          if [ -f "$TOOLS_REL" ]; then
-            echo "tools=$TOOLS_REL" >> $GITHUB_OUTPUT
-          elif [ -f "$TOOLS_DBG" ]; then
-            echo "tools=$TOOLS_DBG" >> $GITHUB_OUTPUT
-          else
-            echo "Tools DLL not found in Release or Debug. Listing candidates:" >&2
-            ls -la "$ROOT/src/TiYf.Engine.Tools/bin" || true
-            ls -la "$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0" || true
-            ls -la "$ROOT/src/TiYf.Engine.Tools/bin/Debug/net8.0" || true
+          if [ ! -f "$SIM_DLL" ]; then
+            echo "Sim Release DLL not found: $SIM_DLL" >&2
             exit 1
           fi
+          if [ ! -f "$TOOLS_REL" ]; then
+            echo "Tools Release DLL not found: $TOOLS_REL" >&2
+            ls -R "$ROOT/src/TiYf.Engine.Tools/bin" || true
+            exit 1
+          fi
+          echo "sim=$SIM_DLL" >> $GITHUB_OUTPUT
+          echo "tools=$TOOLS_REL" >> $GITHUB_OUTPUT
           echo "cfg=$ROOT/tests/fixtures/backtest_m0/config.backtest-m0.json" >> $GITHUB_OUTPUT
+
+      - name: Prepare artifact dirs
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf artifacts || true
+          mkdir -p artifacts/dataqa/pass artifacts/dataqa/fail artifacts/env
 
       - name: Run K=1 (pass)
         shell: bash
@@ -125,20 +131,32 @@ jobs:
           # Debug: list temp dir and first 3 lines of each rewritten CSV
           echo "Temp dir listing:" && ls -la "$TMP_DIR"
           for f in "$TMP_DIR"/ticks_*.csv; do echo "== $f =="; head -n 3 "$f"; done
-          # Run sim with prepared config
-          dotnet exec "$sim" --config "$CONFIG_OUT" --run-id K1-PASS --verbosity quiet
-          # Resolve journal paths using config into local variables
-          mapfile -t _paths < <(node -e '
-            const fs=require("fs"); const path=require("path");
-            const cfgPath=process.env.CONFIG_OUT; const runId="M0-RUN-K1-PASS";
-            const j=JSON.parse(fs.readFileSync(cfgPath,"utf8"));
-            const jdir=(j.output && j.output.journalDir) ? j.output.journalDir : path.resolve("journals","M0");
-            const events=path.join(jdir, runId, "events.csv");
-            const trades=path.join(jdir, runId, "trades.csv");
-            console.log(events); console.log(trades);
-          ')
-          J_EVENTS="${_paths[0]}"; J_TRADES="${_paths[1]}"
-          test -f "$J_EVENTS" || (echo "events missing: $J_EVENTS" && exit 1)
+          # Run sim with prepared config and capture stdout for precise journal paths
+          OUT=$(mktemp)
+          set +e
+          dotnet exec "$sim" --config "$CONFIG_OUT" --run-id K1-PASS --verbosity quiet | tee "$OUT"
+          SIM_CODE=${PIPESTATUS[0]}
+          set -e
+          if [ $SIM_CODE -ne 0 ]; then
+            echo "Simulator exited with $SIM_CODE" >&2
+            echo '--- simulator stdout (K1-PASS) ---'
+            cat "$OUT"
+            exit $SIM_CODE
+          fi
+          J_EVENTS=$(grep -m1 '^JOURNAL_DIR_EVENTS=' "$OUT" | cut -d= -f2 || true)
+          J_TRADES=$(grep -m1 '^JOURNAL_DIR_TRADES=' "$OUT" | cut -d= -f2 || true)
+          if [ -z "$J_EVENTS" ] || [ -z "$J_TRADES" ]; then
+            echo "Missing JOURNAL_DIR_* entries for K1-PASS" >&2
+            echo '--- simulator stdout (K1-PASS) ---'
+            cat "$OUT"
+            exit 2
+          fi
+          test -f "$J_EVENTS" || (echo "events missing: $J_EVENTS" >&2; exit 1)
+          test -f "$J_TRADES" || (echo "trades missing: $J_TRADES" >&2; exit 1)
+          cp "$OUT" artifacts/dataqa/pass/sim.log
+          printf 'mode=pass\nrun_dir=%s\nevents=%s\ntrades=%s\n' "$(dirname "$J_EVENTS")" "$J_EVENTS" "$J_TRADES" >> artifacts/env/env.sanity
+          cp "$J_EVENTS" artifacts/dataqa/pass/events.csv
+          cp "$J_TRADES" artifacts/dataqa/pass/trades.csv
           # Assert summary passed=true and no abort (pure Node)
           EVENTS="$J_EVENTS" node - <<'JS'
           const fs=require("fs");
@@ -251,20 +269,32 @@ jobs:
           # Debug: list temp dir and first 3 lines of each rewritten CSV
           echo "Temp dir listing:" && ls -la "$TMP_DIR"
           for f in "$TMP_DIR"/ticks_*.csv; do echo "== $f =="; head -n 3 "$f"; done
-          # Run sim with prepared config
-          dotnet exec "$sim" --config "$CONFIG_OUT" --run-id K1-FAIL --verbosity quiet
-          # Resolve journal paths using config into local variables
-          mapfile -t _paths < <(node -e '
-            const fs=require("fs"); const path=require("path");
-            const cfgPath=process.env.CONFIG_OUT; const runId="M0-RUN-K1-FAIL";
-            const j=JSON.parse(fs.readFileSync(cfgPath,"utf8"));
-            const jdir=(j.output && j.output.journalDir) ? j.output.journalDir : path.resolve("journals","M0");
-            const events=path.join(jdir, runId, "events.csv");
-            const trades=path.join(jdir, runId, "trades.csv");
-            console.log(events); console.log(trades);
-          ')
-          J_EVENTS="${_paths[0]}"; J_TRADES="${_paths[1]}"
-          test -f "$J_EVENTS" || (echo "events missing: $J_EVENTS" && exit 1)
+          # Run sim with prepared config and capture stdout
+          OUT=$(mktemp)
+          set +e
+          dotnet exec "$sim" --config "$CONFIG_OUT" --run-id K1-FAIL --verbosity quiet | tee "$OUT"
+          SIM_CODE=${PIPESTATUS[0]}
+          set -e
+          if [ $SIM_CODE -ne 0 ]; then
+            echo "Simulator exited with $SIM_CODE" >&2
+            echo '--- simulator stdout (K1-FAIL) ---'
+            cat "$OUT"
+            exit $SIM_CODE
+          fi
+          J_EVENTS=$(grep -m1 '^JOURNAL_DIR_EVENTS=' "$OUT" | cut -d= -f2 || true)
+          J_TRADES=$(grep -m1 '^JOURNAL_DIR_TRADES=' "$OUT" | cut -d= -f2 || true)
+          if [ -z "$J_EVENTS" ]; then
+            echo "Missing JOURNAL_DIR_EVENTS entry for K1-FAIL" >&2
+            echo '--- simulator stdout (K1-FAIL) ---'
+            cat "$OUT"
+            exit 2
+          fi
+          cp "$OUT" artifacts/dataqa/fail/sim.log
+          printf 'mode=fail\nrun_dir=%s\nevents=%s\ntrades=%s\n' "$(dirname "$J_EVENTS")" "$J_EVENTS" "$J_TRADES" >> artifacts/env/env.sanity
+          cp "$J_EVENTS" artifacts/dataqa/fail/events.csv
+          if [ -n "$J_TRADES" ] && [ -f "$J_TRADES" ]; then
+            cp "$J_TRADES" artifacts/dataqa/fail/trades.csv
+          fi
           # Assert summary passed=false (pure Node)
           EVENTS="$J_EVENTS" node - <<'JS'
           const fs=require("fs");
@@ -284,10 +314,17 @@ jobs:
           # Strict verify
           # If Data QA aborted, trades.csv may not exist. In that case, verify events only.
           tools_out=0
-          if [ -f "$J_TRADES" ]; then
+          if [ -n "$J_TRADES" ] && [ -f "$J_TRADES" ]; then
             dotnet exec "$tools" verify strict --events "$J_EVENTS" --trades "$J_TRADES" --schema 1.3.0 --json || tools_out=$?
           else
             echo "trades.csv missing (expected after QA abort); verifying events only"
             dotnet exec "$tools" verify strict --events "$J_EVENTS" --schema 1.3.0 --json || tools_out=$?
           fi
           if [ "$tools_out" -ne 0 ] && [ "$tools_out" -ne 2 ]; then exit 1; fi
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dataqa-tolerance-${{ matrix.os }}
+          path: artifacts/**

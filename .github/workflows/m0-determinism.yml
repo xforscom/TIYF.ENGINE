@@ -88,12 +88,18 @@ jobs:
           EV=$(grep -m1 '^JOURNAL_DIR_EVENTS=' "$OUT" | cut -d= -f2 || true)
           TR=$(grep -m1 '^JOURNAL_DIR_TRADES=' "$OUT" | cut -d= -f2 || true)
           if [ -z "$EV" ] || [ -z "$TR" ]; then
-            RUN_DIR=$(ls -d journals/*M0-RUN-A* 2>/dev/null | head -n1 || true)
-            echo "RUN_DIR=$RUN_DIR"
-            test -n "$RUN_DIR"
-            EV="$RUN_DIR/events.csv"; TR="$RUN_DIR/trades.csv"
+            echo "Missing JOURNAL_DIR_* entries for run A" >&2
+            echo '--- simulator stdout (A) ---'
+            cat "$OUT"
+            exit 2
           fi
           test -f "$EV" && test -f "$TR"
+          RUN_DIR=$(dirname "$EV")
+          {
+            echo "run_a_dir=$RUN_DIR"
+            echo "run_a_events=$EV"
+            echo "run_a_trades=$TR"
+          } >> artifacts/env/env.sanity.txt
           cp "$EV" artifacts/raw/events_A.csv
           cp "$TR" artifacts/raw/trades_A.csv
           echo "events=$EV" >> "$GITHUB_OUTPUT"
@@ -117,12 +123,18 @@ jobs:
           EV=$(grep -m1 '^JOURNAL_DIR_EVENTS=' "$OUT" | cut -d= -f2 || true)
           TR=$(grep -m1 '^JOURNAL_DIR_TRADES=' "$OUT" | cut -d= -f2 || true)
           if [ -z "$EV" ] || [ -z "$TR" ]; then
-            RUN_DIR=$(ls -d journals/*M0-RUN-B* 2>/dev/null | head -n1 || true)
-            echo "RUN_DIR=$RUN_DIR"
-            test -n "$RUN_DIR"
-            EV="$RUN_DIR/events.csv"; TR="$RUN_DIR/trades.csv"
+            echo "Missing JOURNAL_DIR_* entries for run B" >&2
+            echo '--- simulator stdout (B) ---'
+            cat "$OUT"
+            exit 2
           fi
           test -f "$EV" && test -f "$TR"
+          RUN_DIR=$(dirname "$EV")
+          {
+            echo "run_b_dir=$RUN_DIR"
+            echo "run_b_events=$EV"
+            echo "run_b_trades=$TR"
+          } >> artifacts/env/env.sanity.txt
           cp "$EV" artifacts/raw/events_B.csv
           cp "$TR" artifacts/raw/trades_B.csv
           echo "events=$EV" >> "$GITHUB_OUTPUT"
