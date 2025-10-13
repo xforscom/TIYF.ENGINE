@@ -33,7 +33,7 @@ jobs:
           github-token: ${{ env.ADMIN_TOKEN_FOR_WORKFLOW }}
           script: |
             const manualToken = (context.payload?.inputs?.admin_token ?? '').trim();
-            const secretToken = process.env.GITHUB_TOKEN ?? '';
+            const secretToken = process.env.GITHUB_TOKEN || process.env.ADMIN_TOKEN_FOR_WORKFLOW || '';
             const activeToken = secretToken || manualToken;
 
             if (!activeToken) {
