@@ -4,6 +4,14 @@ name: admin-branch-protection
 on:
   workflow_dispatch:
     inputs:
+      branch:
+        description: Branch to protect
+        default: main
+        required: true
+      checks:
+        description: CSV of required status checks
+        default: lint,m0-determinism,verify-strict,dataqa-tolerance,nightly-canary
+        required: true
       reason:
         description: Why the protection update is requested
         required: false
@@ -18,26 +26,47 @@ on:
     paths:
       - .github/workflows/admin-branch-protection.yml
 
+permissions: {}
+
 jobs:
   apply:
     runs-on: ubuntu-latest
     environment:
       name: ADMIN_TOKEN
     steps:
-      - name: Configure branch protection on main
+      - name: Configure branch protection
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
         env:
           # actionlint: allow-secrets ADMIN_TOKEN
           ADMIN_TOKEN_FOR_WORKFLOW: ${{ secrets.ADMIN_TOKEN }}
         with:
-          github-token: ${{ env.ADMIN_TOKEN_FOR_WORKFLOW }}
+          github-token: ${{ github.token }}
           script: |
-            const manualToken = (context.payload?.inputs?.admin_token ?? '').trim();
+            const defaultChecks = [
+              'lint',
+              'm0-determinism',
+              'verify-strict',
+              'dataqa-tolerance',
+              'nightly-canary',
+            ];
+
+            const inputs = context.payload?.inputs ?? {};
+            const branch = (inputs.branch ?? 'main').trim() || 'main';
+            const checksCsv = (inputs.checks ?? '').trim();
+            const manualToken = (inputs.admin_token ?? '').trim();
             const secretToken = process.env.GITHUB_TOKEN || process.env.ADMIN_TOKEN_FOR_WORKFLOW || '';
             const activeToken = secretToken || manualToken;
 
             if (!activeToken) {
               core.setFailed('No admin token available. Configure the ADMIN_TOKEN secret or provide an admin_token input when manually dispatching.');
+              return;
+            }
+
+            const contexts = (checksCsv ? checksCsv.split(',') : defaultChecks)
+              .map((entry) => entry.trim())
+              .filter(Boolean);
+            if (contexts.length === 0) {
+              core.setFailed('At least one status check must be provided.');
               return;
             }
 
@@ -47,13 +76,7 @@ jobs:
             const payload = {
               required_status_checks: {
                 strict: true,
-                checks: [
-                  { context: 'lint' },
-                  { context: 'm0-determinism' },
-                  { context: 'verify-strict' },
-                  { context: 'dataqa-tolerance' },
-                  { context: 'nightly-canary' },
-                ],
+                checks: contexts.map((context) => ({ context })),
               },
               enforce_admins: true,
               required_pull_request_reviews: {
@@ -75,8 +98,8 @@ jobs:
             await adminGithub.request('PUT /repos/{owner}/{repo}/branches/{branch}/protection', {
               owner,
               repo,
-              branch: 'main',
+              branch,
               ...payload,
             });
 
-            core.info('Branch protection updated successfully.');
+            core.info(`Branch protection updated successfully for ${branch}.`);

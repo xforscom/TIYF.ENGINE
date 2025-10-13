@@ -23,10 +23,10 @@ jobs:
         shell: bash
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
 
       - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
         with:
           dotnet-version: '8.0.x'
 
@@ -177,9 +177,9 @@ jobs:
             IFS='|' read -r VAR TITLE LOG_BASENAME <<< "$entry"
             STATUS_VAR="${VAR}_STATUS"
             STATUS=${!STATUS_VAR:-0}
+            printf '\n### %s\n' "$TITLE" >> "$SUMMARY_FILE"
             if [ "$STATUS" != "0" ]; then
               OVERALL=1
-              printf '\n### %s\n' "$TITLE" >> "$SUMMARY_FILE"
               printf -- '- ❌ Failed (exit %s)\n' "$STATUS" >> "$SUMMARY_FILE"
               if [ -s "scratch/${LOG_BASENAME}.log" ]; then
                 printf '\n```\n' >> "$SUMMARY_FILE"
@@ -187,7 +187,6 @@ jobs:
                 printf '\n```\n' >> "$SUMMARY_FILE"
               fi
             else
-              printf '\n### %s\n' "$TITLE" >> "$SUMMARY_FILE"
               printf -- '- ✅ Passed\n' >> "$SUMMARY_FILE"
             fi
           done
@@ -198,9 +197,8 @@ jobs:
 
       - name: Upload lint logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: lint-logs-${{ github.run_id }}
           path: scratch
           retention-days: 7
-

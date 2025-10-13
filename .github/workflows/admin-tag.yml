@@ -1,0 +1,92 @@
+# actionlint: allow-secrets ADMIN_TOKEN
+name: admin-tag
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit SHA or ref
+        required: true
+      tag:
+        description: Tag name
+        required: true
+permissions: {}
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Apply tag
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          # actionlint: allow-secrets ADMIN_TOKEN
+          github-token: ${{ secrets.ADMIN_TOKEN }}
+          script: |
+            const tagName = '${{ inputs.tag }}'.trim();
+            const refInput = '${{ inputs.ref }}'.trim();
+            if (!tagName) {
+              core.setFailed('Tag name is required');
+              return;
+            }
+            if (!refInput) {
+              core.setFailed('Ref is required');
+              return;
+            }
+            const { owner, repo } = context.repo;
+
+            const resolveCommitSha = async () => {
+              const isSha = /^[0-9a-fA-F]{40}$/.test(refInput);
+              if (isSha) {
+                return refInput;
+              }
+
+              const normalizeRef = (input) => {
+                if (input.startsWith('refs/')) {
+                  return input.replace(/^refs\//, '');
+                }
+                if (input.startsWith('heads/') || input.startsWith('tags/') || input.startsWith('remotes/')) {
+                  return input;
+                }
+                return `heads/${input}`;
+              };
+
+              const ref = normalizeRef(refInput);
+              const refResponse = await github.rest.git.getRef({ owner, repo, ref });
+              const target = refResponse.data.object;
+              if (target.type === 'commit') {
+                return target.sha;
+              }
+              if (target.type === 'tag') {
+                const tagResponse = await github.rest.git.getTag({ owner, repo, tag_sha: target.sha });
+                if (tagResponse.data.object.type !== 'commit') {
+                  throw new Error(`Tag ${refInput} does not ultimately reference a commit`);
+                }
+                return tagResponse.data.object.sha;
+              }
+              throw new Error(`Unsupported ref target type: ${target.type}`);
+            };
+
+            const commitSha = await resolveCommitSha();
+            core.info(`Resolved ${refInput} to commit ${commitSha}`);
+
+            const tagRef = `tags/${tagName}`;
+            try {
+              await github.rest.git.deleteRef({ owner, repo, ref: tagRef });
+              core.info(`Deleted existing tag refs/${tagRef}`);
+            } catch (error) {
+              if (error.status !== 422 && error.status !== 404) {
+                throw error;
+              }
+              core.info('No existing tag to delete');
+            }
+
+            await github.rest.git.createRef({
+              owner,
+              repo,
+              ref: `refs/tags/${tagName}`,
+              sha: commitSha,
+            });
+            core.info(`Tag ${tagName} now points to ${commitSha}`);
