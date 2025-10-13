@@ -8,16 +8,16 @@ namespace TiYf.Engine.Tools.Tests;
 
 public class VerifyParityTests
 {
-        private static string ToolsDll()
-        {
-                var rel = Path.Combine(Directory.GetCurrentDirectory(), "src", "TiYf.Engine.Tools", "bin", "Release", "net8.0", "TiYf.Engine.Tools.dll");
-                if (File.Exists(rel)) return rel;
-                var dbg = Path.Combine(Directory.GetCurrentDirectory(), "src", "TiYf.Engine.Tools", "bin", "Debug", "net8.0", "TiYf.Engine.Tools.dll");
-                if (File.Exists(dbg)) return dbg;
-                throw new FileNotFoundException("Tools CLI not built");
-        }
+    private static string ToolsDll()
+    {
+        var rel = Path.Combine(Directory.GetCurrentDirectory(), "src", "TiYf.Engine.Tools", "bin", "Release", "net8.0", "TiYf.Engine.Tools.dll");
+        if (File.Exists(rel)) return rel;
+        var dbg = Path.Combine(Directory.GetCurrentDirectory(), "src", "TiYf.Engine.Tools", "bin", "Debug", "net8.0", "TiYf.Engine.Tools.dll");
+        if (File.Exists(dbg)) return dbg;
+        throw new FileNotFoundException("Tools CLI not built");
+    }
 
-        private static (string ev, string tr) MakeJournal(string tag, string payload)
+    private static (string ev, string tr) MakeJournal(string tag, string payload)
     {
         var dir = Path.Combine(Path.GetTempPath(), $"parity_{Guid.NewGuid():N}_{tag}");
         Directory.CreateDirectory(dir);
