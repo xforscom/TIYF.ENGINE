@@ -34,7 +34,6 @@ public class VerifyDeepTests
             SentimentMode: null
         ));
         Assert.True(result.ExitCode == 0, result.JsonSummary);
-
         using var doc = JsonDocument.Parse(result.JsonSummary);
         Assert.True(doc.RootElement.GetProperty("ok").GetBoolean());
         Assert.False(doc.RootElement.GetProperty("stats").GetProperty("hasBlockingAlerts").GetBoolean());
@@ -60,7 +59,6 @@ public class VerifyDeepTests
             SentimentMode: null
         ));
         Assert.True(result.ExitCode == 2, result.JsonSummary);
-
         using var doc = JsonDocument.Parse(result.JsonSummary);
         Assert.False(doc.RootElement.GetProperty("ok").GetBoolean());
         Assert.True(doc.RootElement.GetProperty("stats").GetProperty("hasBlockingAlerts").GetBoolean());
