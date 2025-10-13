@@ -8,6 +8,10 @@ on:
         description: Why the protection update is requested
         required: false
         default: manual
+      admin_token:
+        description: Optional personal access token with admin permissions
+        required: false
+        default: ""
   push:
     branches:
       - main
@@ -23,11 +27,15 @@ jobs:
         with:
           github-token: ${{ secrets.ADMIN_TOKEN }}
           script: |
-            if (!github.token) {
-              core.setFailed('ADMIN_TOKEN secret is not configured');
+            const manualToken = github.context.payload?.inputs?.admin_token ?? '';
+            const activeToken = github.token || manualToken;
+
+            if (!activeToken) {
+              core.setFailed('No admin token available. Configure the ADMIN_TOKEN secret or provide an admin_token input when manually dispatching.');
               return;
             }
 
+            const adminGithub = github.token ? github : new github.constructor({ auth: manualToken });
             const { owner, repo } = context.repo;
 
             const payload = {
@@ -60,7 +68,7 @@ jobs:
               allow_fork_syncing: true,
             };
 
-            await github.request('PUT /repos/{owner}/{repo}/branches/{branch}/protection', {
+            await adminGithub.request('PUT /repos/{owner}/{repo}/branches/{branch}/protection', {
               owner,
               repo,
               branch: 'main',
