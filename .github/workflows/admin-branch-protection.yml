@@ -4,12 +4,9 @@ name: admin-branch-protection
 on:
   workflow_dispatch:
 
-permissions: {}
-
 jobs:
   protect:
     runs-on: ubuntu-latest
-    permissions: {}
     steps:
       - name: Configure branch protection on main
         env:
