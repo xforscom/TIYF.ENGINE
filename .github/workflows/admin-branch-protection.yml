@@ -27,15 +27,16 @@ jobs:
         with:
           github-token: ${{ secrets.ADMIN_TOKEN }}
           script: |
-            const manualToken = github.context.payload?.inputs?.admin_token ?? '';
-            const activeToken = github.token || manualToken;
+            const manualToken = (context.payload?.inputs?.admin_token ?? '').trim();
+            const secretToken = process.env.GITHUB_TOKEN ?? '';
+            const activeToken = secretToken || manualToken;
 
             if (!activeToken) {
               core.setFailed('No admin token available. Configure the ADMIN_TOKEN secret or provide an admin_token input when manually dispatching.');
               return;
             }
 
-            const adminGithub = github.token ? github : new github.constructor({ auth: manualToken });
+            const adminGithub = secretToken ? github : new github.constructor({ auth: manualToken });
             const { owner, repo } = context.repo;
 
             const payload = {
