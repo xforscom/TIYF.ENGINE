@@ -15,28 +15,22 @@ on:
       - .github/workflows/admin-branch-protection.yml
 
 jobs:
-  protect:
+  apply:
     runs-on: ubuntu-latest
     steps:
       - name: Configure branch protection on main
-  uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
-        env:
-          OWNER: ${{ github.repository_owner }}
-          REPO: ${{ github.event.repository.name }}
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
         with:
           github-token: ${{ secrets.ADMIN_TOKEN }}
           script: |
-            const owner = process.env.OWNER;
-            const repo = process.env.REPO;
             if (!github.token) {
               core.setFailed('ADMIN_TOKEN secret is not configured');
               return;
             }
 
-            await github.request('PUT /repos/{owner}/{repo}/branches/{branch}/protection', {
-              owner,
-              repo,
-              branch: 'main',
+            const { owner, repo } = context.repo;
+
+            const payload = {
               required_status_checks: {
                 strict: true,
                 checks: [
@@ -44,8 +38,8 @@ jobs:
                   { context: 'm0-determinism' },
                   { context: 'verify-strict' },
                   { context: 'dataqa-tolerance' },
-                  { context: 'nightly-canary' }
-                ]
+                  { context: 'nightly-canary' },
+                ],
               },
               enforce_admins: true,
               required_pull_request_reviews: {
@@ -54,7 +48,7 @@ jobs:
                 require_code_owner_reviews: false,
                 required_approving_review_count: 1,
                 require_last_push_approval: false,
-                bypass_pull_request_allowances: {}
+                bypass_pull_request_allowances: {},
               },
               restrictions: null,
               required_linear_history: false,
@@ -63,7 +57,14 @@ jobs:
               block_creations: false,
               required_conversation_resolution: false,
               lock_branch: false,
-              allow_fork_syncing: true
+              allow_fork_syncing: true,
+            };
+
+            await github.request('PUT /repos/{owner}/{repo}/branches/{branch}/protection', {
+              owner,
+              repo,
+              branch: 'main',
+              ...payload,
             });
 
             core.info('Branch protection updated successfully.');
