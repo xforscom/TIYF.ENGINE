@@ -54,7 +54,7 @@ public static class DeepVerifyEngine
         if (!File.Exists(options.EventsPath)) throw new VerifyFatalException($"Events file not found: {options.EventsPath}");
         if (!File.Exists(options.TradesPath)) throw new VerifyFatalException($"Trades file not found: {options.TradesPath}");
 
-    var journalVerify = VerifyEngine.Run(options.EventsPath, new VerifyOptions(options.MaxErrors, Json: true, ReportDuplicates: options.ReportDuplicates));
+        var journalVerify = VerifyEngine.Run(options.EventsPath, new VerifyOptions(options.MaxErrors, Json: true, ReportDuplicates: options.ReportDuplicates));
         var strictReport = StrictJournalVerifier.Verify(new StrictVerifyRequest(
             options.EventsPath,
             options.TradesPath,
@@ -243,7 +243,7 @@ public static class DeepVerifyEngine
             counts[evt] = total + 1;
         }
 
-    string hash = ComputeHashSkippingMeta(path, hashAlg, skipLines: 2);
+        string hash = ComputeHashSkippingMeta(path, hashAlg, skipLines: 2);
         return new EventAnalysis(schema, configHash, dataVersion, eventCount, counts, hash);
     }
 
@@ -262,7 +262,7 @@ public static class DeepVerifyEngine
                 totalPnl += pnl;
         }
 
-    string hash = ComputeHashSkippingMeta(path, hashAlg, skipLines: 1);
+        string hash = ComputeHashSkippingMeta(path, hashAlg, skipLines: 1);
         return new TradeAnalysis(tradeCount, decimal.Round(totalPnl, 6, MidpointRounding.AwayFromZero), hash);
     }
 

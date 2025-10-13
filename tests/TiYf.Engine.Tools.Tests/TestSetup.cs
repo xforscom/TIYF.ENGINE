@@ -10,7 +10,7 @@ internal static class TestSetup
     public static void Initialize()
     {
         var baseDir = AppContext.BaseDirectory;
-    var repoRoot = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", ".."));
+        var repoRoot = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", ".."));
         Directory.SetCurrentDirectory(repoRoot);
     }
 }
