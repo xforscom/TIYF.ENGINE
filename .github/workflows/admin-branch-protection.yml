@@ -3,6 +3,11 @@ name: admin-branch-protection
 
 on:
   workflow_dispatch:
+    inputs:
+      reason:
+        description: Why the protection update is requested
+        required: false
+        default: manual
 
 jobs:
   protect:
