@@ -8,6 +8,11 @@ on:
         description: Why the protection update is requested
         required: false
         default: manual
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/admin-branch-protection.yml
 
 jobs:
   protect:
