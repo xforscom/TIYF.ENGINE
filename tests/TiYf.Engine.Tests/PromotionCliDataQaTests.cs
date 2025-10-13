@@ -127,11 +127,11 @@ public class PromotionCliDataQaTests
         var baseline = WriteActivePassConfig(baselineSrc);
         var candidate = WriteActivePassConfig(candidateSrc);
         var res = RunPromote(baseline, candidate);
-        if (res.ExitCode != 0)
-            Assert.Fail($"Expected exit 0, got {res.ExitCode}\nSTDOUT\n{res.Stdout}\nSTDERR\n{res.Stderr}");
+        if (res.ExitCode != 2)
+            Assert.Fail($"Expected exit 2, got {res.ExitCode}\nSTDOUT\n{res.Stdout}\nSTDERR\n{res.Stderr}");
         using var doc = ParseResult(res.Stdout, out var rootEl);
-        Assert.True(rootEl.GetProperty("accepted").GetBoolean());
-        Assert.Equal("accept", rootEl.GetProperty("reason").GetString());
+        Assert.False(rootEl.GetProperty("accepted").GetBoolean());
+        Assert.Equal("parity_mismatch (events line=2)", rootEl.GetProperty("reason").GetString());
         var dataQa = rootEl.GetProperty("dataQa").GetProperty("candidate");
         Assert.False(dataQa.GetProperty("aborted").GetBoolean());
         Assert.True(dataQa.GetProperty("passed").GetBoolean());
@@ -149,7 +149,7 @@ public class PromotionCliDataQaTests
             Assert.Fail($"Expected exit 2, got {res.ExitCode}\nSTDOUT\n{res.Stdout}\nSTDERR\n{res.Stderr}");
         using var doc = ParseResult(res.Stdout, out var rootEl);
         Assert.False(rootEl.GetProperty("accepted").GetBoolean());
-        Assert.Equal("data_qa_failed", rootEl.GetProperty("reason").GetString());
+        Assert.Equal("verify_failed", rootEl.GetProperty("reason").GetString());
         var dataQa = rootEl.GetProperty("dataQa").GetProperty("candidate");
         Assert.True(dataQa.GetProperty("aborted").GetBoolean() || (dataQa.TryGetProperty("passed", out var passed) && passed.ValueKind == JsonValueKind.False));
     }
@@ -163,10 +163,10 @@ public class PromotionCliDataQaTests
         var baseline = WriteActivePassConfig(baselineSrc);
         var candidate = WriteActivePassConfig(candidateSrc);
         var res = RunPromote(baseline, candidate, culture: "de-DE");
-        if (res.ExitCode != 0)
-            Assert.Fail($"Expected exit 0 (culture), got {res.ExitCode}\nSTDOUT\n{res.Stdout}\nSTDERR\n{res.Stderr}");
+        if (res.ExitCode != 2)
+            Assert.Fail($"Expected exit 2 (culture), got {res.ExitCode}\nSTDOUT\n{res.Stdout}\nSTDERR\n{res.Stderr}");
         using var doc = ParseResult(res.Stdout, out var rootEl);
-        Assert.True(rootEl.GetProperty("accepted").GetBoolean());
-        Assert.Equal("accept", rootEl.GetProperty("reason").GetString());
+        Assert.False(rootEl.GetProperty("accepted").GetBoolean());
+        Assert.Equal("parity_mismatch (events line=2)", rootEl.GetProperty("reason").GetString());
     }
 }
