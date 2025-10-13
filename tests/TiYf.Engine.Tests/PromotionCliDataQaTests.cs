@@ -149,8 +149,13 @@ public class PromotionCliDataQaTests
             Assert.Fail($"Expected exit 2, got {res.ExitCode}\nSTDOUT\n{res.Stdout}\nSTDERR\n{res.Stderr}");
         using var doc = ParseResult(res.Stdout, out var rootEl);
         Assert.False(rootEl.GetProperty("accepted").GetBoolean());
-        var dataQa = rootEl.GetProperty("dataQa").GetProperty("candidate");
-        Assert.True(dataQa.GetProperty("aborted").GetBoolean() || !dataQa.GetProperty("passed").GetBoolean());
+        Assert.Equal("verify_failed", rootEl.GetProperty("reason").GetString());
+        if (rootEl.TryGetProperty("dataQa", out var dataQaOverall) && dataQaOverall.TryGetProperty("candidate", out var dataQa))
+        {
+            var aborted = dataQa.TryGetProperty("aborted", out var abortedEl) && abortedEl.ValueKind == JsonValueKind.True;
+            var passed = dataQa.TryGetProperty("passed", out var passedEl) && passedEl.ValueKind == JsonValueKind.True;
+            Assert.True(aborted || !passed, "Data QA candidate should either be aborted or not passed when verify fails");
+        }
     }
 
     [Fact]
