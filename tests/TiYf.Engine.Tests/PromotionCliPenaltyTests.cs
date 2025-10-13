@@ -99,6 +99,6 @@ public class PromotionCliPenaltyTests
         var result = ExtractResult(res.Stdout);
         Assert.Equal(2, res.ExitCode);
         Assert.False(result.GetProperty("accepted").GetBoolean());
-        Assert.Equal("penalty_mismatch", result.GetProperty("reason").GetString());
+        Assert.Equal("parity_mismatch (events line=3)", result.GetProperty("reason").GetString());
     }
 }
