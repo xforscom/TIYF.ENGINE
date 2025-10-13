@@ -11,10 +11,10 @@ public class PenaltyParityAndDeterminismTests
     private static string SimDll()
     {
         var root = Directory.GetCurrentDirectory();
-        var dll = Path.Combine(root, "src","TiYf.Engine.Sim","bin","Release","net8.0","TiYf.Engine.Sim.dll");
+        var dll = Path.Combine(root, "src", "TiYf.Engine.Sim", "bin", "Release", "net8.0", "TiYf.Engine.Sim.dll");
         if (!File.Exists(dll))
         {
-            var dbg = Path.Combine(root, "src","TiYf.Engine.Sim","bin","Debug","net8.0","TiYf.Engine.Sim.dll");
+            var dbg = Path.Combine(root, "src", "TiYf.Engine.Sim", "bin", "Debug", "net8.0", "TiYf.Engine.Sim.dll");
             if (File.Exists(dbg)) return dbg;
         }
         return dll;
@@ -23,16 +23,16 @@ public class PenaltyParityAndDeterminismTests
     private static string ToolsDll()
     {
         var root = Directory.GetCurrentDirectory();
-        var rel = Path.Combine(root, "src","TiYf.Engine.Tools","bin","Release","net8.0","TiYf.Engine.Tools.dll");
+        var rel = Path.Combine(root, "src", "TiYf.Engine.Tools", "bin", "Release", "net8.0", "TiYf.Engine.Tools.dll");
         if (File.Exists(rel)) return rel;
-        var dbg = Path.Combine(root, "src","TiYf.Engine.Tools","bin","Debug","net8.0","TiYf.Engine.Tools.dll");
+        var dbg = Path.Combine(root, "src", "TiYf.Engine.Tools", "bin", "Debug", "net8.0", "TiYf.Engine.Tools.dll");
         return dbg;
     }
 
     private static string WriteCfg(string penaltyMode, bool forcePenalty, string sentimentMode)
     {
         var root = Directory.GetCurrentDirectory();
-        var src = Path.Combine(root, "tests","fixtures","backtest_m0","config.backtest-m0.json");
+        var src = Path.Combine(root, "tests", "fixtures", "backtest_m0", "config.backtest-m0.json");
         var node = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(src))!.AsObject();
         if (!node.TryGetPropertyValue("featureFlags", out var ff) || ff is not System.Text.Json.Nodes.JsonObject)
             node["featureFlags"] = new System.Text.Json.Nodes.JsonObject();
@@ -59,7 +59,7 @@ public class PenaltyParityAndDeterminismTests
         };
         var p = System.Diagnostics.Process.Start(psi)!; p.WaitForExit(60000);
         Assert.Equal(0, p.ExitCode);
-        var dir = Path.Combine(Directory.GetCurrentDirectory(), "journals","M0", $"M0-RUN-{runId}");
+        var dir = Path.Combine(Directory.GetCurrentDirectory(), "journals", "M0", $"M0-RUN-{runId}");
         return (Path.Combine(dir, "events.csv"), Path.Combine(dir, "trades.csv"));
     }
 
