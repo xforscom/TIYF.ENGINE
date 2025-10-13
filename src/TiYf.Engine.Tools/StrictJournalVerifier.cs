@@ -91,9 +91,9 @@ public static class StrictJournalVerifier
                 else if (ev.Type == "PENALTY_APPLIED_V1")
                 {
                     var prev = parsed.FirstOrDefault(p => p.Seq == ev.Seq - 1);
-                    // Allow penalty after BAR or any sentiment event (Z/CLAMP/APPLIED)
-                    if (prev == null || (prev.Type != "BAR_V1" && !prev.Type.StartsWith("INFO_SENTIMENT_", StringComparison.Ordinal)))
-                        V("order_violation", ev.Seq, GetSym(ev.Payload), ev.Ts.ToString("O"), "PENALTY must follow BAR or sentiment event");
+                    // Allow penalty after BAR, any sentiment event (Z/CLAMP/APPLIED), or a risk evaluation
+                    if (prev == null || (prev.Type != "BAR_V1" && !prev.Type.StartsWith("INFO_SENTIMENT_", StringComparison.Ordinal) && prev.Type != "INFO_RISK_EVAL_V1"))
+                        V("order_violation", ev.Seq, GetSym(ev.Payload), ev.Ts.ToString("O"), "PENALTY must follow BAR, sentiment, or risk eval");
                 }
                 else if (ev.Type == "INFO_RISK_EVAL_V1")
                 {
@@ -122,7 +122,7 @@ public static class StrictJournalVerifier
             if (req.sentimentMode == "shadow") V("mode_violation", ap.Seq, hasSymbol ? symEl.GetString() : null, ap.Ts.ToString("O"), "APPLIED not allowed in shadow mode");
         }
 
-        // Field requirements for PENALTY_APPLIED_V1 (scaffold)
+        // Field requirements for PENALTY_APPLIED_V1 (active)
         foreach (var pen in parsed.Where(p => p.Type == "PENALTY_APPLIED_V1"))
         {
             bool hasSymbol = pen.Payload.TryGetProperty("symbol", out var sEl) && sEl.ValueKind == JsonValueKind.String;
@@ -131,6 +131,13 @@ public static class StrictJournalVerifier
             bool hasAdj = pen.Payload.TryGetProperty("adjusted_units", out var aEl) && aEl.ValueKind == JsonValueKind.Number;
             bool hasScalar = pen.Payload.TryGetProperty("penalty_scalar", out var scEl) && scEl.ValueKind == JsonValueKind.Number;
             if (!(hasSymbol && hasReason && hasOrig && hasAdj && hasScalar)) V("missing_field", pen.Seq, hasSymbol ? sEl.GetString() : null, pen.Ts.ToString("O"), "PENALTY missing required fields");
+            // Numeric formatting invariant: no scientific notation, no commas
+            foreach (var num in new[] { oEl, aEl, scEl })
+            {
+                var raw = num.GetRawText();
+                if (raw.Contains('E') || raw.Contains('e')) V("numeric_format", pen.Seq, hasSymbol ? sEl.GetString() : null, pen.Ts.ToString("O"), "scientific notation in penalty field");
+                if (raw.Contains(',')) V("numeric_format", pen.Seq, hasSymbol ? sEl.GetString() : null, pen.Ts.ToString("O"), "comma decimal disallowed in penalty field");
+            }
         }
 
         // Field requirements for INFO_RISK_EVAL_V1
