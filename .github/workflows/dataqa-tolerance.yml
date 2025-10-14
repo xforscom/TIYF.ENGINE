@@ -1,358 +1,257 @@
 name: dataqa-tolerance
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [ main, feat/**, fix/** ]
   pull_request:
     branches: [ main, feat/**, fix/** ]
-  push:
-    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Build (Release)
-        run: dotnet build TiYf.Engine.sln -c Release --nologo
-      - name: Upload Release binaries
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-binaries
-          path: |
-            src/TiYf.Engine.Sim/bin/Release/net8.0
-            src/TiYf.Engine.Tools/bin/Release/net8.0
-
-  matrix:
-    needs: build
+  dataqa:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+        os: [ ubuntu-latest, windows-latest ]
 
-      - name: Setup .NET 8
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
 
-      - name: Setup Node.js 20
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Download Release binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: release-binaries
-          path: release-binaries
-
-      - name: Sync Release binaries
-        shell: bash
+      - name: Build (Release)
         run: |
           set -euo pipefail
-          mkdir -p src/TiYf.Engine.Sim/bin/Release/net8.0
-          mkdir -p src/TiYf.Engine.Tools/bin/Release/net8.0
-          SOURCE_ROOT="release-binaries/src"
-          if [ ! -d "$SOURCE_ROOT" ]; then
-            SOURCE_ROOT="release-binaries"
-          fi
-          if [ ! -d "$SOURCE_ROOT" ]; then
-            echo "Unable to locate Release binaries in artifact payload" >&2
-            ls -R release-binaries || true
-            exit 1
-          fi
-          if [ ! -d "$SOURCE_ROOT/TiYf.Engine.Sim/bin/Release/net8.0" ]; then
-            echo "Sim binaries missing under $SOURCE_ROOT" >&2
-            ls -R "$SOURCE_ROOT" || true
-            exit 1
-          fi
-          if [ ! -d "$SOURCE_ROOT/TiYf.Engine.Tools/bin/Release/net8.0" ]; then
-            echo "Tools binaries missing under $SOURCE_ROOT" >&2
-            ls -R "$SOURCE_ROOT" || true
-            exit 1
-          fi
-          cp -r "$SOURCE_ROOT/TiYf.Engine.Sim/bin/Release/net8.0/." src/TiYf.Engine.Sim/bin/Release/net8.0/
-          cp -r "$SOURCE_ROOT/TiYf.Engine.Tools/bin/Release/net8.0/." src/TiYf.Engine.Tools/bin/Release/net8.0/
+          mkdir -p scratch
+          set +e
+          dotnet build TiYf.Engine.sln -c Release --nologo | tee scratch/build.out
+          BUILD_EXIT=$?
+          set -e
+          echo "$BUILD_EXIT" > scratch/build_exit.txt
 
-      - name: Prepare paths
-        id: prep
-        shell: bash
+      - name: Prepare scratch roots
         run: |
           set -euo pipefail
-          ROOT="$(pwd)"
-          SIM="$ROOT/src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"
-          TOOLS="$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
-          if [ ! -f "$SIM" ]; then echo "Sim DLL missing at $SIM" >&2; exit 1; fi
-          if [ ! -f "$TOOLS" ]; then echo "Tools DLL missing at $TOOLS" >&2; exit 1; fi
-          echo "root=$ROOT" >> $GITHUB_OUTPUT
-          echo "sim=$SIM" >> $GITHUB_OUTPUT
-          echo "tools=$TOOLS" >> $GITHUB_OUTPUT
-          echo "cfg=$ROOT/tests/fixtures/backtest_m0/config.backtest-m0.json" >> $GITHUB_OUTPUT
+          mkdir -p scratch/K1-PASS scratch/K1-OVERFLOW journals/K1-PASS journals/K1-OVERFLOW
 
-      - name: Run K=1 (pass)
-        shell: bash
+      - name: K1 PASS – configure & run
         run: |
           set -euo pipefail
-          root='${{ steps.prep.outputs.root }}'
-          sim='${{ steps.prep.outputs.sim }}'
-          tools='${{ steps.prep.outputs.tools }}'
-          cfg='${{ steps.prep.outputs.cfg }}'
-          tmp="$root/.tmp_k1_pass"
-          rm -rf "$tmp" && mkdir -p "$tmp"
-          export CONFIG_IN="$cfg"
-          export CONFIG_OUT="$tmp/config.k1pass.json"
-          export TMP_DIR="$tmp"
-          export K_MODE="pass"
-          export INSTR_FILE="$root/tests/fixtures/backtest_m0/instruments.csv"
-          # Node-based preparation: copy ticks, remove 1 data row from each, rewrite config with absolute paths and temp journalDir, force dataQa active
-          node - <<'NODE'
-          const fs = require('fs');
-          const path = require('path');
-          const configIn = process.env.CONFIG_IN;
-          const configOut = process.env.CONFIG_OUT;
-          const tmpDir = process.env.TMP_DIR;
-          const kMode = process.env.K_MODE || 'pass';
-          const instrumentsFile = process.env.INSTR_FILE;
-          if (!configIn || !configOut || !tmpDir || !instrumentsFile) throw new Error('Missing env CONFIG_IN/CONFIG_OUT/TMP_DIR/INSTR_FILE');
-          fs.mkdirSync(tmpDir, { recursive: true });
-          const cfg = JSON.parse(fs.readFileSync(configIn, 'utf8'));
-          // Ensure dataQa active and K=1
-          cfg.featureFlags = { ...(cfg.featureFlags||{}), dataQa: 'active' };
-          cfg.dataQA = { enabled: true, maxMissingBarsPerInstrument: 1, allowDuplicates: false, spikeZ: 5, repair: { forwardFillBars: 0, dropSpikes: true } };
-          // Rewrite instrumentsFile absolute
-          cfg.data = cfg.data || {};
-          cfg.data.instrumentsFile = path.resolve(instrumentsFile);
-          // Process ticks
-          if (!cfg.data.ticks || typeof cfg.data.ticks !== 'object') throw new Error('config.data.ticks missing or not an object');
-          const rewritten = {};
-          // For overflow: create a genuine per-symbol hole: remove 2 from EURUSD only; others remove 0
-          const removeNFor = (sym) => (kMode === 'overflow' ? (sym === 'EURUSD' ? 2 : 0) : 1);
-          for (const [sym, srcRaw] of Object.entries(cfg.data.ticks)) {
-            if (typeof srcRaw !== 'string') continue;
-            const src = path.resolve(srcRaw);
-            if (!fs.existsSync(src)) throw new Error(`Tick file not found: ${src}`);
-            const dst = path.join(tmpDir, `ticks_${sym}.csv`);
-            const lines = fs.readFileSync(src, 'utf8').split(/\r?\n/);
-            const header = lines[0] ?? '';
-            const data = lines.slice(1).filter(l => l.trim().length > 0);
-            const toRemove = Math.min(removeNFor(sym), data.length);
-            const dataAfter = data.slice(toRemove);
-            const out = [header, ...dataAfter].join('\n') + '\n';
-            fs.writeFileSync(dst, out, 'utf8');
-            // Verify file exists and has >=2 lines (header + at least 1 data row)
-            const verify = fs.readFileSync(dst, 'utf8').trim().split(/\r?\n/);
-            if (verify.length < 2) {
-              console.error(`After K edit, ${dst} has no data rows (lines=${verify.length}).`);
-              process.exit(1);
-            }
-            rewritten[sym] = path.resolve(dst);
-          }
-          cfg.data.ticks = rewritten;
-          // Set temp journalDir
-          cfg.output = cfg.output || {};
-          cfg.output.journalDir = path.resolve(path.join(tmpDir, 'journals'));
-          // Ensure name is backtest-m0 for engine heuristics
-          cfg.name = cfg.name || 'backtest-m0';
-          fs.writeFileSync(configOut, JSON.stringify(cfg, null, 2), 'utf8');
-          // Export CONFIG_OUT for subsequent steps
-          fs.appendFileSync(process.env.GITHUB_ENV, `\nCONFIG_OUT=${configOut}\n`);
-          fs.appendFileSync(process.env.GITHUB_ENV, `TMP_DIR=${tmpDir}\n`);
-          NODE
-          # Debug: list temp dir and first 3 lines of each rewritten CSV
-          echo "Temp dir listing:" && ls -la "$TMP_DIR"
-          for f in "$TMP_DIR"/ticks_*.csv; do echo "== $f =="; head -n 3 "$f"; done
-          # Run sim with prepared config
-          dotnet exec "$sim" --config "$CONFIG_OUT" --run-id K1-PASS --verbosity quiet
-          # Resolve journal paths using config into local variables
-          mapfile -t _paths < <(node -e '
-            const fs=require("fs"); const path=require("path");
-            const cfgPath=process.env.CONFIG_OUT; const runId="M0-RUN-K1-PASS";
-            const j=JSON.parse(fs.readFileSync(cfgPath,"utf8"));
-            const jdir=(j.output && j.output.journalDir) ? j.output.journalDir : path.resolve("journals","M0");
-            const events=path.join(jdir, runId, "events.csv");
-            const trades=path.join(jdir, runId, "trades.csv");
-            console.log(events); console.log(trades);
-          ')
-          J_EVENTS="${_paths[0]}"; J_TRADES="${_paths[1]}"
-          test -f "$J_EVENTS" || (echo "events missing: $J_EVENTS" && exit 1)
-          # Assert summary passed=true and no abort (pure Node)
-          EVENTS="$J_EVENTS" node - <<'JS'
-          const fs=require("fs");
-          const line=(fs.readFileSync(process.env.EVENTS,"utf8").split(/\r?\n/).find(l=>l.includes(",DATA_QA_SUMMARY_V1,"))||"");
-          if(!line){ console.error("DATA_QA_SUMMARY_V1 not found"); process.exit(1); }
-          const QUOTE=String.fromCharCode(34);
-          function splitCsv(s){ const out=[]; let buf="", q=false; for(let i=0;i<s.length;i++){ const c=s[i]; if(q){ if(c===QUOTE){ if(i+1<s.length && s[i+1]===QUOTE){ buf+=QUOTE; i++; } else { q=false; } } else { buf+=c; } } else { if(c===','){ out.push(buf); buf=""; } else if(c===QUOTE){ q=true; } else { buf+=c; } } } out.push(buf); return out; }
-          const cols=splitCsv(line);
-          const payload=cols[3];
-          try {
-            const j=JSON.parse(payload);
-            if(!(j.passed===true && j.aborted===false)){ console.error("Unexpected DATA_QA_SUMMARY_V1", j); process.exit(1); }
-          } catch(e) {
-            console.error("Failed to parse payload as JSON:", payload); process.exit(1);
-          }
-          JS
-          EVENTS="$J_EVENTS" node - <<'JS'
-          const fs=require('fs');
-          const text=fs.readFileSync(process.env.EVENTS,'utf8');
-          if (text.includes(',DATA_QA_ABORT_V1,')) { console.error('Unexpected abort event found'); process.exit(1); }
-          JS
-          # Strict verify (deep)
-          dotnet exec "$tools" verify strict --events "$J_EVENTS" --trades "$J_TRADES" --schema 1.3.0 --json
+          ROOT="$GITHUB_WORKSPACE"
+          RUN_ROOT="$ROOT/scratch/K1-PASS"
+          SIM="src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"
+          BASE_CFG="tests/fixtures/backtest_m0/config.backtest-m0.json"
+          CFG_OUT="$RUN_ROOT/config.k1.pass.json"
+          mkdir -p "$RUN_ROOT"
 
-      - name: Run K=1 with overflow (fail)
-        shell: bash
-        run: |
-          set -euo pipefail
-          root='${{ steps.prep.outputs.root }}'
-          sim='${{ steps.prep.outputs.sim }}'
-          tools='${{ steps.prep.outputs.tools }}'
-          cfg='${{ steps.prep.outputs.cfg }}'
-          tmp="$root/.tmp_k1_over"
-          rm -rf "$tmp" && mkdir -p "$tmp"
-          export CONFIG_IN="$cfg"
-          export CONFIG_OUT="$tmp/config.k1over.json"
-          export TMP_DIR="$tmp"
-          export K_MODE="overflow"
-          export INSTR_FILE="$root/tests/fixtures/backtest_m0/instruments.csv"
-          node - <<'NODE'
-          const fs = require('fs');
-          const path = require('path');
-          const configIn = process.env.CONFIG_IN;
-          const configOut = process.env.CONFIG_OUT;
-          const tmpDir = process.env.TMP_DIR;
-          const kMode = process.env.K_MODE || 'overflow';
-          const instrumentsFile = process.env.INSTR_FILE;
-          if (!configIn || !configOut || !tmpDir || !instrumentsFile) throw new Error('Missing env CONFIG_IN/CONFIG_OUT/TMP_DIR/INSTR_FILE');
-          fs.mkdirSync(tmpDir, { recursive: true });
-          const cfg = JSON.parse(fs.readFileSync(configIn, 'utf8'));
-          cfg.featureFlags = { ...(cfg.featureFlags||{}), dataQa: 'active' };
-          cfg.dataQA = { enabled: true, maxMissingBarsPerInstrument: 1, allowDuplicates: false, spikeZ: 5, repair: { forwardFillBars: 0, dropSpikes: true } };
-          cfg.data = cfg.data || {};
-          cfg.data.instrumentsFile = path.resolve(instrumentsFile);
-          if (!cfg.data.ticks || typeof cfg.data.ticks !== 'object') throw new Error('config.data.ticks missing or not an object');
-          const rewritten = {};
-          // Choose one target symbol to introduce an interior gap exceeding K=1
-          const tickSymbols = Object.keys(cfg.data.ticks || {});
-          if (tickSymbols.length === 0) throw new Error('No tick symbols found in config.data.ticks');
-          const targetSym = tickSymbols.find(s => /EURUSD/i.test(s)) || tickSymbols[0];
-          for (const [sym, srcRaw] of Object.entries(cfg.data.ticks)) {
-            if (typeof srcRaw !== 'string') continue;
-            const src = path.resolve(srcRaw);
-            if (!fs.existsSync(src)) throw new Error(`Tick file not found: ${src}`);
-            const dst = path.join(tmpDir, `ticks_${sym}.csv`);
-            const lines = fs.readFileSync(src, 'utf8').split(/\r?\n/);
-            const header = lines[0] ?? '';
-            const data = lines.slice(1).filter(l => l.trim().length > 0);
-            let dataAfter = data;
-            if (kMode === 'overflow' && sym === targetSym) {
-              // Remove two interior rows to create a mid-sequence gap; avoid edges so union still spans these times
-              if (data.length > 5) {
-                const mid = Math.floor(data.length / 2);
-                const removeIdx = new Set([mid - 1, mid]);
-                console.log(`[overflow] Target ${sym}: removing interior indices ${mid-1} and ${mid} of ${data.length}`);
-                dataAfter = data.filter((_, i) => !removeIdx.has(i));
-              } else if (data.length > 3) {
-                console.log(`[overflow] Target ${sym}: short series, removing indices 1 and 2 of ${data.length}`);
-                const removeIdx = new Set([1, 2]);
-                dataAfter = data.filter((_, i) => !removeIdx.has(i));
-              } else if (data.length > 2) {
-                console.log(`[overflow] Target ${sym}: very short series, removing index 1 of ${data.length}`);
-                const removeIdx = new Set([1]);
-                dataAfter = data.filter((_, i) => !removeIdx.has(i));
-              } else {
-                // Too short to meaningfully remove interior rows; leave as-is to avoid empty file
-                console.warn(`[overflow] Target ${sym}: insufficient rows (${data.length}) to create interior gap; leaving data unchanged`);
-              }
-            } else if (kMode !== 'overflow') {
-              // For completeness if ever reused: remove one from start in non-overflow (not used here)
-              dataAfter = data.slice(1);
-            }
-            const out = [header, ...dataAfter].join('\n') + '\n';
-            fs.writeFileSync(dst, out, 'utf8');
-            const verify = fs.readFileSync(dst, 'utf8').trim().split(/\r?\n/);
-            if (verify.length < 2) {
-              console.error(`After K edit, ${dst} has no data rows (lines=${verify.length}).`);
-              process.exit(1);
-            }
-            rewritten[sym] = path.resolve(dst);
-          }
-          cfg.data.ticks = rewritten;
-          cfg.output = cfg.output || {};
-          cfg.output.journalDir = path.resolve(path.join(tmpDir, 'journals'));
-          cfg.name = cfg.name || 'backtest-m0';
-          fs.writeFileSync(configOut, JSON.stringify(cfg, null, 2), 'utf8');
-          fs.appendFileSync(process.env.GITHUB_ENV, `\nCONFIG_OUT=${configOut}\n`);
-          fs.appendFileSync(process.env.GITHUB_ENV, `TMP_DIR=${tmpDir}\n`);
-          NODE
-          # Debug: list temp dir and first 3 lines of each rewritten CSV
-          echo "Temp dir listing:" && ls -la "$TMP_DIR"
-          for f in "$TMP_DIR"/ticks_*.csv; do echo "== $f =="; head -n 3 "$f"; done
-          # Run sim with prepared config
-          dotnet exec "$sim" --config "$CONFIG_OUT" --run-id K1-FAIL --verbosity quiet
-          # Resolve journal paths using config into local variables
-          mapfile -t _paths < <(node -e '
-            const fs=require("fs"); const path=require("path");
-            const cfgPath=process.env.CONFIG_OUT; const runId="M0-RUN-K1-FAIL";
-            const j=JSON.parse(fs.readFileSync(cfgPath,"utf8"));
-            const jdir=(j.output && j.output.journalDir) ? j.output.journalDir : path.resolve("journals","M0");
-            const events=path.join(jdir, runId, "events.csv");
-            const trades=path.join(jdir, runId, "trades.csv");
-            console.log(events); console.log(trades);
-          ')
-          J_EVENTS="${_paths[0]}"; J_TRADES="${_paths[1]}"
-          test -f "$J_EVENTS" || (echo "events missing: $J_EVENTS" && exit 1)
-          # Assert summary passed=false (pure Node)
-          EVENTS="$J_EVENTS" node - <<'JS'
-          const fs=require("fs");
-          const line=(fs.readFileSync(process.env.EVENTS,"utf8").split(/\r?\n/).find(l=>l.includes(",DATA_QA_SUMMARY_V1,"))||"");
-          if(!line){ console.error("DATA_QA_SUMMARY_V1 not found"); process.exit(1); }
-          const QUOTE=String.fromCharCode(34);
-          function splitCsv(s){ const out=[]; let buf="", q=false; for(let i=0;i<s.length;i++){ const c=s[i]; if(q){ if(c===QUOTE){ if(i+1<s.length && s[i+1]===QUOTE){ buf+=QUOTE; i++; } else { q=false; } } else { buf+=c; } } else { if(c===','){ out.push(buf); buf=""; } else if(c===QUOTE){ q=true; } else { buf+=c; } } } out.push(buf); return out; }
-          const cols=splitCsv(line);
-          const payload=cols[3];
-          try {
-            const j=JSON.parse(payload);
-            if(j.passed!==false){ console.error("Expected passed=false in DATA_QA_SUMMARY_V1", j); process.exit(1); }
-          } catch(e) {
-            console.error("Failed to parse payload as JSON:", payload); process.exit(1);
-          }
-          JS
-          # Strict verify
-          # If Data QA aborted, trades.csv may not exist. In that case, verify events only.
-          tools_out=0
-          if [ -f "$J_TRADES" ]; then
-            dotnet exec "$tools" verify strict --events "$J_EVENTS" --trades "$J_TRADES" --schema 1.3.0 --json || tools_out=$?
+          set +e
+          BASE_CFG="$BASE_CFG" CFG_OUT="$CFG_OUT" RUN_ROOT="$RUN_ROOT" K_MODE=pass DQ_EXTRA_MISSING=0 node .github/scripts/dataqa-rewrite.js
+          CFG_EXIT=$?
+          set -e
+          echo "$CFG_EXIT" > "$RUN_ROOT/config_exit.txt"
+
+          set +e
+          dotnet exec "$SIM" --config "$CFG_OUT" --run-id K1-PASS | tee "$RUN_ROOT/sim.out"
+          SIM_EXIT=$?
+          set -e
+          echo "$SIM_EXIT" > "$RUN_ROOT/sim_exit.txt"
+
+          EV_PATH=$(sed -n 's/^JOURNAL_DIR_EVENTS=//p' "$RUN_ROOT/sim.out" | head -1)
+          TR_PATH=$(sed -n 's/^JOURNAL_DIR_TRADES=//p' "$RUN_ROOT/sim.out" | head -1)
+          echo "$EV_PATH" > "$RUN_ROOT/events_path.txt"
+          echo "$TR_PATH" > "$RUN_ROOT/trades_path.txt"
+          if [[ -n "$EV_PATH" ]]; then
+            dirname "$EV_PATH" > "$RUN_ROOT/run_dir.txt"
           else
-            echo "trades.csv missing (expected after QA abort); verifying events only"
-            dotnet exec "$tools" verify strict --events "$J_EVENTS" --schema 1.3.0 --json || tools_out=$?
+            echo "" > "$RUN_ROOT/run_dir.txt"
           fi
-          if [ "$tools_out" -ne 0 ] && [ "$tools_out" -ne 2 ]; then exit 1; fi
+          GAPS=0
+          if [[ -n "$EV_PATH" && -f "$EV_PATH" ]]; then
+            GAPS=$(grep -c 'MARKET_DATA_GAP' "$EV_PATH" || true)
+          fi
+          ABORT_LINE=$(grep -m1 '^ABORTED=' "$RUN_ROOT/sim.out" || true)
+          ABORT_BOOL=false
+          if [[ -n "$ABORT_LINE" ]]; then
+            VAL=$(echo "${ABORT_LINE#*=}" | tr '[:upper:]' '[:lower:]')
+            if [[ "$VAL" == "1" || "$VAL" == "true" ]]; then
+              ABORT_BOOL=true
+            fi
+          fi
+          PASSED_BOOL=false
+          if [[ "$SIM_EXIT" == "0" ]]; then
+            PASSED_BOOL=true
+          fi
+          echo "$PASSED_BOOL" > "$RUN_ROOT/passed.txt"
+          echo "$ABORT_BOOL" > "$RUN_ROOT/aborted.txt"
+          echo "$GAPS" > "$RUN_ROOT/gaps.txt"
+          PASSED_ENV=$(if [[ "$PASSED_BOOL" == "true" ]]; then echo "true"; else echo "false"; fi)
+          ABORT_ENV=$(if [[ "$ABORT_BOOL" == "true" ]]; then echo "true"; else echo "false"; fi)
+          GAPS_ENV="$GAPS"
+          printf '{\n  "mode": "%s",\n  "passed": %s,\n  "aborted": %s,\n  "gaps": %s\n}\n' "K1-PASS" "$PASSED_ENV" "$ABORT_ENV" "${GAPS_ENV:-0}" > "$RUN_ROOT/verdict.json"
 
-      - name: Summary
-        if: always()
-        env:
-          MATRIX_OS: ${{ matrix.os }}
-        shell: bash
+      - name: K1 OVERFLOW – configure & run
         run: |
           set -euo pipefail
-          echo "### DataQA Tolerance ($MATRIX_OS)" >> "$GITHUB_STEP_SUMMARY"
-          echo "pass tmp: .tmp_k1_pass" >> "$GITHUB_STEP_SUMMARY"
-          echo "overflow tmp: .tmp_k1_over" >> "$GITHUB_STEP_SUMMARY"
+          ROOT="$GITHUB_WORKSPACE"
+          RUN_ROOT="$ROOT/scratch/K1-OVERFLOW"
+          SIM="src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"
+          BASE_CFG="tests/fixtures/backtest_m0/config.backtest-m0.json"
+          CFG_OUT="$RUN_ROOT/config.k1.over.json"
+          mkdir -p "$RUN_ROOT"
+
+          set +e
+          BASE_CFG="$BASE_CFG" CFG_OUT="$CFG_OUT" RUN_ROOT="$RUN_ROOT" K_MODE=overflow DQ_EXTRA_MISSING=5 node .github/scripts/dataqa-rewrite.js
+          CFG_EXIT=$?
+          set -e
+          echo "$CFG_EXIT" > "$RUN_ROOT/config_exit.txt"
+
+          set +e
+          dotnet exec "$SIM" --config "$CFG_OUT" --run-id K1-OVERFLOW | tee "$RUN_ROOT/sim.out"
+          SIM_EXIT=$?
+          set -e
+          echo "$SIM_EXIT" > "$RUN_ROOT/sim_exit.txt"
+
+          EV_PATH=$(sed -n 's/^JOURNAL_DIR_EVENTS=//p' "$RUN_ROOT/sim.out" | head -1)
+          TR_PATH=$(sed -n 's/^JOURNAL_DIR_TRADES=//p' "$RUN_ROOT/sim.out" | head -1)
+          echo "$EV_PATH" > "$RUN_ROOT/events_path.txt"
+          echo "$TR_PATH" > "$RUN_ROOT/trades_path.txt"
+          if [[ -n "$EV_PATH" ]]; then
+            dirname "$EV_PATH" > "$RUN_ROOT/run_dir.txt"
+          else
+            echo "" > "$RUN_ROOT/run_dir.txt"
+          fi
+          GAPS=0
+          if [[ -n "$EV_PATH" && -f "$EV_PATH" ]]; then
+            GAPS=$(grep -c 'MARKET_DATA_GAP' "$EV_PATH" || true)
+          fi
+          ABORT_LINE=$(grep -m1 '^ABORTED=' "$RUN_ROOT/sim.out" || true)
+          ABORT_BOOL=false
+          if [[ -n "$ABORT_LINE" ]]; then
+            VAL=$(echo "${ABORT_LINE#*=}" | tr '[:upper:]' '[:lower:]')
+            if [[ "$VAL" == "1" || "$VAL" == "true" ]]; then
+              ABORT_BOOL=true
+            fi
+          fi
+          PASSED_BOOL=false
+          if [[ "$SIM_EXIT" == "0" ]]; then
+            PASSED_BOOL=true
+          fi
+          echo "$CFG_EXIT" > "$RUN_ROOT/config_exit.txt"
+          echo "$SIM_EXIT" > "$RUN_ROOT/sim_exit.txt"
+          echo "$PASSED_BOOL" > "$RUN_ROOT/passed.txt"
+          echo "$ABORT_BOOL" > "$RUN_ROOT/aborted.txt"
+          echo "$GAPS" > "$RUN_ROOT/gaps.txt"
+          PASSED_ENV=$(if [[ "$PASSED_BOOL" == "true" ]]; then echo "true"; else echo "false"; fi)
+          ABORT_ENV=$(if [[ "$ABORT_BOOL" == "true" ]]; then echo "true"; else echo "false"; fi)
+          GAPS_ENV="$GAPS"
+          printf '{\n  "mode": "%s",\n  "passed": %s,\n  "aborted": %s,\n  "gaps": %s\n}\n' "K1-OVERFLOW" "$PASSED_ENV" "$ABORT_ENV" "${GAPS_ENV:-0}" > "$RUN_ROOT/verdict.json"
+
+      - name: Compose summary CSV
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE"
+          SUMMARY="$ROOT/scratch/dataqa-summary.csv"
+          printf "mode,passed,aborted,gaps\n" > "$SUMMARY"
+          for MODE in K1-PASS K1-OVERFLOW; do
+            RUN_ROOT="$ROOT/scratch/$MODE"
+            PASSED=$(cat "$RUN_ROOT/passed.txt" 2>/dev/null || echo "")
+            ABORTED=$(cat "$RUN_ROOT/aborted.txt" 2>/dev/null || echo "")
+            GAPS=$(cat "$RUN_ROOT/gaps.txt" 2>/dev/null || echo "")
+            printf "%s,%s,%s,%s\n" "$MODE" "$PASSED" "$ABORTED" "$GAPS" >> "$SUMMARY"
+          done
+
+      - name: Collect diagnostics
+        if: always()
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE"
+          mkdir -p artifacts/dataqa
+          for MODE in K1-PASS K1-OVERFLOW; do
+            RUN_ROOT="$ROOT/scratch/$MODE"
+            DEST_DIR="journals/$MODE"
+            mkdir -p "$DEST_DIR"
+            RUN_DIR_RAW=$(cat "$RUN_ROOT/run_dir.txt" 2>/dev/null || echo "")
+            rm -rf -- "${DEST_DIR:?}/"* || true
+            DEST_ABS=$(cd "$DEST_DIR" && pwd)
+            RUN_DIR_POSIX="${RUN_DIR_RAW//\\//}"
+            if [[ -n "$RUN_DIR_POSIX" && -d "$RUN_DIR_POSIX" ]]; then
+              if RUN_ABS=$(cd "$RUN_DIR_POSIX" && pwd); then
+                if [[ "$DEST_ABS" != "$RUN_ABS" ]]; then
+                  cp -R "$RUN_DIR_POSIX/." "$DEST_DIR/"
+                fi
+              else
+                cp -R "$RUN_DIR_POSIX/." "$DEST_DIR/"
+              fi
+            fi
+            touch "$DEST_DIR/.keep"
+            for FILE in config_exit.txt sim_exit.txt events_path.txt trades_path.txt run_dir.txt verdict.json passed.txt aborted.txt gaps.txt sim.out; do
+              cp "$RUN_ROOT/$FILE" "artifacts/dataqa/${MODE}_$FILE" || true
+            done
+          done
+          cp scratch/build.out artifacts/dataqa/build.out || true
+          cp scratch/build_exit.txt artifacts/dataqa/build_exit.txt || true
+          cp scratch/dataqa-summary.csv artifacts/dataqa/dataqa-summary.csv || true
+
+      - name: Invariants (final gate)
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE"
+          BUILD_EXIT=$(cat scratch/build_exit.txt 2>/dev/null || echo 1)
+          if [[ "$BUILD_EXIT" != "0" ]]; then
+            echo "dotnet build exited with $BUILD_EXIT" >&2
+            exit 2
+          fi
+          for MODE in K1-PASS K1-OVERFLOW; do
+            RUN_ROOT="$ROOT/scratch/$MODE"
+            CFG_EXIT=$(cat "$RUN_ROOT/config_exit.txt" 2>/dev/null || echo 1)
+            if [[ "$CFG_EXIT" != "0" ]]; then
+              echo "$MODE config rewrite failed (exit $CFG_EXIT)" >&2
+              exit 2
+            fi
+          done
+          PASS_SIM_EXIT=$(cat scratch/K1-PASS/sim_exit.txt 2>/dev/null || echo 1)
+          OVER_SIM_EXIT=$(cat scratch/K1-OVERFLOW/sim_exit.txt 2>/dev/null || echo 1)
+          PASS_ABORTED=$(cat scratch/K1-PASS/aborted.txt 2>/dev/null || echo "")
+          OVER_ABORTED=$(cat scratch/K1-OVERFLOW/aborted.txt 2>/dev/null || echo "")
+          if [[ "$PASS_SIM_EXIT" != "0" ]]; then
+            echo "K1-PASS sim exited with $PASS_SIM_EXIT" >&2
+            exit 2
+          fi
+          if [[ "$PASS_ABORTED" != "false" ]]; then
+            echo "Expected K1-PASS run to avoid abort (found $PASS_ABORTED)" >&2
+            exit 2
+          fi
+          if [[ "$OVER_ABORTED" != "true" ]]; then
+            echo "Expected K1-OVERFLOW run to abort (found $OVER_ABORTED)" >&2
+            exit 2
+          fi
+          echo "dataqa invariants satisfied"
 
       - name: Upload artifacts (always)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dataqa-${{ matrix.os }}
+          name: dataqa-tolerance-${{ matrix.os }}
           path: |
-            .tmp_k1_pass
-            .tmp_k1_over
+            scratch/build.out
+            scratch/build_exit.txt
+            scratch/dataqa-summary.csv
+            scratch/K1-PASS/**
+            scratch/K1-OVERFLOW/**
+            journals/K1-PASS/**
+            journals/K1-OVERFLOW/**
+          if-no-files-found: warn
+          retention-days: 7

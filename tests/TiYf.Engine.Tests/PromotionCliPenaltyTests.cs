@@ -1,13 +1,18 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Xunit;
 
 [Collection("E2E-Serial")] // serialize promotion runs
-public class PromotionCliPenaltyTests
+public class PromotionCliPenaltyTests : IDisposable
 {
     private record CliResult(int ExitCode, string Stdout, string Stderr);
+    private readonly List<string> _tempFiles = new();
 
     private static string RepoRoot()
     {
@@ -53,7 +58,7 @@ public class PromotionCliPenaltyTests
         return doc.RootElement.Clone();
     }
 
-    private static string WritePenaltyConfig(string srcCfg, string penaltyMode, bool forcePenalty, string sentimentMode = "off")
+    private string WritePenaltyConfig(string srcCfg, string penaltyMode, bool forcePenalty, string sentimentMode = "off")
     {
         var json = File.ReadAllText(srcCfg);
         var node = System.Text.Json.Nodes.JsonNode.Parse(json)!.AsObject();
@@ -65,8 +70,13 @@ public class PromotionCliPenaltyTests
         ffObj["penalty"] = penaltyMode; // off|shadow|active
         ffObj["sentiment"] = sentimentMode; // off|shadow|active
         node["penaltyConfig"] = new System.Text.Json.Nodes.JsonObject { ["forcePenalty"] = forcePenalty };
+        if (forcePenalty)
+        {
+            node["ciPenaltyScaffold"] = true;
+        }
         var tmp = Path.Combine(Path.GetTempPath(), $"promo_pen_{penaltyMode}_{sentimentMode}_{Guid.NewGuid():N}.json");
-        File.WriteAllText(tmp, node.ToJsonString());
+        File.WriteAllText(tmp, node.ToJsonString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        _tempFiles.Add(tmp);
         return tmp;
     }
 
@@ -83,7 +93,9 @@ public class PromotionCliPenaltyTests
         Assert.True(result.GetProperty("accepted").GetBoolean());
         // penalty block present
         var penalty = result.GetProperty("penalty");
+        Assert.Equal("ok", penalty.GetProperty("parity").GetString());
         Assert.Equal("ok", penalty.GetProperty("reason").GetString());
+        Assert.Equal(string.Empty, penalty.GetProperty("diff_hint").GetString());
     }
 
     [Fact]
@@ -99,6 +111,56 @@ public class PromotionCliPenaltyTests
         var result = ExtractResult(res.Stdout);
         Assert.Equal(2, res.ExitCode);
         Assert.False(result.GetProperty("accepted").GetBoolean());
-        Assert.Equal("parity_mismatch (events line=3)", result.GetProperty("reason").GetString());
+        var reason = result.GetProperty("reason").GetString();
+        var penalty = result.GetProperty("penalty");
+        var penaltyParity = penalty.GetProperty("parity").GetString();
+        Assert.Equal("penalty_mismatch", reason);
+        Assert.Equal("mismatch", penaltyParity);
+        Assert.Equal("penalty_mismatch", penalty.GetProperty("reason").GetString());
+        var diffHint = penalty.GetProperty("diff_hint").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(diffHint));
+        var match = Regex.Match(diffHint!.Trim(), "^penalty seq: baseline=(\\d+) candidate=(\\d+)$", RegexOptions.CultureInvariant);
+        Assert.True(match.Success, $"penalty diff hint did not match contract. value='{diffHint}'");
+        var baselineSeq = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+        var candidateSeq = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
+        Assert.NotEqual(baselineSeq, candidateSeq);
+        // Back-compat guard: tolerate legacy parity_mismatch reason only when penalty metadata signals mismatch
+        if (reason == "parity_mismatch") Assert.Equal("mismatch", penaltyParity);
+    }
+
+    [Fact]
+    public void Promotion_ResultIncludesPenaltyDiffHint_OnMismatch()
+    {
+        var root = RepoRoot();
+        var baseSrc = Path.Combine(root, "tests", "fixtures", "backtest_m0", "config.backtest-m0.json");
+        var baseline = WritePenaltyConfig(baseSrc, penaltyMode: "active", forcePenalty: true, sentimentMode: "off");
+        var candidate = WritePenaltyConfig(baseSrc, penaltyMode: "active", forcePenalty: true, sentimentMode: "shadow");
+        var res = RunPromote(baseline, candidate);
+        var result = ExtractResult(res.Stdout);
+        var penalty = result.GetProperty("penalty");
+        Assert.Equal("mismatch", penalty.GetProperty("parity").GetString());
+        var hint = penalty.GetProperty("diff_hint").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(hint));
+        var match = Regex.Match(hint!.Trim(), "^penalty seq: baseline=(\\d+) candidate=(\\d+)$", RegexOptions.CultureInvariant);
+        Assert.True(match.Success, $"penalty diff hint did not match contract. value='{hint}'");
+        var baselineSeq = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+        var candidateSeq = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
+        Assert.NotEqual(baselineSeq, candidateSeq);
+        Assert.Contains("penalty", result.GetProperty("reason").GetString(), StringComparison.Ordinal);
+    }
+
+    public void Dispose()
+    {
+        foreach (var tmp in _tempFiles)
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(tmp) && File.Exists(tmp)) File.Delete(tmp);
+            }
+            catch
+            {
+                // best-effort cleanup; ignore failures to avoid masking test results
+            }
+        }
     }
 }

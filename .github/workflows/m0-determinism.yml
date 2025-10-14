@@ -1,175 +1,88 @@
-name: M0 Determinism
+﻿name: m0-determinism
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [ main, feat/**, fix/** ]
   pull_request:
     branches: [ main, feat/**, fix/** ]
-  push:
-    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  m0-determinism:
+  determinism:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: 8.0.x
 
       - name: Build (Release)
-        run: dotnet build TiYf.Engine.sln -c Release --nologo
+        run: dotnet build -c Release
 
-      - name: Clean journals
-        shell: bash
-        run: rm -rf journals || true
-
-      - name: Run A (capture stdout)
-        id: run_a
-        shell: bash
+      - name: Run M0 (A)
         run: |
           set -euo pipefail
-          resolve_journal() {
-            local raw="$1"
-            local label="$2"
-            if [ -z "$raw" ]; then
-              echo "Missing $label journal path" >&2
-              exit 1
-            fi
-            if [ -f "$raw" ]; then
-              echo "$raw"
-              return 0
-            fi
-            if [ -d "$raw" ]; then
-              local candidate="$raw/${label}.csv"
-              if [ -f "$candidate" ]; then
-                echo "$candidate"
-                return 0
-              fi
-              echo "Directory $raw does not contain ${label}.csv" >&2
-              exit 1
-            fi
-            echo "Journal path $raw does not exist" >&2
-            exit 1
-          }
+          SIM="src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"
+          CFG="tests/fixtures/backtest_m0/config.backtest-m0.json"
+          OUT=$(dotnet exec "$SIM" --config "$CFG" --run-id M0-RUN-A | tee sim_A.out)
+          echo "$OUT" | sed -n 's/^JOURNAL_DIR_EVENTS=//p' | head -1 > ev_A.txt
+          echo "$OUT" | sed -n 's/^JOURNAL_DIR_TRADES=//p' | head -1 > tr_A.txt
 
-          find_latest_journal() {
-            local label="$1"
-            find journals -type f -name "${label}.csv" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n1 | cut -d' ' -f2-
-          }
-
-          LOG=run-A.log
-          dotnet exec src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll \
-            --config tests/fixtures/backtest_m0/config.backtest-m0.json \
-            --run-id A --quiet | tee "$LOG"
-          ev=$(awk -F= '/^JOURNAL_DIR_EVENTS=/{print $2}' "$LOG" | tail -n1)
-          tr=$(awk -F= '/^JOURNAL_DIR_TRADES=/{print $2}' "$LOG" | tail -n1)
-          set +e
-          ev_path=$(resolve_journal "$ev" events 2>/dev/null)
-          ev_status=$?
-          tr_path=$(resolve_journal "$tr" trades 2>/dev/null)
-          tr_status=$?
-          set -e
-          if [ "$ev_status" -ne 0 ] || [ -z "$ev_path" ]; then
-            ev_path=$(find_latest_journal events)
-          fi
-          if [ "$tr_status" -ne 0 ] || [ -z "$tr_path" ]; then
-            tr_path=$(find_latest_journal trades)
-          fi
-          if [ -z "$ev_path" ] || [ -z "$tr_path" ]; then
-            echo "Unable to resolve journals for run A" >&2
-            ls -R journals || true
-            exit 1
-          fi
-          echo "EV_A=$ev_path" >> "$GITHUB_OUTPUT"
-          echo "TR_A=$tr_path" >> "$GITHUB_OUTPUT"
-
-      - name: Run B (capture stdout)
-        id: run_b
-        shell: bash
+      - name: Run M0 (B)
         run: |
           set -euo pipefail
-          resolve_journal() {
-            local raw="$1"
-            local label="$2"
-            if [ -z "$raw" ]; then
-              echo "Missing $label journal path" >&2
-              exit 1
-            fi
-            if [ -f "$raw" ]; then
-              echo "$raw"
-              return 0
-            fi
-            if [ -d "$raw" ]; then
-              local candidate="$raw/${label}.csv"
-              if [ -f "$candidate" ]; then
-                echo "$candidate"
-                return 0
-              fi
-              echo "Directory $raw does not contain ${label}.csv" >&2
-              exit 1
-            fi
-            echo "Journal path $raw does not exist" >&2
-            exit 1
-          }
+          SIM="src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"
+          CFG="tests/fixtures/backtest_m0/config.backtest-m0.json"
+          OUT=$(dotnet exec "$SIM" --config "$CFG" --run-id M0-RUN-B | tee sim_B.out)
+          echo "$OUT" | sed -n 's/^JOURNAL_DIR_EVENTS=//p' | head -1 > ev_B.txt
+          echo "$OUT" | sed -n 's/^JOURNAL_DIR_TRADES=//p' | head -1 > tr_B.txt
 
-          LOG=run-B.log
-          dotnet exec src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll \
-            --config tests/fixtures/backtest_m0/config.backtest-m0.json \
-            --run-id B --quiet | tee "$LOG"
-          ev=$(awk -F= '/^JOURNAL_DIR_EVENTS=/{print $2}' "$LOG" | tail -n1)
-          tr=$(awk -F= '/^JOURNAL_DIR_TRADES=/{print $2}' "$LOG" | tail -n1)
-          set +e
-          ev_path=$(resolve_journal "$ev" events 2>/dev/null)
-          ev_status=$?
-          tr_path=$(resolve_journal "$tr" trades 2>/dev/null)
-          tr_status=$?
-          set -e
-          if [ "$ev_status" -ne 0 ] || [ -z "$ev_path" ]; then
-            ev_path=$(find_latest_journal events)
-          fi
-          if [ "$tr_status" -ne 0 ] || [ -z "$tr_path" ]; then
-            tr_path=$(find_latest_journal trades)
-          fi
-          if [ -z "$ev_path" ] || [ -z "$tr_path" ]; then
-            echo "Unable to resolve journals for run B" >&2
-            ls -R journals || true
-            exit 1
-          fi
-          echo "EV_B=$ev_path" >> "$GITHUB_OUTPUT"
-          echo "TR_B=$tr_path" >> "$GITHUB_OUTPUT"
-
-      - name: Verify parity (events + trades)
-        shell: bash
+      - name: Parity check (events + trades)
         run: |
           set -euo pipefail
-          tools="src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
+          TOOLS="src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
+          EV_A=$(cat ev_A.txt); EV_B=$(cat ev_B.txt)
+          TR_A=$(cat tr_A.txt); TR_B=$(cat tr_B.txt)
           set +e
-          dotnet exec "$tools" verify parity \
-            --events-a "${{ steps.run_a.outputs.EV_A }}" \
-            --events-b "${{ steps.run_b.outputs.EV_B }}" \
-            --trades-a "${{ steps.run_a.outputs.TR_A }}" \
-            --trades-b "${{ steps.run_b.outputs.TR_B }}" \
+          dotnet exec "$TOOLS" verify parity \
+            --events-a "$EV_A" --events-b "$EV_B" \
+            --trades-a "$TR_A" --trades-b "$TR_B" \
             --json | tee parity.json
-          code=$?
+          PARITY_EXIT=$?
           set -e
-          echo "PARITY_EXIT=$code" >> "$GITHUB_ENV"
+          echo "$PARITY_EXIT" > parity_exit.txt
 
-      - name: Upload parity JSON (always)
+      - name: Invariants (final gate)
+        run: |
+          set -euo pipefail
+          PARITY_EXIT=$(cat parity_exit.txt || echo 1)
+          if [[ "$PARITY_EXIT" != "0" ]]; then
+            echo "Parity mismatch (see parity.json)"; exit 2
+          fi
+          EV_A=$(cat ev_A.txt); TR_A=$(cat tr_A.txt)
+          ALERTS=$(grep -c '^ALERT_BLOCK_' "$EV_A" || true)
+          TR_ROWS=$(tail -n +2 "$TR_A" | wc -l | awk '{print $1}')
+          if [[ "$ALERTS" != "0" ]]; then echo "Alerts found=$ALERTS"; exit 2; fi
+          if [[ "$TR_ROWS" != "6" ]]; then echo "Unexpected trades rows=$TR_ROWS"; exit 2; fi
+          echo " Determinism OK (no alerts, 6 trades, parity match)."
+
+      - name: Upload artifacts (always)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: m0-parity
-          path: parity.json
-
-      - name: Gate on parity == OK
-        shell: bash
-        run: |
-          set -euo pipefail
-          code=$(jq -r '.exit_code // .exitCode // 2' parity.json || echo 2)
-          if [ "$code" != "0" ]; then
-            echo "Parity drift. See parity.json and raw journals."
-            exit 2
-          fi
+          path: |
+            sim_A.out
+            sim_B.out
+            ev_A.txt
+            ev_B.txt
+            tr_A.txt
+            tr_B.txt
+            parity.json
+            parity_exit.txt
+            journals/M0/M0-RUN-A/**
+            journals/M0/M0-RUN-B/**

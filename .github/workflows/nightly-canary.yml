@@ -1,11 +1,11 @@
 name: nightly-canary
 
 on:
-  workflow_dispatch:
   schedule:
     - cron: '0 5 * * *'
   pull_request:
     branches: [ main, feat/**, fix/** ]
+  workflow_dispatch:
 
 concurrency:
   group: nightly-canary
@@ -14,13 +14,27 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      build_exit: ${{ steps.build_release.outputs.exit_code }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
       - name: Build (Release)
-        run: dotnet build TiYf.Engine.sln -c Release --nologo
+        id: build_release
+        run: |
+          set -euo pipefail
+          mkdir -p scratch
+          set +e
+          dotnet build TiYf.Engine.sln -c Release --nologo | tee scratch/build.out
+          BUILD_EXIT=$?
+          set -e
+          echo "$BUILD_EXIT" > scratch/build_exit.txt
+          echo "exit_code=$BUILD_EXIT" >> "$GITHUB_OUTPUT"
       - name: Upload Release binaries
         uses: actions/upload-artifact@v4
         with:
@@ -28,10 +42,29 @@ jobs:
           path: |
             src/TiYf.Engine.Sim/bin/Release/net8.0
             src/TiYf.Engine.Tools/bin/Release/net8.0
+      - name: Upload build diagnostics (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-build-logs
+          path: |
+            scratch/build.out
+            scratch/build_exit.txt
 
   nightly-canary:
     needs: build
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      DOTNET_NOLOGO: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -42,159 +75,301 @@ jobs:
         with:
           name: release-binaries
           path: release-binaries
-      - name: Sync built binaries
+      - name: Prepare scratch layout
+        id: prep
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p src/TiYf.Engine.Sim/bin/Release/net8.0
-          mkdir -p src/TiYf.Engine.Tools/bin/Release/net8.0
-          SOURCE_ROOT="release-binaries/src"
-          if [ ! -d "$SOURCE_ROOT" ]; then
-            SOURCE_ROOT="release-binaries"
+          ROOT="$GITHUB_WORKSPACE/scratch/nightly/${{ matrix.os }}"
+          rm -rf "$ROOT"
+          mkdir -p "$ROOT/bin" "$ROOT/runs" "$ROOT/artifacts/parity" "$ROOT/state"
+          SRC_ROOT="release-binaries/src"
+          if [[ ! -d "$SRC_ROOT" ]]; then
+            SRC_ROOT="release-binaries"
           fi
-          if [ ! -d "$SOURCE_ROOT" ]; then
-            echo "Unable to locate Release binaries in artifact payload" >&2
-            ls -R release-binaries || true
-            exit 1
+          COPY_EXIT=0
+          if [[ -d "$SRC_ROOT/TiYf.Engine.Sim/bin/Release/net8.0" ]]; then
+            cp -R "$SRC_ROOT/TiYf.Engine.Sim/bin/Release/net8.0/." "$ROOT/bin/"
+          else
+            COPY_EXIT=1
           fi
-          rsync -a "$SOURCE_ROOT/" src/
-      - name: Run canary modes
-        id: modes
+          if [[ -d "$SRC_ROOT/TiYf.Engine.Tools/bin/Release/net8.0" ]]; then
+            cp -R "$SRC_ROOT/TiYf.Engine.Tools/bin/Release/net8.0/." "$ROOT/bin/"
+          else
+            COPY_EXIT=1
+          fi
+          echo "$COPY_EXIT" > "$ROOT/state/prep_exit.txt"
+          if [[ ! -f "$ROOT/bin/TiYf.Engine.Sim.dll" || ! -f "$ROOT/bin/TiYf.Engine.Tools.dll" ]]; then
+            COPY_EXIT=1
+            echo "$COPY_EXIT" > "$ROOT/state/prep_exit.txt"
+          fi
+          echo "ROOT=$ROOT" >> "$GITHUB_ENV"
+          echo "SIM=$ROOT/bin/TiYf.Engine.Sim.dll" >> "$GITHUB_ENV"
+          echo "TOOLS=$ROOT/bin/TiYf.Engine.Tools.dll" >> "$GITHUB_ENV"
+          echo "summary_root=$ROOT/artifacts" >> "$GITHUB_OUTPUT"
+          echo "summary_csv=$ROOT/artifacts/parity_summary.csv" >> "$GITHUB_OUTPUT"
+          echo "root=$ROOT" >> "$GITHUB_OUTPUT"
+      - name: Execute modes
+        id: runmodes
         shell: bash
         run: |
           set -euo pipefail
-          resolve_journal() {
-            local raw="$1"
-            local label="$2"
-            if [ -z "$raw" ]; then
-              echo "Missing $label journal path" >&2
-              exit 1
-            fi
-            if [ -f "$raw" ]; then
-              echo "$raw"
-              return 0
-            fi
-            if [ -d "$raw" ]; then
-              local candidate="$raw/${label}.csv"
-              if [ -f "$candidate" ]; then
-                echo "$candidate"
-                return 0
-              fi
-              echo "Directory $raw does not contain ${label}.csv" >&2
-              exit 1
-            fi
-            echo "Journal path $raw does not exist" >&2
-            exit 1
-          }
+          : "${ROOT:?ROOT env missing}"
+          # shellcheck disable=SC2269
+          SIM_PATH="${SIM:-}"
+          # shellcheck disable=SC2269
+          TOOLS_PATH="${TOOLS:-}"
+          BASE_CFG="$GITHUB_WORKSPACE/tests/fixtures/backtest_m0/config.backtest-m0.json"
+          RUN_BASE="${RUNNER_TEMP}/nightly-${{ matrix.os }}"
+          mkdir -p "$RUN_BASE"
+          TMP_DIR="$GITHUB_WORKSPACE/.tmp"
+          mkdir -p "$TMP_DIR"
 
-          ROOT="$GITHUB_WORKSPACE"
-          SIM="$ROOT/src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll"
-          TOOLS="$ROOT/src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll"
-          BASE_CFG="$ROOT/tests/fixtures/backtest_m0/config.backtest-m0.json"
+          SUMMARY="$ROOT/artifacts/parity_summary.csv"
+          printf 'mode,trades_sha,penalty_count,events_sha,run_dir,status,hint,sim_exit,parity_exit\n' > "$SUMMARY"
+          SUMMARY_MD="$ROOT/artifacts/summary.md"
+          printf '### Nightly canary parity (%s)\n\n' "${{ matrix.os }}" > "$SUMMARY_MD"
+
           MODES=(off shadow active penalty-active)
-          mkdir -p artifacts/parity
-          SUMMARY="artifacts/parity_summary.csv"
-          echo "mode,trades_hash,penalty_count" > "$SUMMARY"
-          rm -rf "$ROOT/journals" || true
           for MODE in "${MODES[@]}"; do
-            CFG=$(mktemp)
-            jq '.featureFlags.sentiment="off" | .featureFlags.risk="off"' "$BASE_CFG" > "$CFG"
-            case "$MODE" in
-              off)
-                jq '.featureFlags.penalty="off"' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
-                ;;
-              shadow)
-                jq '.featureFlags.penalty="shadow"' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
-                ;;
-              active)
-                jq '.featureFlags.penalty="active"' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
-                ;;
-              penalty-active)
-                jq '.featureFlags.penalty="active" | .penaltyConfig = (.penaltyConfig // {}) | .penaltyConfig.forcePenalty=true | .ciPenaltyScaffold=true' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
-                ;;
-            esac
-            RUN_ID="CANARY-${MODE^^}"
-            OUT=$(mktemp)
-            dotnet exec "$SIM" --config "$CFG" --run-id "$RUN_ID" --quiet | tee "$OUT"
-            EV=$(grep -m1 '^JOURNAL_DIR_EVENTS=' "$OUT" | cut -d= -f2-)
-            TR=$(grep -m1 '^JOURNAL_DIR_TRADES=' "$OUT" | cut -d= -f2-)
-            if [ -z "$EV" ] || [ -z "$TR" ]; then
-              echo "Failed to capture journal paths for mode $MODE" >&2
-              exit 1
+            RUN_ROOT="$RUN_BASE/$MODE"
+            mkdir -p "$RUN_ROOT"
+            CFG_IN="$BASE_CFG"
+            CFG_OUT="$RUN_ROOT/config.json"
+            RID="CANARY-${MODE^^}"
+            STATUS="ok"
+            HINTS=()
+            SIM_EXIT=1
+            PARITY_EXIT=1
+            EVENTS=""
+            TRADES=""
+            PENALTY_COUNT=0
+            RUN_DIR=""
+
+            if [[ ! -f "$SIM_PATH" || ! -f "$TOOLS_PATH" ]]; then
+              STATUS="missing-binaries"
+              HINTS+=("Release binaries unavailable")
+            else
+              ENV_FILE="$TMP_DIR/nightly.env"
+              node .github/scripts/nightly-config.js "$CFG_IN" "$CFG_OUT" "$RUN_ROOT" "$MODE" > "$ENV_FILE"
+              export ENV_FILE CFG_IN CFG_OUT RUN_ROOT
+              python -c "import os, pathlib, shlex; env_path = pathlib.Path(os.environ['ENV_FILE']); cfg_in = pathlib.Path(os.environ['CFG_IN']).resolve(); cfg_out = pathlib.Path(os.environ['CFG_OUT']).resolve(); run_root = pathlib.Path(os.environ['RUN_ROOT']).resolve(); lines = [f\"CFG_IN={shlex.quote(str(cfg_in))}\", f\"CFG_OUT={shlex.quote(str(cfg_out))}\", f\"RUN_ROOT={shlex.quote(str(run_root))}\"]; env_path.open('a', encoding='utf-8').write('\\n'.join(lines) + '\\n')"
+              echo "Configuration environment:" >> "$RUN_ROOT/setup.log"
+              cat "$ENV_FILE" >> "$RUN_ROOT/setup.log"
+              set -a
+              # shellcheck disable=SC1090
+              source "$ENV_FILE"
+              set +a
+              printf 'CFG_IN=%q\nCFG_OUT=%q\nRUN_ROOT=%q\n' "${CFG_IN}" "${CFG_OUT}" "${RUN_ROOT}" | tee "$RUN_ROOT/env.snapshot"
+
+              SIM_LOG="$RUN_ROOT/sim.log"
+              set +e
+              dotnet exec "$SIM_PATH" --config "$CFG_OUT" --run-id "$RID" 2>&1 | tee "$SIM_LOG"
+              SIM_EXIT=${PIPESTATUS[0]}
+              set -e
+              echo "$SIM_EXIT" > "$RUN_ROOT/sim_exit.txt"
+              if [[ "$SIM_EXIT" != "0" ]]; then
+                STATUS="sim_rc=$SIM_EXIT"
+                HINTS+=("sim failed")
+              fi
+
+              EVENTS=$(grep -m1 '^JOURNAL_DIR_EVENTS=' "$SIM_LOG" | cut -d= -f2- | tr -d '\r' || true)
+              TRADES=$(grep -m1 '^JOURNAL_DIR_TRADES=' "$SIM_LOG" | cut -d= -f2- | tr -d '\r' || true)
+              if [[ -z "${EVENTS:-}" ]]; then
+                echo "No JOURNAL_DIR_EVENTS found in sim output" >&2
+                exit 1
+              fi
+              export RAW_EVENTS="$EVENTS" RAW_TRADES="$TRADES" RUN_ROOT
+              python .github/scripts/nightly-path-resolve.py "$RUN_ROOT/path.resolve"
+              # shellcheck disable=SC1091
+              source "$RUN_ROOT/path.resolve"
+              EVENTS="$EVENTS_RESOLVED"
+              TRADES="$TRADES_RESOLVED"
+              RUN_DIR="$RUN_DIR_RESOLVED"
+              MODE_KEY=$(echo "$MODE" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
+              {
+                printf 'NIGHTLY_%s_EVENTS=%s\n' "$MODE_KEY" "$EVENTS"
+                printf 'NIGHTLY_%s_TRADES=%s\n' "$MODE_KEY" "$TRADES"
+              } >> "$GITHUB_ENV"
+
+              echo "EVENTS=$EVENTS" >> "$GITHUB_ENV"
+              echo "TRADES=$TRADES" >> "$GITHUB_ENV"
+
+              if [[ ! -f "$EVENTS" ]]; then
+                STATUS="${STATUS}|missing_events"
+                HINTS+=("events missing")
+              fi
+              if [[ -n "$TRADES" && ! -f "$TRADES" ]]; then
+                STATUS="${STATUS}|missing_trades"
+                HINTS+=("trades missing")
+              fi
+
+              if [[ -f "$EVENTS" ]]; then
+                PENALTY_COUNT=$(grep -c 'PENALTY_APPLIED' "$EVENTS" || true)
+              fi
+
+              PARITY_JSON="$RUN_ROOT/parity-parrot.json"
+              set +e
+              if [[ -n "$TRADES" ]]; then
+                dotnet exec "$TOOLS_PATH" verify parity \
+                  --events-a "$EVENTS" --events-b "$EVENTS" \
+                  --trades-a "$TRADES" --trades-b "$TRADES" \
+                  --json | tee "$PARITY_JSON"
+              else
+                dotnet exec "$TOOLS_PATH" verify parity \
+                  --events-a "$EVENTS" --events-b "$EVENTS" \
+                  --json | tee "$PARITY_JSON"
+              fi
+              PARITY_EXIT=${PIPESTATUS[0]}
+              set -e
+
+              export EVENTS TRADES
+              if [[ -n "$TRADES" ]]; then
+                python .github/scripts/nightly-hash-snapshot.py "$RUN_ROOT/hashes.snapshot" "$EVENTS" "$TRADES"
+              else
+                python .github/scripts/nightly-hash-snapshot.py "$RUN_ROOT/hashes.snapshot" "$EVENTS"
+              fi
+              # shellcheck disable=SC1091
+              source "$RUN_ROOT/hashes.snapshot"
+              EVENTS_SHA_VALUE="${EVENTS_SHA:-}"
+              TRADES_SHA_VALUE="${TRADES_SHA:-}"
+
+              echo "$PARITY_EXIT" > "$RUN_ROOT/parity_exit.txt"
+              if [[ "$PARITY_EXIT" != "0" ]]; then
+                STATUS="${STATUS}|parity_rc=$PARITY_EXIT"
+                HINTS+=("parity self-check failed")
+              fi
             fi
-            EV_FILE=$(resolve_journal "$EV" events)
-            TR_FILE=$(resolve_journal "$TR" trades)
-            KEY=${MODE//-/_}
-            echo "ev_${KEY}=$EV_FILE" >> "$GITHUB_OUTPUT"
-            echo "tr_${KEY}=$TR_FILE" >> "$GITHUB_OUTPUT"
-            MODE_DIR="artifacts/parity/$MODE"
-            mkdir -p "$MODE_DIR"
-            set +e
-            dotnet exec "$TOOLS" verify parity \
-              --events-a "$EV_FILE" \
-              --events-b "$EV_FILE" \
-              --trades-a "$TR_FILE" \
-              --trades-b "$TR_FILE" \
-              --json | tee "$MODE_DIR/parity-parrot.json"
-            CODE=$?
-            set -e
-            if [ $CODE -ne 0 ]; then
-              echo "Parity self-check failed for mode $MODE" >&2
-              exit $CODE
+            STATUS_TRIMMED="${STATUS#ok|}"
+            STATUS_TRIMMED="${STATUS_TRIMMED%|}"
+            if [[ "$STATUS_TRIMMED" == "" ]]; then
+              STATUS_LABEL="ok"
+            else
+              STATUS_LABEL="$STATUS_TRIMMED"
             fi
-            EVENTS_HASH=$(jq -r '.events.hashA // empty' "$MODE_DIR/parity-parrot.json")
-            TRADES_HASH=$(jq -r '.trades.hashA // empty' "$MODE_DIR/parity-parrot.json")
-            if [ -z "$TRADES_HASH" ]; then
-              echo "Unable to extract trades hash for mode $MODE" >&2
-              exit 1
+
+            HINT=""
+            if (( ${#HINTS[@]} )); then
+              HINT=$(IFS='; '; echo "${HINTS[*]}")
             fi
-            PENALTY_COUNT=$(grep -c 'PENALTY_APPLIED_V1' "$EV_FILE" || true)
-            {
-              echo "mode=$MODE"
-              echo "events_hash=$EVENTS_HASH"
-              echo "trades_hash=$TRADES_HASH"
-              echo "penalty_count=$PENALTY_COUNT"
-              echo "events_path=$EV_FILE"
-              echo "trades_path=$TR_FILE"
-            } > "$MODE_DIR/hashes.txt"
-            echo "$MODE,$TRADES_HASH,$PENALTY_COUNT" >> "$SUMMARY"
+            echo "$STATUS_LABEL" > "$RUN_ROOT/status.txt"
+            echo "$HINT" > "$RUN_ROOT/hint.txt"
+            printf 'events_sha=%s\ntrades_sha=%s\npenalty_count=%s\nrun_dir=%s\n' "$EVENTS_SHA_VALUE" "$TRADES_SHA_VALUE" "$PENALTY_COUNT" "$RUN_DIR" > "$RUN_ROOT/hashes.txt"
+
+            printf '%s,%s,%s,%s,%s,%s,%s,%s,%s\n' "$MODE" "$TRADES_SHA_VALUE" "$PENALTY_COUNT" "$EVENTS_SHA_VALUE" "$RUN_DIR" "$STATUS_LABEL" "$HINT" "${SIM_EXIT:-1}" "$PARITY_EXIT" >> "$SUMMARY"
+
+            if [[ "$STATUS_LABEL" == "ok" ]]; then
+              printf '✅ parity OK (mode=%s)\n' "$MODE" >> "$SUMMARY_MD"
+            else
+              printf '❌ parity drift (mode=%s) — %s %s\n' "$MODE" "$STATUS_LABEL" "$HINT" >> "$SUMMARY_MD"
+            fi
+
+            MODE_ARTIFACT="$ROOT/artifacts/parity/$MODE"
+            mkdir -p "$MODE_ARTIFACT"
+            cp -f "$RUN_ROOT"/*.txt "$RUN_ROOT"/*.json "$RUN_ROOT"/*.log "$MODE_ARTIFACT" 2>/dev/null || true
+            [[ -f "$RUN_ROOT/sim.err" ]] && cp -f "$RUN_ROOT/sim.err" "$MODE_ARTIFACT/"
+            [[ -f "$EVENTS" ]] && cp -f "$EVENTS" "$MODE_ARTIFACT/events.csv"
+            [[ -n "$TRADES" && -f "$TRADES" ]] && cp -f "$TRADES" "$MODE_ARTIFACT/trades.csv"
           done
-      - name: Check invariants
+
+          echo "summary_csv=$SUMMARY" >> "$GITHUB_OUTPUT"
+          echo "summary_md=$SUMMARY_MD" >> "$GITHUB_OUTPUT"
+      - name: Publish summary
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import csv, sys
-          required = ["off", "shadow", "active", "penalty-active"]
-          rows = {}
-          with open("artifacts/parity_summary.csv", newline="") as fh:
-            reader = csv.DictReader(fh)
-            for row in reader:
-              rows[row["mode"]] = row
-          missing = [m for m in required if m not in rows]
-          if missing:
-            sys.exit(f"Missing canary modes: {', '.join(missing)}")
-          if rows["off"]["trades_hash"] != rows["shadow"]["trades_hash"]:
-            sys.exit("off vs shadow trades hash mismatch")
-          if rows["shadow"]["trades_hash"] != rows["active"]["trades_hash"]:
-            sys.exit("shadow vs active trades hash mismatch")
-          penalty = int(rows["penalty-active"]["penalty_count"] or 0)
-          if penalty < 1:
-            sys.exit("penalty-active produced no penalty events")
-          PY
-      - name: Summary
+          ROOT="${ROOT:?ROOT env missing}"
+          SUMMARY_MD="${{ steps.runmodes.outputs.summary_md }}"
+          [[ -f "$SUMMARY_MD" ]] && cat "$SUMMARY_MD" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          column -s, -t "${{ steps.runmodes.outputs.summary_csv }}" 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || cat "${{ steps.runmodes.outputs.summary_csv }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - name: Collect diagnostics
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          echo "### Nightly Canary Summary" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          cat artifacts/parity_summary.csv >> "$GITHUB_STEP_SUMMARY"
+          ROOT="${ROOT:?ROOT env missing}"
+          mkdir -p "$ROOT/artifacts/meta"
+          cp "$ROOT/state/prep_exit.txt" "$ROOT/artifacts/meta/prep_exit.txt"
+          cp "${{ steps.runmodes.outputs.summary_csv }}" "$ROOT/artifacts/meta/parity_summary.csv"
+          [[ -f "${{ steps.runmodes.outputs.summary_md }}" ]] && cp "${{ steps.runmodes.outputs.summary_md }}" "$ROOT/artifacts/meta/summary.md"
+      - name: Invariants (final gate)
+        shell: python
+        env:
+          SUMMARY_CSV: ${{ steps.runmodes.outputs.summary_csv }}
+          BUILD_EXIT: ${{ needs.build.outputs.build_exit }}
+          PREP_EXIT_PATH: ${{ steps.prep.outputs.root }}/state/prep_exit.txt
+        run: |
+          import csv
+          import os
+          import sys
+
+          build_exit = os.environ.get("BUILD_EXIT", "1")
+          if build_exit != "0":
+              print(f"dotnet build exited with {build_exit}", file=sys.stderr)
+              sys.exit(2)
+
+          prep_exit_path = os.environ.get("PREP_EXIT_PATH")
+          try:
+              with open(prep_exit_path, "r", encoding="utf-8") as fh:
+                  prep_exit = fh.read().strip() or "1"
+          except OSError:
+              prep_exit = "1"
+
+          if prep_exit != "0":
+              print("Release binaries unavailable during prepare", file=sys.stderr)
+              sys.exit(2)
+
+          summary_csv = os.environ.get("SUMMARY_CSV")
+          if not summary_csv:
+              print("summary csv missing", file=sys.stderr)
+              sys.exit(2)
+
+          checks = []
+
+          try:
+              with open(summary_csv, newline="", encoding="utf-8") as fh:
+                  rows = {row.get("mode"): row for row in csv.DictReader(fh) if row.get("mode")}
+          except OSError as exc:
+              print(f"unable to read summary: {exc}", file=sys.stderr)
+              sys.exit(2)
+
+          def trade_sha(mode: str) -> str:
+              row = rows.get(mode)
+              return row.get("trades_sha", "") if row else ""
+
+          off_sha = trade_sha("off")
+          shadow_sha = trade_sha("shadow")
+          active_sha = trade_sha("active")
+          penalty_row = rows.get("penalty-active", {})
+
+          if off_sha and shadow_sha and off_sha != shadow_sha:
+              checks.append("off vs shadow trades_sha mismatch")
+          if shadow_sha and active_sha and shadow_sha != active_sha:
+              checks.append("shadow vs active trades_sha mismatch")
+
+          try:
+              penalty_count = int(penalty_row.get("penalty_count") or 0)
+          except (TypeError, ValueError):
+              penalty_count = 0
+          if penalty_count < 1:
+              checks.append("penalty-active has no penalty lines")
+
+          if checks:
+              for item in checks:
+                  print(item)
+              sys.exit(2)
+
+          print("invariants satisfied")
       - name: Upload parity artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nightly-canary-artifacts
+          name: nightly-canary-${{ matrix.os }}
           path: |
-            artifacts/parity
-            artifacts/parity_summary.csv
+            ${{ steps.runmodes.outputs.summary_csv }}
+            ${{ steps.runmodes.outputs.summary_md }}
+            ${{ steps.prep.outputs.summary_root }}/parity/**
+            ${{ steps.prep.outputs.root }}/state/prep_exit.txt

@@ -501,11 +501,14 @@ if (qaEvents is not null && qaEvents.Count > 0)
         .ThenBy(e => e.Sequence)
         .ToList();
     await journal.AppendRangeAsync(qaEvents);
-    if (qaAbort)
-    {
-        Console.WriteLine("DATA_QA gate failed – aborting prior to bar/trade processing.");
-        return;
-    }
+}
+
+Console.WriteLine($"ABORTED={qaAbort.ToString().ToLowerInvariant()}");
+
+if (qaAbort)
+{
+    Console.WriteLine("DATA_QA gate failed – aborting prior to bar/trade processing.");
+    return;
 }
 // Load snapshot now that paths are final
 var snapshotPath = Path.Combine(journalRoot, runId, "bar-keys.snapshot.json");
