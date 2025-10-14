@@ -404,6 +404,19 @@ FodyWeavers.xsd
 *.msm
 *.msp
 
+# Repo hygiene for CI scratch and local temp artifacts
+tests/**/tmp*/
+**/.tmp*/
+*.local.json
+tests/**/config.*.tmp.json
+journals/**/LOCAL-*
+artifacts/**
+**/env.sanity
+**/env.snapshot
+**/*.snapshot.csv
+**/parity/*.json
+**/hashes.txt
+
 # JetBrains Rider
 *.sln.iml
 .idea
