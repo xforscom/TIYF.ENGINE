@@ -33,7 +33,7 @@ for (int i = 0; i < args.Length; i++)
         outPath = args[i + 1];
     if (args[i] == "--run-id" && i + 1 < args.Length)
         runIdOverride = args[i + 1];
-    if (args[i] == "--verbose" || args[i]=="-v") verbose = true;
+    if (args[i] == "--verbose" || args[i] == "-v") verbose = true;
     if (args[i] == "--diagnose") diagnose = true;
 }
 
@@ -45,7 +45,7 @@ try
     if (!File.Exists(fullConfigPath))
     {
         Console.WriteLine($"Config '{fullConfigPath}' not found. Creating sample.");
-    var sample = "{\n  \"SchemaVersion\":\"" + TiYf.Engine.Core.Infrastructure.Schema.Version + "\",\n  \"RunId\":\"RUN-DEMO\",\n  \"InstrumentFile\":\"sample-instruments.csv\",\n  \"InputTicksFile\":\"sample-ticks.csv\",\n  \"JournalRoot\":\"journals\"\n}";
+        var sample = "{\n  \"SchemaVersion\":\"" + TiYf.Engine.Core.Infrastructure.Schema.Version + "\",\n  \"RunId\":\"RUN-DEMO\",\n  \"InstrumentFile\":\"sample-instruments.csv\",\n  \"InputTicksFile\":\"sample-ticks.csv\",\n  \"JournalRoot\":\"journals\"\n}";
         await File.WriteAllTextAsync(fullConfigPath, sample);
     }
 }
@@ -74,7 +74,7 @@ try
         if (nm.StartsWith("backtest-m0", StringComparison.Ordinal)) isM0 = true;
     }
     // Fallback heuristic: presence of data.ticks object implies M0-style multi-instrument fixture
-    if (!isM0 && raw.RootElement.TryGetProperty("data", out var dProbe) && dProbe.TryGetProperty("ticks", out var tProbe) && tProbe.ValueKind==JsonValueKind.Object)
+    if (!isM0 && raw.RootElement.TryGetProperty("data", out var dProbe) && dProbe.TryGetProperty("ticks", out var tProbe) && tProbe.ValueKind == JsonValueKind.Object)
         isM0 = true;
 }
 catch { /* default false */ }
@@ -90,7 +90,7 @@ if (isM0)
         foreach (var s in specs)
             m0Instruments.Add(new Instrument(new InstrumentId(s.Symbol), s.Symbol, s.PriceDecimals));
         catalog = new InMemoryInstrumentCatalog(m0Instruments);
-        if (raw.RootElement.TryGetProperty("output", out var outNode) && outNode.TryGetProperty("journalDir", out var jd) && jd.ValueKind==JsonValueKind.String)
+        if (raw.RootElement.TryGetProperty("output", out var outNode) && outNode.TryGetProperty("journalDir", out var jd) && jd.ValueKind == JsonValueKind.String)
             m0JournalDir = jd.GetString();
     }
     catch (Exception ex) { Console.Error.WriteLine($"M0 instrument parse error: {ex.Message}"); }
@@ -104,7 +104,7 @@ if (isM0)
         var tickObj = raw.RootElement.GetProperty("data").GetProperty("ticks");
         var allTs = new HashSet<DateTime>();
         // Optional diagnostics: track per-file stats for guardrail
-        var diag = new List<(string Sym,string Path,bool Exists,int DataRows)>();
+        var diag = new List<(string Sym, string Path, bool Exists, int DataRows)>();
         foreach (var entry in tickObj.EnumerateObject())
         {
             var path = entry.Value.GetString();
@@ -118,13 +118,13 @@ if (isM0)
                     var parts = line.Split(',');
                     if (parts.Length < 4) continue;
                     dataRows++;
-                    var ts = DateTime.Parse(parts[0], null, System.Globalization.DateTimeStyles.AssumeUniversal|System.Globalization.DateTimeStyles.AdjustToUniversal);
+                    var ts = DateTime.Parse(parts[0], null, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal);
                     allTs.Add(ts);
                 }
             }
             diag.Add((entry.Name, path ?? string.Empty, exists, dataRows));
         }
-        sequence = allTs.OrderBy(t=>t).ToList();
+        sequence = allTs.OrderBy(t => t).ToList();
         if (sequence.Count == 0)
         {
             Console.Error.WriteLine("No timestamps found when building M0 tick sequence. Diagnostics:");
@@ -192,8 +192,8 @@ ITickSource tickSource = isM0 ? new MultiInstrumentTickSource(raw) : new CsvTick
 
 // Determine instrument set
 List<InstrumentId> instrumentIds = isM0
-    ? catalog.All().Select(i=>i.Id).ToList()
-    : (cfg.Instruments is { Length: >0 } ? cfg.Instruments.Select(s=> new InstrumentId(s)).Distinct().ToList() : new List<InstrumentId>{instrument.Id});
+    ? catalog.All().Select(i => i.Id).ToList()
+    : (cfg.Instruments is { Length: > 0 } ? cfg.Instruments.Select(s => new InstrumentId(s)).Distinct().ToList() : new List<InstrumentId> { instrument.Id });
 
 // Determine intervals
 BarInterval MapInterval(string code) => code.ToUpperInvariant() switch
@@ -203,7 +203,7 @@ BarInterval MapInterval(string code) => code.ToUpperInvariant() switch
     "D1" => BarInterval.OneDay,
     _ => throw new ArgumentException($"Unsupported interval {code}")
 };
-var intervals = (cfg.Intervals is { Length: >0 } ? cfg.Intervals : new[] { "M1" })
+var intervals = (cfg.Intervals is { Length: > 0 } ? cfg.Intervals : new[] { "M1" })
     .Select(MapInterval)
     .Distinct()
     .ToList();
@@ -225,14 +225,14 @@ try
     {
         var rootProp = raw.RootElement.GetProperty("data").GetProperty("ticks");
         var paths = new List<string>();
-        if (raw.RootElement.GetProperty("data").TryGetProperty("instrumentsFile", out var instEl) && instEl.ValueKind==JsonValueKind.String)
+        if (raw.RootElement.GetProperty("data").TryGetProperty("instrumentsFile", out var instEl) && instEl.ValueKind == JsonValueKind.String)
             paths.Add(instEl.GetString()!);
-        foreach (var p in rootProp.EnumerateObject()) if (p.Value.ValueKind==JsonValueKind.String) paths.Add(p.Value.GetString()!);
+        foreach (var p in rootProp.EnumerateObject()) if (p.Value.ValueKind == JsonValueKind.String) paths.Add(p.Value.GetString()!);
         // Also include config file itself if we can resolve path (cfg.ConfigPath if available else skip)
-    // Intentionally exclude the config file itself so data_version reflects ONLY raw market data fixtures (stable across config param tweaks)
+        // Intentionally exclude the config file itself so data_version reflects ONLY raw market data fixtures (stable across config param tweaks)
         // Normalize to repo-relative existing paths only
         var existing = paths.Where(File.Exists).ToArray();
-        if (existing.Length>0)
+        if (existing.Length > 0)
             dataVersion = TiYf.Engine.Core.DataVersion.Compute(existing);
     }
 }
@@ -256,7 +256,7 @@ if (isM0)
         // Historical deterministic run id for M0 tests; add suffix when explicit risk flag present to avoid cross-test collisions
         try
         {
-            if (raw.RootElement.TryGetProperty("featureFlags", out var ffR) && ffR.ValueKind==JsonValueKind.Object && ffR.TryGetProperty("risk", out var rMode) && rMode.ValueKind==JsonValueKind.String)
+            if (raw.RootElement.TryGetProperty("featureFlags", out var ffR) && ffR.ValueKind == JsonValueKind.Object && ffR.TryGetProperty("risk", out var rMode) && rMode.ValueKind == JsonValueKind.String)
             {
                 var r = (rMode.GetString() ?? "off").ToLowerInvariant();
                 runId = $"M0-RUN-{r}";
@@ -280,14 +280,14 @@ else
 }
 var journalRoot = isM0 && !string.IsNullOrWhiteSpace(m0JournalDir) ? m0JournalDir : (cfg.JournalRoot ?? (isM0 ? "journals/M0" : "journals"));
 // For M0 determinism & parallel test safety, serialize access to the single run folder via a named mutex
-System.Threading.Mutex? m0Mutex = null; bool m0Locked=false;
+System.Threading.Mutex? m0Mutex = null; bool m0Locked = false;
 try
 {
     if (isM0)
     {
         m0Mutex = new System.Threading.Mutex(false, "Global\\TIYF.M0.RUNLOCK");
         // Wait up to 2 minutes to avoid deadlocks in CI; if cannot acquire, proceed best-effort
-        try { m0Locked = m0Mutex.WaitOne(TimeSpan.FromMinutes(2)); } catch { m0Locked=false; }
+        try { m0Locked = m0Mutex.WaitOne(TimeSpan.FromMinutes(2)); } catch { m0Locked = false; }
         var runDir = Path.Combine(journalRoot, runId);
         if (Directory.Exists(runDir))
         {
@@ -305,39 +305,39 @@ try
     string dataQaMode = "shadow";
     try
     {
-        if (raw.RootElement.TryGetProperty("featureFlags", out var ffNode) && ffNode.ValueKind==JsonValueKind.Object && ffNode.TryGetProperty("dataQa", out var dqModeNode) && dqModeNode.ValueKind==JsonValueKind.String)
+        if (raw.RootElement.TryGetProperty("featureFlags", out var ffNode) && ffNode.ValueKind == JsonValueKind.Object && ffNode.TryGetProperty("dataQa", out var dqModeNode) && dqModeNode.ValueKind == JsonValueKind.String)
         {
             var m = dqModeNode.GetString();
             if (!string.IsNullOrWhiteSpace(m)) dataQaMode = m!; // trust input
         }
     }
     catch { /* default shadow */ }
-    if (raw.RootElement.TryGetProperty("dataQA", out var qaNode) && qaNode.ValueKind==JsonValueKind.Object && dataQaMode != "off")
+    if (raw.RootElement.TryGetProperty("dataQA", out var qaNode) && qaNode.ValueKind == JsonValueKind.Object && dataQaMode != "off")
     {
-        bool enabled = qaNode.TryGetProperty("enabled", out var en) && en.ValueKind==JsonValueKind.True;
+        bool enabled = qaNode.TryGetProperty("enabled", out var en) && en.ValueKind == JsonValueKind.True;
         if (enabled)
         {
-            int maxMissing = qaNode.TryGetProperty("maxMissingBarsPerInstrument", out var mm) && mm.ValueKind==JsonValueKind.Number ? mm.GetInt32() : 0;
-            bool allowDup = qaNode.TryGetProperty("allowDuplicates", out var ad) && ad.ValueKind==JsonValueKind.True;
-            decimal spikeZ = qaNode.TryGetProperty("spikeZ", out var sz) && sz.ValueKind==JsonValueKind.Number ? sz.GetDecimal() : 8m;
-            int ffill = 0; 
-            if (qaNode.TryGetProperty("repair", out var rep) && rep.ValueKind==JsonValueKind.Object && rep.TryGetProperty("forwardFillBars", out var ffb) && ffb.ValueKind==JsonValueKind.Number)
+            int maxMissing = qaNode.TryGetProperty("maxMissingBarsPerInstrument", out var mm) && mm.ValueKind == JsonValueKind.Number ? mm.GetInt32() : 0;
+            bool allowDup = qaNode.TryGetProperty("allowDuplicates", out var ad) && ad.ValueKind == JsonValueKind.True;
+            decimal spikeZ = qaNode.TryGetProperty("spikeZ", out var sz) && sz.ValueKind == JsonValueKind.Number ? sz.GetDecimal() : 8m;
+            int ffill = 0;
+            if (qaNode.TryGetProperty("repair", out var rep) && rep.ValueKind == JsonValueKind.Object && rep.TryGetProperty("forwardFillBars", out var ffb) && ffb.ValueKind == JsonValueKind.Number)
                 ffill = ffb.GetInt32();
-            bool dropSpikes = qaNode.TryGetProperty("repair", out var rep2) && rep2.ValueKind==JsonValueKind.Object && rep2.TryGetProperty("dropSpikes", out var ds) && ds.ValueKind==JsonValueKind.True;
+            bool dropSpikes = qaNode.TryGetProperty("repair", out var rep2) && rep2.ValueKind == JsonValueKind.Object && rep2.TryGetProperty("dropSpikes", out var ds) && ds.ValueKind == JsonValueKind.True;
             var dqCfg = new TiYf.Engine.Core.DataQaConfig(true, maxMissing, allowDup, spikeZ, ffill, dropSpikes);
             // Collect ticks per symbol (using bookRef later or raw fixture paths for M0)
-            var ticksBySymbol = new Dictionary<string,List<(DateTime,decimal)>>(StringComparer.Ordinal);
-            if (isM0 && raw.RootElement.TryGetProperty("data", out var dnode) && dnode.TryGetProperty("ticks", out var tnode) && tnode.ValueKind==JsonValueKind.Object)
+            var ticksBySymbol = new Dictionary<string, List<(DateTime, decimal)>>(StringComparer.Ordinal);
+            if (isM0 && raw.RootElement.TryGetProperty("data", out var dnode) && dnode.TryGetProperty("ticks", out var tnode) && tnode.ValueKind == JsonValueKind.Object)
             {
                 foreach (var tk in tnode.EnumerateObject())
                 {
                     var path = tk.Value.GetString(); if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) continue;
-                    var list = new List<(DateTime,decimal)>();
+                    var list = new List<(DateTime, decimal)>();
                     foreach (var line in SafeReadLines(path).Skip(1))
                     {
                         if (string.IsNullOrWhiteSpace(line)) continue;
                         var parts = line.Split(','); if (parts.Length < 3) continue;
-                        var ts = DateTime.Parse(parts[0], null, System.Globalization.DateTimeStyles.AssumeUniversal|System.Globalization.DateTimeStyles.AdjustToUniversal);
+                        var ts = DateTime.Parse(parts[0], null, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal);
                         var mid = (decimal.Parse(parts[1]) + decimal.Parse(parts[2])) / 2m;
                         list.Add((ts, mid));
                     }
@@ -351,27 +351,29 @@ try
             var dqResult = ApplyTolerance(dqResultRaw, dqCfg);
             int toleratedCount = dqResultRaw.IssuesList.Count - dqResult.IssuesList.Count;
             // Build tolerance profile JSON (canonical) for hashing
-            var toleranceObj = new {
+            var toleranceObj = new
+            {
                 maxMissingBarsPerInstrument = dqCfg.MaxMissingBarsPerInstrument,
                 allowDuplicates = dqCfg.AllowDuplicates,
                 spikeZ = dqCfg.SpikeZ,
                 forwardFillBars = dqCfg.ForwardFillBars,
                 dropSpikes = dqCfg.DropSpikes
             };
-            string toleranceJson = System.Text.Json.JsonSerializer.Serialize(toleranceObj, new JsonSerializerOptions{PropertyNamingPolicy = JsonNamingPolicy.CamelCase});
+            string toleranceJson = System.Text.Json.JsonSerializer.Serialize(toleranceObj, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
             string toleranceProfileHash;
             using (var sha = System.Security.Cryptography.SHA256.Create())
             {
                 var bytes = System.Text.Encoding.UTF8.GetBytes(toleranceJson);
-                toleranceProfileHash = string.Concat(sha.ComputeHash(bytes).Select(b=>b.ToString("X2")));
+                toleranceProfileHash = string.Concat(sha.ComputeHash(bytes).Select(b => b.ToString("X2")));
             }
             qaEvents = new List<JournalEvent>();
             if (ticksBySymbol.Count > 0)
             {
-                var earliest = ticksBySymbol.SelectMany(k=>k.Value).Select(v=>v.Item1).OrderBy(t=>t).FirstOrDefault();
-                DateTime tsBase = earliest == default ? new DateTime(2000,1,1,0,0,0,DateTimeKind.Utc) : earliest;
+                var earliest = ticksBySymbol.SelectMany(k => k.Value).Select(v => v.Item1).OrderBy(t => t).FirstOrDefault();
+                DateTime tsBase = earliest == default ? new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc) : earliest;
                 // BEGIN
-                var beginPayload = JsonSerializer.SerializeToElement(new {
+                var beginPayload = JsonSerializer.SerializeToElement(new
+                {
                     timeframe = "M1",
                     window_from = tsBase,
                     window_to = tsBase, // single window placeholder (future: derive)
@@ -386,7 +388,8 @@ try
                         .ThenBy(i => i.Kind, StringComparer.Ordinal)
                         .ThenBy(i => i.Details, StringComparer.Ordinal))
                     {
-                        var issuePayload = JsonSerializer.SerializeToElement(new {
+                        var issuePayload = JsonSerializer.SerializeToElement(new
+                        {
                             symbol = issue.Symbol,
                             kind = issue.Kind,
                             ts = issue.Ts,
@@ -395,9 +398,10 @@ try
                         qaEvents.Add(new JournalEvent(0, issue.Ts, "DATA_QA_ISSUE_V1", issuePayload));
                     }
                 }
-                bool abortedFlagLocal = (!dqResult.Passed && dataQaMode=="active");
+                bool abortedFlagLocal = (!dqResult.Passed && dataQaMode == "active");
                 Console.WriteLine($"QA_DECISION passed={dqResult.Passed.ToString().ToLowerInvariant()} aborted={abortedFlagLocal.ToString().ToLowerInvariant()} mode={dataQaMode}");
-                var summaryPayload = JsonSerializer.SerializeToElement(new {
+                var summaryPayload = JsonSerializer.SerializeToElement(new
+                {
                     symbols_checked = dqResult.SymbolsChecked,
                     issues = dqResult.Issues,
                     repaired = dqResult.Repaired,
@@ -407,14 +411,15 @@ try
                     tolerance_profile_hash = toleranceProfileHash
                 });
                 qaEvents.Add(new JournalEvent(0, tsBase, "DATA_QA_SUMMARY_V1", summaryPayload));
-                if (!dqResult.Passed && dataQaMode=="active")
+                if (!dqResult.Passed && dataQaMode == "active")
                 {
                     // Derive reason deterministically
                     string reason = "unknown";
-                    if (dqResult.IssuesList.Any(i=>i.Kind=="missing_bar")) reason = "missing_bars_exceeded";
-                    else if (dqResult.IssuesList.Any(i=>i.Kind=="duplicate")) reason = "duplicates_not_allowed";
-                    else if (dqResult.IssuesList.Any(i=>i.Kind=="spike")) reason = "spike_threshold_exceeded";
-                    var abortPayload = JsonSerializer.SerializeToElement(new {
+                    if (dqResult.IssuesList.Any(i => i.Kind == "missing_bar")) reason = "missing_bars_exceeded";
+                    else if (dqResult.IssuesList.Any(i => i.Kind == "duplicate")) reason = "duplicates_not_allowed";
+                    else if (dqResult.IssuesList.Any(i => i.Kind == "spike")) reason = "spike_threshold_exceeded";
+                    var abortPayload = JsonSerializer.SerializeToElement(new
+                    {
                         reason,
                         issues_emitted = dqResult.Issues,
                         tolerated = toleratedCount,
@@ -509,14 +514,14 @@ if (qaAbort)
 var snapshotPath = Path.Combine(journalRoot, runId, "bar-keys.snapshot.json");
 barKeyTracker = BarKeyTrackerPersistence.Load(snapshotPath);
 TradesJournalWriter? tradesWriter = null; PositionTracker? positions = null; IExecutionAdapter? execution = null; TickBook? bookRef = null;
-if (raw.RootElement.TryGetProperty("name", out var nmEl) && nmEl.ValueKind==JsonValueKind.String && (nmEl.GetString()=="backtest-m0" || (nmEl.GetString()?.StartsWith("backtest-m0", StringComparison.Ordinal) ?? false)))
+if (raw.RootElement.TryGetProperty("name", out var nmEl) && nmEl.ValueKind == JsonValueKind.String && (nmEl.GetString() == "backtest-m0" || (nmEl.GetString()?.StartsWith("backtest-m0", StringComparison.Ordinal) ?? false)))
 {
     positions = new PositionTracker();
     tradesWriter = new TradesJournalWriter(journalRoot, runId, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, cfgHash, dataVersion);
     // Build multi-instrument tick book from fixture files if present
     try
     {
-        if (raw.RootElement.TryGetProperty("data", out var dataNode) && dataNode.TryGetProperty("ticks", out var ticksNode) && ticksNode.ValueKind==JsonValueKind.Object)
+        if (raw.RootElement.TryGetProperty("data", out var dataNode) && dataNode.TryGetProperty("ticks", out var ticksNode) && ticksNode.ValueKind == JsonValueKind.Object)
         {
             var rows = new List<(string Symbol, DateTime Ts, decimal Bid, decimal Ask)>();
             foreach (var tkv in ticksNode.EnumerateObject())
@@ -529,7 +534,7 @@ if (raw.RootElement.TryGetProperty("name", out var nmEl) && nmEl.ValueKind==Json
                     if (string.IsNullOrWhiteSpace(line)) continue;
                     var parts = line.Split(',');
                     if (parts.Length < 4) continue; // timestamp,bid,ask,volume
-                    var ts = DateTime.Parse(parts[0], null, System.Globalization.DateTimeStyles.AssumeUniversal|System.Globalization.DateTimeStyles.AdjustToUniversal);
+                    var ts = DateTime.Parse(parts[0], null, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal);
                     var bid = decimal.Parse(parts[1]);
                     var ask = decimal.Parse(parts[2]);
                     rows.Add((sym, ts, bid, ask));
@@ -553,27 +558,27 @@ try
     if (raw.RootElement.TryGetProperty("equity", out var eqEl) && eqEl.ValueKind == JsonValueKind.Number) equity = eqEl.GetDecimal();
     // Accept both legacy "risk" and newer "riskConfig" blocks, later entries override earlier ones
     var riskBlocks = new List<JsonElement>();
-    if (raw.RootElement.TryGetProperty("risk", out var legacyRisk) && legacyRisk.ValueKind==JsonValueKind.Object) riskBlocks.Add(legacyRisk);
-    if (raw.RootElement.TryGetProperty("riskConfig", out var rcBlock) && rcBlock.ValueKind==JsonValueKind.Object) riskBlocks.Add(rcBlock);
+    if (raw.RootElement.TryGetProperty("risk", out var legacyRisk) && legacyRisk.ValueKind == JsonValueKind.Object) riskBlocks.Add(legacyRisk);
+    if (raw.RootElement.TryGetProperty("riskConfig", out var rcBlock) && rcBlock.ValueKind == JsonValueKind.Object) riskBlocks.Add(rcBlock);
     if (riskBlocks.Count > 0)
     {
         decimal TryNum(string name, decimal? fallbackNullable)
         {
             foreach (var blk in riskBlocks)
             {
-                if (blk.TryGetProperty(name, out var v) && v.ValueKind==JsonValueKind.Number) return v.GetDecimal();
+                if (blk.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number) return v.GetDecimal();
                 // camel/snake translation
                 string alt = name.Contains('_')
-                    ? string.Concat(name.Split('_', StringSplitOptions.RemoveEmptyEntries).Select((s,i)=> i==0 ? s : char.ToUpperInvariant(s[0])+s.Substring(1)))
+                    ? string.Concat(name.Split('_', StringSplitOptions.RemoveEmptyEntries).Select((s, i) => i == 0 ? s : char.ToUpperInvariant(s[0]) + s.Substring(1)))
                     : string.Concat(name.Select(c => char.IsUpper(c) ? '_' + char.ToLowerInvariant(c) : c)).TrimStart('_');
-                if (blk.TryGetProperty(alt, out var v2) && v2.ValueKind==JsonValueKind.Number) return v2.GetDecimal();
+                if (blk.TryGetProperty(alt, out var v2) && v2.ValueKind == JsonValueKind.Number) return v2.GetDecimal();
                 // case-insensitive fallback scan (captures variants like maxRunDrawdownCCY with different casing)
-                if (blk.ValueKind==JsonValueKind.Object)
+                if (blk.ValueKind == JsonValueKind.Object)
                 {
                     foreach (var prop in blk.EnumerateObject())
                     {
-                        if (prop.Value.ValueKind==JsonValueKind.Number && prop.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) return prop.Value.GetDecimal();
-                        if (prop.Value.ValueKind==JsonValueKind.Number && prop.Name.Equals(alt, StringComparison.OrdinalIgnoreCase)) return prop.Value.GetDecimal();
+                        if (prop.Value.ValueKind == JsonValueKind.Number && prop.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) return prop.Value.GetDecimal();
+                        if (prop.Value.ValueKind == JsonValueKind.Number && prop.Name.Equals(alt, StringComparison.OrdinalIgnoreCase)) return prop.Value.GetDecimal();
                     }
                 }
             }
@@ -583,11 +588,11 @@ try
         {
             foreach (var blk in riskBlocks)
             {
-                if (blk.TryGetProperty(name, out var v) && (v.ValueKind==JsonValueKind.True || v.ValueKind==JsonValueKind.False)) return v.GetBoolean();
+                if (blk.TryGetProperty(name, out var v) && (v.ValueKind == JsonValueKind.True || v.ValueKind == JsonValueKind.False)) return v.GetBoolean();
                 string alt = name.Contains('_')
-                    ? string.Concat(name.Split('_', StringSplitOptions.RemoveEmptyEntries).Select((s,i)=> i==0 ? s : char.ToUpperInvariant(s[0])+s.Substring(1)))
+                    ? string.Concat(name.Split('_', StringSplitOptions.RemoveEmptyEntries).Select((s, i) => i == 0 ? s : char.ToUpperInvariant(s[0]) + s.Substring(1)))
                     : string.Concat(name.Select(c => char.IsUpper(c) ? '_' + char.ToLowerInvariant(c) : c)).TrimStart('_');
-                if (blk.TryGetProperty(alt, out var v2) && (v2.ValueKind==JsonValueKind.True || v2.ValueKind==JsonValueKind.False)) return v2.GetBoolean();
+                if (blk.TryGetProperty(alt, out var v2) && (v2.ValueKind == JsonValueKind.True || v2.ValueKind == JsonValueKind.False)) return v2.GetBoolean();
             }
             return fallback;
         }
@@ -595,20 +600,20 @@ try
         {
             foreach (var blk in riskBlocks)
             {
-                if (blk.TryGetProperty(name, out var v) && v.ValueKind==JsonValueKind.String) return v.GetString() ?? fallback;
+                if (blk.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String) return v.GetString() ?? fallback;
                 string alt = name.Contains('_')
-                    ? string.Concat(name.Split('_', StringSplitOptions.RemoveEmptyEntries).Select((s,i)=> i==0 ? s : char.ToUpperInvariant(s[0])+s.Substring(1)))
+                    ? string.Concat(name.Split('_', StringSplitOptions.RemoveEmptyEntries).Select((s, i) => i == 0 ? s : char.ToUpperInvariant(s[0]) + s.Substring(1)))
                     : string.Concat(name.Select(c => char.IsUpper(c) ? '_' + char.ToLowerInvariant(c) : c)).TrimStart('_');
-                if (blk.TryGetProperty(alt, out var v2) && v2.ValueKind==JsonValueKind.String) return v2.GetString() ?? fallback;
+                if (blk.TryGetProperty(alt, out var v2) && v2.ValueKind == JsonValueKind.String) return v2.GetString() ?? fallback;
             }
             return fallback;
         }
-        var buckets = new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
+        var buckets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var blk in riskBlocks)
         {
-            if (blk.TryGetProperty("instrument_buckets", out var bEl) && bEl.ValueKind==JsonValueKind.Object)
+            if (blk.TryGetProperty("instrument_buckets", out var bEl) && bEl.ValueKind == JsonValueKind.Object)
             {
-                foreach (var p in bEl.EnumerateObject()) if (p.Value.ValueKind==JsonValueKind.String) buckets[p.Name] = p.Value.GetString() ?? string.Empty;
+                foreach (var p in bEl.EnumerateObject()) if (p.Value.ValueKind == JsonValueKind.String) buckets[p.Name] = p.Value.GetString() ?? string.Empty;
             }
         }
         var exposureDict = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
@@ -618,22 +623,22 @@ try
             {
                 if (expNode.ValueKind == JsonValueKind.Object)
                 {
-                    foreach (var p2 in expNode.EnumerateObject()) if (p2.Value.ValueKind==JsonValueKind.Number) exposureDict[p2.Name] = p2.Value.GetDecimal();
+                    foreach (var p2 in expNode.EnumerateObject()) if (p2.Value.ValueKind == JsonValueKind.Number) exposureDict[p2.Name] = p2.Value.GetDecimal();
                 }
             }
         }
         var maxRunDD = TryNum("max_run_drawdown_ccy", null);
         if (maxRunDD == 0m) maxRunDD = 0m; // interpret 0 as null below
         // Parse force_drawdown_after_evals (object map symbol->int)
-        Dictionary<string,int>? forceDdMap = null;
+        Dictionary<string, int>? forceDdMap = null;
         foreach (var blk in riskBlocks)
         {
             if (blk.TryGetProperty("forceDrawdownAfterEvals", out var fd) || blk.TryGetProperty("force_drawdown_after_evals", out fd))
             {
-                if (fd.ValueKind==JsonValueKind.Object)
+                if (fd.ValueKind == JsonValueKind.Object)
                 {
-                    forceDdMap ??= new Dictionary<string,int>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var p in fd.EnumerateObject()) if (p.Value.ValueKind==JsonValueKind.Number) forceDdMap[p.Name] = p.Value.GetInt32();
+                    forceDdMap ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var p in fd.EnumerateObject()) if (p.Value.ValueKind == JsonValueKind.Number) forceDdMap[p.Name] = p.Value.GetInt32();
                 }
             }
         }
@@ -650,7 +655,7 @@ try
             EmitEvaluations = TryBool("emit_evaluations", true),
             BlockOnBreach = TryBool("block_on_breach", true),
             MaxRunDrawdownCCY = maxRunDD == 0m ? null : maxRunDD,
-            MaxNetExposureBySymbol = exposureDict.Count==0 ? null : exposureDict,
+            MaxNetExposureBySymbol = exposureDict.Count == 0 ? null : exposureDict,
             ForceDrawdownAfterEvals = forceDdMap
         };
     }
@@ -680,18 +685,18 @@ string penaltyMode = "off"; bool forcePenalty = false;
 bool ciPenaltyScaffold = false; // new root-level opt-in for CI-only forced penalty emission
 try
 {
-    if (raw.RootElement.TryGetProperty("featureFlags", out var ffPen) && ffPen.ValueKind==JsonValueKind.Object && ffPen.TryGetProperty("penalty", out var penNode) && penNode.ValueKind==JsonValueKind.String)
+    if (raw.RootElement.TryGetProperty("featureFlags", out var ffPen) && ffPen.ValueKind == JsonValueKind.Object && ffPen.TryGetProperty("penalty", out var penNode) && penNode.ValueKind == JsonValueKind.String)
     {
         penaltyMode = (penNode.GetString() ?? "off").ToLowerInvariant();
     }
-    if (raw.RootElement.TryGetProperty("penaltyConfig", out var pCfg) && pCfg.ValueKind==JsonValueKind.Object && pCfg.TryGetProperty("forcePenalty", out var fp) && (fp.ValueKind==JsonValueKind.True || fp.ValueKind==JsonValueKind.False))
+    if (raw.RootElement.TryGetProperty("penaltyConfig", out var pCfg) && pCfg.ValueKind == JsonValueKind.Object && pCfg.TryGetProperty("forcePenalty", out var fp) && (fp.ValueKind == JsonValueKind.True || fp.ValueKind == JsonValueKind.False))
     {
-        forcePenalty = fp.ValueKind==JsonValueKind.True;
+        forcePenalty = fp.ValueKind == JsonValueKind.True;
     }
     // Explicit CI scaffold opt-in (default false). Only when true do we emit the early penalty scaffold.
-    if (raw.RootElement.TryGetProperty("ciPenaltyScaffold", out var ciPen) && (ciPen.ValueKind==JsonValueKind.True || ciPen.ValueKind==JsonValueKind.False))
+    if (raw.RootElement.TryGetProperty("ciPenaltyScaffold", out var ciPen) && (ciPen.ValueKind == JsonValueKind.True || ciPen.ValueKind == JsonValueKind.False))
     {
-        ciPenaltyScaffold = ciPen.ValueKind==JsonValueKind.True;
+        ciPenaltyScaffold = ciPen.ValueKind == JsonValueKind.True;
     }
 }
 catch { }
@@ -706,8 +711,8 @@ try
 {
     if (raw.RootElement.TryGetProperty("strategy", out var stratNode) && stratNode.TryGetProperty("params", out var pNode))
     {
-        if (pNode.TryGetProperty("sizeUnitsFx", out var fxNode) && fxNode.ValueKind==JsonValueKind.Number) sizeUnitsFx = (long)fxNode.GetInt32();
-        if (pNode.TryGetProperty("sizeUnitsXau", out var xNode) && xNode.ValueKind==JsonValueKind.Number) sizeUnitsXau = (long) xNode.GetInt32();
+        if (pNode.TryGetProperty("sizeUnitsFx", out var fxNode) && fxNode.ValueKind == JsonValueKind.Number) sizeUnitsFx = (long)fxNode.GetInt32();
+        if (pNode.TryGetProperty("sizeUnitsXau", out var xNode) && xNode.ValueKind == JsonValueKind.Number) sizeUnitsXau = (long)xNode.GetInt32();
     }
 }
 catch { }
@@ -717,20 +722,20 @@ SentimentGuardConfig? BuildSentimentConfig(JsonDocument rawDoc)
     try
     {
         string mode = "shadow"; // default shadow per spec
-        if (rawDoc.RootElement.TryGetProperty("featureFlags", out var ffNode) && ffNode.ValueKind==JsonValueKind.Object)
+        if (rawDoc.RootElement.TryGetProperty("featureFlags", out var ffNode) && ffNode.ValueKind == JsonValueKind.Object)
         {
-            if (ffNode.TryGetProperty("sentiment", out var sentNode) && sentNode.ValueKind==JsonValueKind.String)
+            if (ffNode.TryGetProperty("sentiment", out var sentNode) && sentNode.ValueKind == JsonValueKind.String)
             {
                 mode = sentNode.GetString() ?? "shadow"; // off|shadow|active
             }
         }
-    if (mode.Equals("off", StringComparison.OrdinalIgnoreCase) || mode.Equals("disabled", StringComparison.OrdinalIgnoreCase) || mode.Equals("none", StringComparison.OrdinalIgnoreCase)) return null; // treat synonyms as off
+        if (mode.Equals("off", StringComparison.OrdinalIgnoreCase) || mode.Equals("disabled", StringComparison.OrdinalIgnoreCase) || mode.Equals("none", StringComparison.OrdinalIgnoreCase)) return null; // treat synonyms as off
         // Optional nested sentiment config: sentimentConfig: { window: 20, volGuardSigma: 0.05 }
         int window = 20; decimal sigma = 0.10m;
-        if (rawDoc.RootElement.TryGetProperty("sentimentConfig", out var sc) && sc.ValueKind==JsonValueKind.Object)
+        if (rawDoc.RootElement.TryGetProperty("sentimentConfig", out var sc) && sc.ValueKind == JsonValueKind.Object)
         {
-            if (sc.TryGetProperty("window", out var w) && w.ValueKind==JsonValueKind.Number) window = w.GetInt32();
-            if (sc.TryGetProperty("volGuardSigma", out var s) && s.ValueKind==JsonValueKind.Number) sigma = s.GetDecimal();
+            if (sc.TryGetProperty("window", out var w) && w.ValueKind == JsonValueKind.Number) window = w.GetInt32();
+            if (sc.TryGetProperty("volGuardSigma", out var s) && s.ValueKind == JsonValueKind.Number) sigma = s.GetDecimal();
         }
         return new SentimentGuardConfig(true, window, sigma, mode);
     }
@@ -742,7 +747,7 @@ var loop = new EngineLoop(clock, builders, barKeyTracker!, journal, tickSource, 
 {
     // Persist after each emitted bar (simple, can batch later)
     BarKeyTrackerPersistence.Save(snapshotPath, (InMemoryBarKeyTracker)barKeyTracker, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, EngineInstanceId);
-}, riskFormulas, basketAgg, cfgHash, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, enforcer, riskConfig, equity, 
+}, riskFormulas, basketAgg, cfgHash, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, enforcer, riskConfig, equity,
     deterministicStrategy: isM0 ? new DeterministicScriptStrategy(clock, catalog.All(), sequence.First()) : null,
     execution: execution,
     positions: positions,
@@ -750,7 +755,7 @@ var loop = new EngineLoop(clock, builders, barKeyTracker!, journal, tickSource, 
     dataVersion: dataVersion,
     sizeUnitsFx: sizeUnitsFx,
     sizeUnitsXau: sizeUnitsXau,
-    riskProbeEnabled: !(raw.RootElement.TryGetProperty("featureFlags", out var ff) && ff.ValueKind==JsonValueKind.Object && ff.TryGetProperty("riskProbe", out var rp) && rp.ValueKind==JsonValueKind.String && rp.GetString()=="disabled"),
+    riskProbeEnabled: !(raw.RootElement.TryGetProperty("featureFlags", out var ff) && ff.ValueKind == JsonValueKind.Object && ff.TryGetProperty("riskProbe", out var rp) && rp.ValueKind == JsonValueKind.String && rp.GetString() == "disabled"),
     sentimentConfig: BuildSentimentConfig(raw),
     penaltyConfig: penaltyMode,
     forcePenalty: forcePenalty,
@@ -768,7 +773,7 @@ if (!string.IsNullOrWhiteSpace(outPath))
 {
     try
     {
-    var sourceEvents = Path.Combine(journalRoot, runId, "events.csv");
+        var sourceEvents = Path.Combine(journalRoot, runId, "events.csv");
         if (!File.Exists(sourceEvents))
         {
             Console.Error.WriteLine($"Expected journal file not found at {sourceEvents}");
@@ -813,8 +818,8 @@ try
     if (File.Exists(eventsPath))
     {
         Directory.CreateDirectory(Path.Combine(runDir, "..", "..")); // ensure journals root present (defensive)
-    var parityDirName = runId.StartsWith("M0-RUN-", StringComparison.Ordinal) ? runId.Substring("M0-RUN-".Length) : runId;
-    var parityDir = Path.Combine("artifacts", "parity", parityDirName); // retain trimmed naming to align with tests
+        var parityDirName = runId.StartsWith("M0-RUN-", StringComparison.Ordinal) ? runId.Substring("M0-RUN-".Length) : runId;
+        var parityDir = Path.Combine("artifacts", "parity", parityDirName); // retain trimmed naming to align with tests
         Directory.CreateDirectory(parityDir);
 
         string NormalizeEvents(string path)
@@ -824,13 +829,13 @@ try
             // Skip meta + header
             var data = lines.Skip(2);
             var sb = new System.Text.StringBuilder();
-            bool first=true;
+            bool first = true;
             foreach (var raw in data)
             {
                 if (string.IsNullOrWhiteSpace(raw)) continue;
                 var line = raw.Replace("\r\n", "\n").Replace("\r", "");
                 // events.csv does not include config_hash as a separate column (it's in meta line) so nothing to drop
-                if (!first) sb.Append('\n'); first=false; sb.Append(line);
+                if (!first) sb.Append('\n'); first = false; sb.Append(line);
             }
             return sb.ToString();
         }
@@ -843,15 +848,15 @@ try
             var header = lines[0].Split(',');
             var dropIdx = Array.FindIndex(header, h => h.Equals("config_hash", StringComparison.OrdinalIgnoreCase));
             var keepIdx = new List<int>();
-            for (int i=0;i<header.Length;i++) if (i != dropIdx) keepIdx.Add(i);
-            var sb = new System.Text.StringBuilder(); bool firstLine=true;
+            for (int i = 0; i < header.Length; i++) if (i != dropIdx) keepIdx.Add(i);
+            var sb = new System.Text.StringBuilder(); bool firstLine = true;
             foreach (var raw in lines.Skip(1))
             {
                 if (string.IsNullOrWhiteSpace(raw)) continue;
                 var parts = raw.Split(',');
                 var proj = keepIdx.Select(i => i < parts.Length ? parts[i] : string.Empty);
                 var line = string.Join(',', proj).Replace("\r\n", "\n").Replace("\r", "");
-                if (!firstLine) sb.Append('\n'); firstLine=false; sb.Append(line);
+                if (!firstLine) sb.Append('\n'); firstLine = false; sb.Append(line);
             }
             return sb.ToString();
         }
@@ -861,7 +866,7 @@ try
             using var sha = System.Security.Cryptography.SHA256.Create();
             var bytes = System.Text.Encoding.UTF8.GetBytes(content);
             var hash = sha.ComputeHash(bytes);
-            return string.Concat(hash.Select(b=>b.ToString("X2")));
+            return string.Concat(hash.Select(b => b.ToString("X2")));
         }
 
         var normEvents = NormalizeEvents(eventsPath);
@@ -880,7 +885,7 @@ try
         catch { /* ignore count errors */ }
 
         var hashFile = Path.Combine(parityDir, "hashes.txt");
-        var linesOut = new []
+        var linesOut = new[]
         {
             $"events_sha={eventsSha}",
             $"trades_sha={tradesSha}",

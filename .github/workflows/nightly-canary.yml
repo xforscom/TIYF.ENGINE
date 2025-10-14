@@ -114,9 +114,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ROOT="${ROOT:?ROOT env missing}"
-          SIM="${SIM:-}"
-          TOOLS="${TOOLS:-}"
+          : "${ROOT:?ROOT env missing}"
+          # shellcheck disable=SC2269
+          SIM_PATH="${SIM:-}"
+          # shellcheck disable=SC2269
+          TOOLS_PATH="${TOOLS:-}"
           BASE_CFG="$GITHUB_WORKSPACE/tests/fixtures/backtest_m0/config.backtest-m0.json"
           RUN_BASE="${RUNNER_TEMP}/nightly-${{ matrix.os }}"
           mkdir -p "$RUN_BASE"
@@ -144,7 +146,7 @@ jobs:
             PENALTY_COUNT=0
             RUN_DIR=""
 
-            if [[ ! -f "$SIM" || ! -f "$TOOLS" ]]; then
+            if [[ ! -f "$SIM_PATH" || ! -f "$TOOLS_PATH" ]]; then
               STATUS="missing-binaries"
               HINTS+=("Release binaries unavailable")
             else
@@ -162,7 +164,7 @@ jobs:
 
               SIM_LOG="$RUN_ROOT/sim.log"
               set +e
-              dotnet exec "$SIM" --config "$CFG_OUT" --run-id "$RID" 2>&1 | tee "$SIM_LOG"
+              dotnet exec "$SIM_PATH" --config "$CFG_OUT" --run-id "$RID" 2>&1 | tee "$SIM_LOG"
               SIM_EXIT=${PIPESTATUS[0]}
               set -e
               echo "$SIM_EXIT" > "$RUN_ROOT/sim_exit.txt"
@@ -209,12 +211,12 @@ jobs:
               PARITY_JSON="$RUN_ROOT/parity-parrot.json"
               set +e
               if [[ -n "$TRADES" ]]; then
-                dotnet exec "$TOOLS" verify parity \
+                dotnet exec "$TOOLS_PATH" verify parity \
                   --events-a "$EVENTS" --events-b "$EVENTS" \
                   --trades-a "$TRADES" --trades-b "$TRADES" \
                   --json | tee "$PARITY_JSON"
               else
-                dotnet exec "$TOOLS" verify parity \
+                dotnet exec "$TOOLS_PATH" verify parity \
                   --events-a "$EVENTS" --events-b "$EVENTS" \
                   --json | tee "$PARITY_JSON"
               fi
@@ -229,8 +231,8 @@ jobs:
               fi
               # shellcheck disable=SC1091
               source "$RUN_ROOT/hashes.snapshot"
-              EVENTS_SHA="$EVENTS_SHA"
-              TRADES_SHA="$TRADES_SHA"
+              EVENTS_SHA_VALUE="${EVENTS_SHA:-}"
+              TRADES_SHA_VALUE="${TRADES_SHA:-}"
 
               echo "$PARITY_EXIT" > "$RUN_ROOT/parity_exit.txt"
               if [[ "$PARITY_EXIT" != "0" ]]; then
@@ -252,9 +254,9 @@ jobs:
             fi
             echo "$STATUS_LABEL" > "$RUN_ROOT/status.txt"
             echo "$HINT" > "$RUN_ROOT/hint.txt"
-            printf 'events_sha=%s\ntrades_sha=%s\npenalty_count=%s\nrun_dir=%s\n' "$EVENTS_SHA" "$TRADES_SHA" "$PENALTY_COUNT" "$RUN_DIR" > "$RUN_ROOT/hashes.txt"
+            printf 'events_sha=%s\ntrades_sha=%s\npenalty_count=%s\nrun_dir=%s\n' "$EVENTS_SHA_VALUE" "$TRADES_SHA_VALUE" "$PENALTY_COUNT" "$RUN_DIR" > "$RUN_ROOT/hashes.txt"
 
-            printf '%s,%s,%s,%s,%s,%s,%s,%s,%s\n' "$MODE" "$TRADES_SHA" "$PENALTY_COUNT" "$EVENTS_SHA" "$RUN_DIR" "$STATUS_LABEL" "$HINT" "${SIM_EXIT:-1}" "$PARITY_EXIT" >> "$SUMMARY"
+            printf '%s,%s,%s,%s,%s,%s,%s,%s,%s\n' "$MODE" "$TRADES_SHA_VALUE" "$PENALTY_COUNT" "$EVENTS_SHA_VALUE" "$RUN_DIR" "$STATUS_LABEL" "$HINT" "${SIM_EXIT:-1}" "$PARITY_EXIT" >> "$SUMMARY"
 
             if [[ "$STATUS_LABEL" == "ok" ]]; then
               printf '✅ parity OK (mode=%s)\n' "$MODE" >> "$SUMMARY_MD"

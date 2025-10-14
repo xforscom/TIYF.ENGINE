@@ -184,7 +184,7 @@ jobs:
             DEST_DIR="journals/$MODE"
             mkdir -p "$DEST_DIR"
             RUN_DIR_RAW=$(cat "$RUN_ROOT/run_dir.txt" 2>/dev/null || echo "")
-            rm -rf "$DEST_DIR"/* 2>/dev/null || true
+            rm -rf -- "${DEST_DIR:?}/"* || true
             DEST_ABS=$(cd "$DEST_DIR" && pwd)
             RUN_DIR_POSIX="${RUN_DIR_RAW//\\//}"
             if [[ -n "$RUN_DIR_POSIX" && -d "$RUN_DIR_POSIX" ]]; then
