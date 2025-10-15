@@ -1,3 +1,4 @@
+# actionlint: allow-secrets ADMIN_TOKEN
 name: admin-merge
 on:
   workflow_dispatch:
