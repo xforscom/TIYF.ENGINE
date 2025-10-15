@@ -38,7 +38,7 @@ jobs:
       - name: Prepare directories and env snapshot
         run: |
           $ErrorActionPreference = 'Stop'
-          foreach ($path in @('artifacts', 'scratch')) {
+          foreach ($path in @('artifacts/demo-smoke', 'artifacts/env', 'scratch')) {
             if (Test-Path $path) { Remove-Item -Recurse -Force $path }
           }
           New-Item -ItemType Directory -Force -Path 'artifacts/demo-smoke' | Out-Null
