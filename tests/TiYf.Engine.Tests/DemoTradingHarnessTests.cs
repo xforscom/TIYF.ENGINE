@@ -15,15 +15,15 @@ public sealed class DemoTradingHarnessTests
     public async Task RunAsync_ProducesResultWithExpectedShape()
     {
         string root = ResolveRepoRoot();
-    string configSource = Path.Combine(root, "tests", "fixtures", "backtest_m0", "config.backtest-m0.json");
-    string tempRoot = Path.Combine(Path.GetTempPath(), "demo-harness-tests", Guid.NewGuid().ToString("N"));
-    string journalRoot = Path.Combine(tempRoot, "journals");
-    string configCopy = Path.Combine(tempRoot, "config.json");
+        string configSource = Path.Combine(root, "tests", "fixtures", "backtest_m0", "config.backtest-m0.json");
+        string tempRoot = Path.Combine(Path.GetTempPath(), "demo-harness-tests", Guid.NewGuid().ToString("N"));
+        string journalRoot = Path.Combine(tempRoot, "journals");
+        string configCopy = Path.Combine(tempRoot, "config.json");
 
-    Directory.CreateDirectory(tempRoot);
-    Directory.CreateDirectory(journalRoot);
+        Directory.CreateDirectory(tempRoot);
+        Directory.CreateDirectory(journalRoot);
 
-    PrepareConfig(configSource, configCopy, root);
+        PrepareConfig(configSource, configCopy, root);
 
         try
         {
