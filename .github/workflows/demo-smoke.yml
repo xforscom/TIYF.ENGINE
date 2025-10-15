@@ -30,10 +30,15 @@ jobs:
           dotnet restore TiYf.Engine.sln
           dotnet build TiYf.Engine.sln -c Release --no-restore --nologo
 
+      - name: Run unit tests
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet test TiYf.Engine.sln -c Release --no-build --logger "trx;LogFileName=demo-smoke.trx" --results-directory artifacts/test-results
+
       - name: Prepare directories and env snapshot
         run: |
           $ErrorActionPreference = 'Stop'
-          foreach ($path in @('artifacts', 'scratch')) {
+          foreach ($path in @('artifacts/demo-smoke', 'artifacts/env', 'scratch')) {
             if (Test-Path $path) { Remove-Item -Recurse -Force $path }
           }
           New-Item -ItemType Directory -Force -Path 'artifacts/demo-smoke' | Out-Null
@@ -152,3 +157,11 @@ jobs:
             artifacts/demo-smoke/**
             artifacts/env/env.sanity.txt
             scratch/summary.md
+
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: demo-smoke-tests
+          path: artifacts/test-results/**
+          if-no-files-found: ignore
