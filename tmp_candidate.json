@@ -1,0 +1,42 @@
+{
+  "name": "backtest-m0",
+  "clock": { "mode": "simulated", "startUtc": "2025-01-02T00:00:00Z" },
+  "data": {
+    "type": "csv_ticks",
+    "root": "tests/fixtures/backtest_m0",
+    "instrumentsFile": "tests/fixtures/backtest_m0/instruments.csv",
+    "ticks": {
+      "EURUSD": "tests/fixtures/backtest_m0/ticks_EURUSD.csv",
+      "USDJPY": "tests/fixtures/backtest_m0/ticks_USDJPY.csv",
+      "XAUUSD": "tests/fixtures/backtest_m0/ticks_XAUUSD.csv"
+    },
+    "window": {"fromUtc": "2025-01-02T00:00:00Z", "toUtc": "2025-01-02T02:00:00Z"}
+  },
+  "barBuilder": { "timeframe": "M1", "sessionCalendar": "24x5", "dropOutOfOrder": true },
+  "risk": {
+    "realLeverageCap": 999.0,
+    "marginUsageCapPct": 100000.0,
+    "perPositionRiskCapPct": 1000.0,
+    "basketMode": "instrument_bucket",
+    "basketRiskCapPct": 5000.0
+  },
+  "strategy": {
+    "type": "DeterministicScriptStrategy",
+    "params": {
+      "proposalOffsetsMinutes": [15, 75],
+      "sizeUnitsFx": 1000,
+      "sizeUnitsXau": 1
+    }
+  },
+  "adapters": { "execution": "SimulatedExecutionAdapter", "dataFeed": "HistoricalCsvFeedAdapter" },
+  "featureFlags": {
+    "sentiment": "shadow",
+    "learning": "disabled",
+    "riskProbe": "disabled",
+    "penalty": "active"
+  },
+  "ciPenaltyScaffold": true,
+  "penaltyConfig": { "forcePenalty": true },
+  "rngSeed": 1337,
+  "output": { "journalDir": "journals/M0", "atomicWrites": true, "canonicalizeCsv": true }
+}

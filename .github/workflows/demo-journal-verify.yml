@@ -113,7 +113,7 @@ jobs:
             $runId = $spec.RunId
             $logPath = Join-Path $artifactRoot $spec.LogName
 
-            dotnet exec $demoFeedDll --run-id $runId | Tee-Object -FilePath $logPath | Out-Null
+            dotnet exec $demoFeedDll --run-id $runId --broker-enabled true --broker-fill-mode ioc-market | Tee-Object -FilePath $logPath | Out-Null
             $exitCode = $LASTEXITCODE
             if ($exitCode -ne 0) {
               Set-SummaryLine("❌ demo-journal: adapter FAIL (run_id=$runId exit=$exitCode)")
@@ -124,6 +124,7 @@ jobs:
             $eventsLine = $logLines | Where-Object { $_ -like 'JOURNAL_DIR_EVENTS=*' } | Select-Object -First 1
             $tradesLine = $logLines | Where-Object { $_ -like 'JOURNAL_DIR_TRADES=*' } | Select-Object -First 1
             $runDirLine = $logLines | Where-Object { $_ -like 'RUN_DIR=*' } | Select-Object -First 1
+            $infoLine = $logLines | Where-Object { $_ -like 'INFO first_ts=*' } | Select-Object -First 1
 
             if (-not $eventsLine) {
               Set-SummaryLine("❌ demo-journal: adapter FAIL (missing events path for $runId)")
@@ -137,10 +138,25 @@ jobs:
               Set-SummaryLine("❌ demo-journal: adapter FAIL (missing run dir for $runId)")
               throw "Run directory missing for $runId"
             }
+            if (-not $infoLine) {
+              Set-SummaryLine("❌ demo-journal: adapter FAIL (missing INFO telemetry for $runId)")
+              throw "INFO line missing for $runId"
+            }
 
             $eventsPath = $eventsLine.Split('=')[1]
             $tradesPath = $tradesLine.Split('=')[1]
             $runDirectory = $runDirLine.Split('=')[1]
+            $brokerMatch = [regex]::Match($infoLine, 'broker_dangling=(?<flag>true|false)')
+            if (-not $brokerMatch.Success) {
+              Set-SummaryLine("❌ demo-journal: adapter FAIL (missing broker_dangling telemetry for $runId)")
+              throw "broker_dangling flag missing for $runId"
+            }
+
+            $brokerFlag = $brokerMatch.Groups['flag'].Value
+            if ($brokerFlag -ne 'false') {
+              Set-SummaryLine("❌ demo-journal: adapter FAIL (broker_dangling=$brokerFlag for $runId)")
+              throw "broker dangling reported for $runId"
+            }
 
             if (-not (Test-Path $eventsPath)) {
               Set-SummaryLine("❌ demo-journal: adapter FAIL (events.csv not found for $runId)")
@@ -164,11 +180,13 @@ jobs:
               Events = $resolvedEvents
               Trades = $resolvedTrades
               RunDir = $resolvedRunDir
+              BrokerDangling = $brokerFlag
             }
 
             Add-Content -Path $envSanityPath -Value ("{0}_events={1}" -f $runId.ToLowerInvariant(), $resolvedEvents) -Encoding UTF8
             Add-Content -Path $envSanityPath -Value ("{0}_trades={1}" -f $runId.ToLowerInvariant(), $resolvedTrades) -Encoding UTF8
             Add-Content -Path $envSanityPath -Value ("{0}_dir={1}" -f $runId.ToLowerInvariant(), $resolvedRunDir) -Encoding UTF8
+            Add-Content -Path $envSanityPath -Value ("{0}_broker_dangling={1}" -f $runId.ToLowerInvariant(), $brokerFlag) -Encoding UTF8
           }
 
           $eventsA = $runInfo['DEMO-J1-A'].Events
@@ -217,7 +235,7 @@ jobs:
           $eventsSha = $parityJson.events.hashA
           $tradesSha = $parityJson.trades.hashA
 
-          Set-SummaryLine("✅ demo-journal: strict OK, parity OK (events_sha=$eventsSha, trades_sha=$tradesSha)")
+          Set-SummaryLine("✅ demo-journal: strict OK, parity OK (events_sha=$eventsSha, trades_sha=$tradesSha, broker_dangling=false)")
           Add-Content -Path $env:GITHUB_ENV -Value "DEMO_JOURNAL_EVENTS_SHA=$eventsSha" -Encoding UTF8
           Add-Content -Path $env:GITHUB_ENV -Value "DEMO_JOURNAL_TRADES_SHA=$tradesSha" -Encoding UTF8
 

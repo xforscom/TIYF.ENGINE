@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\TiYf.Engine.Core\TiYf.Engine.Core.csproj" />
+    <ProjectReference Include="..\..\src\TiYf.Engine.DemoFeed\TiYf.Engine.DemoFeed.csproj" />
     <ProjectReference Include="..\..\src\TiYf.Engine.Sim\TiYf.Engine.Sim.csproj" />
     <ProjectReference Include="..\..\src\TiYf.Engine.Sidecar\TiYf.Engine.Sidecar.csproj" />
     <ProjectReference Include="..\..\src\TiYf.Engine.Tools\TiYf.Engine.Tools.csproj" />

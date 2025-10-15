@@ -34,6 +34,12 @@ dotnet exec src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll verif
 
 Expected results: `SIM_EXIT=0`, `STRICT_EXIT=0`, `PARITY_EXIT=0`, six trades, zero `ALERT_BLOCK_*` events, and parity status `"match": true` for both journals.
 
+Demo feed broker flags (PR-B demo stub):
+- `--broker-enabled` turns the deterministic stub on for the run (defaults to disabled).
+- `--broker-fill-mode` currently only accepts `ioc-market`.
+- `--broker-seed` is accepted for forward compatibility but ignored in PR-B.
+- The CLI now logs `broker_dangling` in the INFO banner; CI requires this to remain `false`.
+
 ## Goals (M0)
 
 1. Deterministic clock (test seam)  
