@@ -53,15 +53,19 @@ $eventsPath = [System.IO.Path]::GetFullPath((($eventsLine | Select-Object -First
 $tradesPath = [System.IO.Path]::GetFullPath((($tradesLine | Select-Object -First 1).Line.Split('=')[1]))
 
 $strictJson = Join-Path $stageDir 'strict.json'
-dotnet exec $toolsDll verify strict --events $eventsPath --trades $tradesPath --schema 1.3.0 --json | Tee-Object -FilePath $strictJson
+$strictLines = & dotnet exec $toolsDll verify strict --events $eventsPath --trades $tradesPath --schema 1.3.0 --json
 $strictExit = $LASTEXITCODE
+$strictLines | ForEach-Object { $_ }
+Set-Content -Path $strictJson -Value $strictLines -Encoding UTF8
 if ($strictExit -ne 0) {
     throw "verify strict exited with $strictExit"
 }
 
 $parityJson = Join-Path $stageDir 'parity.json'
-dotnet exec $toolsDll verify parity --events-a $eventsPath --events-b $eventsPath --trades-a $tradesPath --trades-b $tradesPath --json | Tee-Object -FilePath $parityJson
+$parityLines = & dotnet exec $toolsDll verify parity --events-a $eventsPath --events-b $eventsPath --trades-a $tradesPath --trades-b $tradesPath --json
 $parityExit = $LASTEXITCODE
+$parityLines | ForEach-Object { $_ }
+Set-Content -Path $parityJson -Value $parityLines -Encoding UTF8
 if ($parityExit -ne 0) {
     throw "verify parity exited with $parityExit"
 }

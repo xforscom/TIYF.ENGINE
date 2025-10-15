@@ -23,14 +23,70 @@ jobs:
               core.setFailed('Invalid pull request number');
               return;
             }
-            const result = await github.rest.pulls.merge({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: prNumber,
-              merge_method: 'squash',
-            });
-            if (!result.data.merged) {
-              core.setFailed(`Merge API call returned merged=${result.data.merged}`);
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            let pr;
+            try {
+              const { data } = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
+              pr = data;
+            } catch (error) {
+              core.error(error);
+              core.setFailed(`Failed to load PR #${prNumber}`);
               return;
             }
-            core.info(`PR #${prNumber} merged as ${result.data.sha}`);
+
+            const expectedHeadOid = pr.head?.sha;
+            if (!expectedHeadOid) {
+              core.setFailed('Missing head SHA on pull request');
+              return;
+            }
+
+            const headlineRaw = `Merge PR #${prNumber}: ${pr.title ?? ''}`.trim();
+            const headline = headlineRaw.length > 250 ? `${headlineRaw.slice(0, 247)}...` : (headlineRaw || `Merge PR #${prNumber}`);
+            const bypassReasonRaw = `Admin merge via workflow run ${process.env.GITHUB_RUN_ID ?? 'unknown'}`;
+            const bypassReason = bypassReasonRaw.length > 256 ? bypassReasonRaw.slice(0, 256) : bypassReasonRaw;
+
+            const mutation = `mutation MergeAdminBypass($pullRequestId: ID!, $expectedHeadOid: GitObjectID!, $commitHeadline: String!, $bypassReason: String!) {
+              mergePullRequest(input: {
+                pullRequestId: $pullRequestId,
+                expectedHeadOid: $expectedHeadOid,
+                mergeMethod: SQUASH,
+                commitHeadline: $commitHeadline,
+                bypassPullRequestAllowances: true,
+                bypassReason: $bypassReason
+              }) {
+                pullRequest {
+                  merged
+                  mergeCommit { oid }
+                }
+              }
+            }`;
+
+            try {
+              const response = await github.graphql(mutation, {
+                pullRequestId: pr.node_id,
+                expectedHeadOid,
+                commitHeadline: headline,
+                bypassReason,
+              });
+
+              const mergeResult = response?.mergePullRequest?.pullRequest;
+              if (!mergeResult?.merged) {
+                core.setFailed('Merge mutation completed without merging the pull request');
+                return;
+              }
+
+              const mergeCommit = mergeResult.mergeCommit?.oid ?? 'unknown commit';
+              core.info(`PR #${prNumber} merged as ${mergeCommit}`);
+            } catch (error) {
+              if (error?.errors) {
+                for (const err of error.errors) {
+                  core.error(`${err.type ?? 'GraphQLError'}: ${err.message}`);
+                }
+              } else {
+                core.error(error);
+              }
+              core.setFailed('Failed to merge pull request via GraphQL API');
+            }
