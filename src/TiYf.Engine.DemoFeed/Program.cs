@@ -1,19 +1,22 @@
+using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using TiYf.Engine.DemoFeed;
 
 try
 {
     var options = DemoFeedOptions.FromArgs(args);
     var result = DemoFeedRunner.Run(options);
 
-    Console.WriteLine("INFO first_ts={0} last_ts={1} bars={2} symbols={3} run_dir={4}",
+    Console.WriteLine("INFO first_ts={0} last_ts={1} bars={2} symbols={3} run_dir={4} broker_dangling={5}",
         result.FirstTimestamp.ToString("O", CultureInfo.InvariantCulture),
         result.LastTimestamp.ToString("O", CultureInfo.InvariantCulture),
         result.BarsWritten,
         string.Join(',', result.Symbols),
-        result.RunDirectory);
+        result.RunDirectory,
+        result.BrokerHadDanglingPositions ? "true" : "false");
 
     Console.WriteLine("RUN_DIR={0}", result.RunDirectory);
     Console.WriteLine("JOURNAL_DIR_EVENTS={0}", result.EventsPath);
@@ -32,7 +35,15 @@ catch (Exception ex)
     return 1;
 }
 
-internal sealed record DemoFeedResult(string RunDirectory, string EventsPath, string? TradesPath, DateTime FirstTimestamp, DateTime LastTimestamp, int BarsWritten, IReadOnlyList<string> Symbols);
+internal sealed record DemoFeedResult(
+    string RunDirectory,
+    string EventsPath,
+    string? TradesPath,
+    DateTime FirstTimestamp,
+    DateTime LastTimestamp,
+    int BarsWritten,
+    IReadOnlyList<string> Symbols,
+    bool BrokerHadDanglingPositions);
 
 internal static class DemoFeedRunner
 {
@@ -70,15 +81,20 @@ internal static class DemoFeedRunner
         var interval = TimeSpan.FromSeconds(options.IntervalSeconds);
         var firstTs = startUtc;
         var lastTs = startUtc;
+        var barsBySymbol = new Dictionary<string, List<DemoBarSnapshot>>(StringComparer.Ordinal);
 
         foreach (var symbol in options.Symbols)
         {
-            // The stub accepts a single symbol in PR A, but the loop keeps the structure extensible without extra branching.
             var clock = startUtc;
+            var symbolBars = new List<DemoBarSnapshot>(options.Bars);
+            barsBySymbol[symbol] = symbolBars;
+
             for (var i = 0; i < options.Bars; i++)
             {
                 var endUtc = clock.Add(interval);
                 var bar = GenerateBar(options.Seed, symbol, clock, endUtc, i);
+                symbolBars.Add(new DemoBarSnapshot(endUtc, bar.Close));
+
                 var payload = JsonSerializer.Serialize(bar, SerializerOptions);
                 writer.WriteLine(string.Format(CultureInfo.InvariantCulture,
                     "{0},{1},BAR_V1,\"{2}\"",
@@ -97,6 +113,9 @@ internal static class DemoFeedRunner
 
         var tradesPath = Path.Combine(runDirectory, "trades.csv");
         if (File.Exists(tradesPath)) File.Delete(tradesPath);
+
+        var brokerResult = DemoBrokerStub.GenerateTrades(options, barsBySymbol);
+
         using (var tradesStream = new FileStream(tradesPath, FileMode.Create, FileAccess.Write, FileShare.None))
         using (var tradesWriter = new StreamWriter(tradesStream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false))
         {
@@ -104,11 +123,40 @@ internal static class DemoFeedRunner
         })
         {
             tradesWriter.WriteLine("utc_ts_open,utc_ts_close,symbol,direction,entry_price,exit_price,volume_units,pnl_ccy,pnl_r,decision_id,schema_version,config_hash,data_version");
+
+            foreach (var trade in brokerResult.Trades)
+            {
+                tradesWriter.WriteLine(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12}",
+                    trade.UtcTsOpen.ToString("O", CultureInfo.InvariantCulture),
+                    trade.UtcTsClose.ToString("O", CultureInfo.InvariantCulture),
+                    trade.Symbol,
+                    trade.Direction,
+                    trade.EntryPrice.ToString("F4", CultureInfo.InvariantCulture),
+                    trade.ExitPrice.ToString("F4", CultureInfo.InvariantCulture),
+                    trade.VolumeUnits,
+                    trade.PnlCcy.ToString("F2", CultureInfo.InvariantCulture),
+                    trade.PnlR.ToString("F2", CultureInfo.InvariantCulture),
+                    trade.DecisionId,
+                    SchemaVersion,
+                    ConfigHash,
+                    string.Empty));
+            }
+
             tradesWriter.Flush();
             tradesStream.Flush(flushToDisk: true);
         }
 
-        return new DemoFeedResult(runDirectory, Path.GetFullPath(eventsPath), Path.GetFullPath(tradesPath), firstTs, lastTs, options.Bars * options.Symbols.Count, options.Symbols);
+        return new DemoFeedResult(
+            runDirectory,
+            Path.GetFullPath(eventsPath),
+            Path.GetFullPath(tradesPath),
+            firstTs,
+            lastTs,
+            options.Bars * options.Symbols.Count,
+            options.Symbols,
+            brokerResult.HadDanglingPositions);
     }
 
     private static GeneratedBar GenerateBar(int seed, string symbol, DateTime startUtc, DateTime endUtc, int index)
@@ -187,7 +235,7 @@ internal static class SerializerFactory
 
 internal sealed class DemoFeedOptions
 {
-    private DemoFeedOptions(string runId, string journalRoot, IReadOnlyList<string> symbols, DateTime startUtc, int bars, int intervalSeconds, int seed)
+    private DemoFeedOptions(string runId, string journalRoot, IReadOnlyList<string> symbols, DateTime startUtc, int bars, int intervalSeconds, int seed, DemoBrokerOptions broker)
     {
         RunId = runId;
         JournalRoot = journalRoot;
@@ -196,6 +244,7 @@ internal sealed class DemoFeedOptions
         Bars = bars;
         IntervalSeconds = intervalSeconds;
         Seed = seed;
+        Broker = broker;
     }
 
     public string RunId { get; }
@@ -205,6 +254,7 @@ internal sealed class DemoFeedOptions
     public int Bars { get; }
     public int IntervalSeconds { get; }
     public int Seed { get; }
+    public DemoBrokerOptions Broker { get; }
 
     public static DemoFeedOptions FromArgs(string[] args)
     {
@@ -247,7 +297,21 @@ internal sealed class DemoFeedOptions
         if (!int.TryParse(seedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var seed))
             throw new DemoFeedException("seed must be an integer");
 
-        return new DemoFeedOptions(runId, journalRoot, Array.AsReadOnly(symbols), startUtc, bars, intervalSeconds, seed);
+        var brokerEnabled = GetBoolean(map, "broker-enabled", fallback: false);
+        var brokerFillMode = GetOrDefault(map, "broker-fill-mode", "ioc-market");
+        if (string.IsNullOrWhiteSpace(brokerFillMode))
+            throw new DemoFeedException("broker-fill-mode cannot be empty");
+        int? brokerSeed = null;
+        if (map.TryGetValue("broker-seed", out var brokerSeedValue) && !string.IsNullOrWhiteSpace(brokerSeedValue))
+        {
+            if (!int.TryParse(brokerSeedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedBrokerSeed))
+                throw new DemoFeedException("broker-seed must be an integer");
+            brokerSeed = parsedBrokerSeed;
+        }
+
+        var brokerOptions = new DemoBrokerOptions(brokerEnabled, brokerFillMode, brokerSeed);
+
+        return new DemoFeedOptions(runId, journalRoot, Array.AsReadOnly(symbols), startUtc, bars, intervalSeconds, seed, brokerOptions);
     }
 
     private static Dictionary<string, string> ParseArgs(string[] args)
@@ -293,6 +357,26 @@ internal sealed class DemoFeedOptions
     private static string GetOrDefault(Dictionary<string, string> map, string key, string fallback)
     {
         return map.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value) ? value : fallback;
+    }
+
+    private static bool GetBoolean(Dictionary<string, string> map, string key, bool fallback)
+    {
+        if (!map.TryGetValue(key, out var value) || string.IsNullOrWhiteSpace(value))
+        {
+            return fallback;
+        }
+
+        if (bool.TryParse(value, out var boolean))
+        {
+            return boolean;
+        }
+
+        if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var numeric))
+        {
+            return numeric != 0;
+        }
+
+        throw new DemoFeedException($"Invalid boolean value '{value}' for '{key}'.");
     }
 }
 
