@@ -1,5 +1,7 @@
 # Demo Trading Skeleton Plan
 
+> Status: Draft PR placeholder awaiting review
+
 ## Goal
 
 Establish a paper/demo trading harness that exercises the engine without touching live venues while preserving the existing determinism + verification guarantees.
