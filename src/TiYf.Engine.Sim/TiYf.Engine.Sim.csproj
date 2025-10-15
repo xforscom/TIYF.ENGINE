@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\TiYf.Engine.Core\TiYf.Engine.Core.csproj" />
     <ProjectReference Include="..\TiYf.Engine.Sidecar\TiYf.Engine.Sidecar.csproj" />
+    <ProjectReference Include="..\TiYf.Engine.Tools\TiYf.Engine.Tools.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
