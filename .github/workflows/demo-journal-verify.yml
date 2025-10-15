@@ -1,0 +1,252 @@
+name: demo-journal-verify
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - .github/workflows/demo-journal-verify.yml
+      - src/TiYf.Engine.DemoFeed/**
+      - TiYf.Engine.sln
+      - docs/**
+      - README.md
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore and build Release
+        run: |
+          dotnet restore TiYf.Engine.sln
+          dotnet build TiYf.Engine.sln -c Release --no-restore --nologo
+
+      - name: Upload release binaries
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-binaries
+          path: |
+            src/TiYf.Engine.DemoFeed/bin/Release/net8.0/**
+            src/TiYf.Engine.Tools/bin/Release/net8.0/**
+
+  verify:
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Download release binaries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-binaries
+          path: release-binaries
+
+      - name: Run demo feed and verify journals
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          function Set-SummaryLine([string]$line) {
+            if (-not [string]::IsNullOrWhiteSpace($line)) {
+              Add-Content -Path $env:GITHUB_ENV -Value "DEMO_JOURNAL_SUMMARY_LINE=$line" -Encoding UTF8
+            }
+          }
+
+          function Resolve-Binary([string]$root, [string]$fileName, [string]$summaryContext) {
+            $match = Get-ChildItem -Path $root -Filter $fileName -File -Recurse | Select-Object -First 1
+            if (-not $match) {
+              Set-SummaryLine("❌ demo-journal: $summaryContext FAIL ($fileName missing)")
+              throw "$fileName not found under $root"
+            }
+
+            return (Resolve-Path $match.FullName).Path
+          }
+
+          $artifactRootPath = (Resolve-Path 'release-binaries').Path
+          $demoFeedDll = Resolve-Binary -root $artifactRootPath -fileName 'TiYf.Engine.DemoFeed.dll' -summaryContext 'adapter'
+          $toolsDll = Resolve-Binary -root $artifactRootPath -fileName 'TiYf.Engine.Tools.dll' -summaryContext 'verify'
+
+          $artifactRoot = Join-Path $PWD 'artifacts/demo-journal'
+          New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
+
+          $envSanityPath = Join-Path $artifactRoot 'env.sanity'
+          $envDetails = @(
+            "os=$env:RUNNER_OS",
+            "job_os=${{ matrix.os }}",
+            "github_sha=$env:GITHUB_SHA",
+            "workflow=$env:GITHUB_WORKFLOW",
+            "run_attempt=$env:GITHUB_RUN_ATTEMPT",
+            "demo_feed_dll=$demoFeedDll",
+            "tools_dll=$toolsDll"
+          )
+          $envDetails | Set-Content -Path $envSanityPath -Encoding UTF8
+
+          $runSpecs = @(
+            @{ RunId = 'DEMO-J1-A'; LogName = 'demofeed-A.log' },
+            @{ RunId = 'DEMO-J1-B'; LogName = 'demofeed-B.log' }
+          )
+
+          $runInfo = @{}
+
+          foreach ($spec in $runSpecs) {
+            $runId = $spec.RunId
+            $logPath = Join-Path $artifactRoot $spec.LogName
+
+            dotnet exec $demoFeedDll --run-id $runId | Tee-Object -FilePath $logPath | Out-Null
+            $exitCode = $LASTEXITCODE
+            if ($exitCode -ne 0) {
+              Set-SummaryLine("❌ demo-journal: adapter FAIL (run_id=$runId exit=$exitCode)")
+              throw "Demo feed exited with code $exitCode for $runId"
+            }
+
+            $logLines = Get-Content $logPath
+            $eventsLine = $logLines | Where-Object { $_ -like 'JOURNAL_DIR_EVENTS=*' } | Select-Object -First 1
+            $tradesLine = $logLines | Where-Object { $_ -like 'JOURNAL_DIR_TRADES=*' } | Select-Object -First 1
+            $runDirLine = $logLines | Where-Object { $_ -like 'RUN_DIR=*' } | Select-Object -First 1
+
+            if (-not $eventsLine) {
+              Set-SummaryLine("❌ demo-journal: adapter FAIL (missing events path for $runId)")
+              throw "Events path missing for $runId"
+            }
+            if (-not $tradesLine) {
+              Set-SummaryLine("❌ demo-journal: adapter FAIL (missing trades path for $runId)")
+              throw "Trades path missing for $runId"
+            }
+            if (-not $runDirLine) {
+              Set-SummaryLine("❌ demo-journal: adapter FAIL (missing run dir for $runId)")
+              throw "Run directory missing for $runId"
+            }
+
+            $eventsPath = $eventsLine.Split('=')[1]
+            $tradesPath = $tradesLine.Split('=')[1]
+            $runDirectory = $runDirLine.Split('=')[1]
+
+            if (-not (Test-Path $eventsPath)) {
+              Set-SummaryLine("❌ demo-journal: adapter FAIL (events.csv not found for $runId)")
+              throw "events.csv missing at $eventsPath"
+            }
+            if (-not (Test-Path $tradesPath)) {
+              Set-SummaryLine("❌ demo-journal: adapter FAIL (trades.csv not found for $runId)")
+              throw "trades.csv missing at $tradesPath"
+            }
+            if (-not (Test-Path $runDirectory)) {
+              Set-SummaryLine("❌ demo-journal: adapter FAIL (run dir missing for $runId)")
+              throw "run directory missing at $runDirectory"
+            }
+
+            $resolvedEvents = (Resolve-Path $eventsPath).Path
+            $resolvedTrades = (Resolve-Path $tradesPath).Path
+            $resolvedRunDir = (Resolve-Path $runDirectory).Path
+
+            $runInfo[$runId] = [PSCustomObject]@{
+              RunId  = $runId
+              Events = $resolvedEvents
+              Trades = $resolvedTrades
+              RunDir = $resolvedRunDir
+            }
+
+            Add-Content -Path $envSanityPath -Value ("{0}_events={1}" -f $runId.ToLowerInvariant(), $resolvedEvents) -Encoding UTF8
+            Add-Content -Path $envSanityPath -Value ("{0}_trades={1}" -f $runId.ToLowerInvariant(), $resolvedTrades) -Encoding UTF8
+            Add-Content -Path $envSanityPath -Value ("{0}_dir={1}" -f $runId.ToLowerInvariant(), $resolvedRunDir) -Encoding UTF8
+          }
+
+          $eventsA = $runInfo['DEMO-J1-A'].Events
+          $tradesA = $runInfo['DEMO-J1-A'].Trades
+          $eventsB = $runInfo['DEMO-J1-B'].Events
+          $tradesB = $runInfo['DEMO-J1-B'].Trades
+
+          $strictJsonPath = Join-Path $artifactRoot 'strict.json'
+          $strictArgs = @('verify','strict','--events',$eventsA,'--trades',$tradesA,'--schema','1.3.0','--json')
+          dotnet exec $toolsDll @strictArgs | Tee-Object -FilePath $strictJsonPath | Out-Null
+          $strictExit = $LASTEXITCODE
+          $strictJson = Get-Content $strictJsonPath -Raw | ConvertFrom-Json
+
+          if ($strictExit -ne 0) {
+            $detail = 'exit_nonzero'
+            if ($strictJson.violations -and $strictJson.violations.Count -gt 0) {
+              $detail = $strictJson.violations[0].detail
+            }
+            $summary = "❌ demo-journal: strict FAIL (first_violation=$detail)"
+            Set-SummaryLine($summary)
+            throw "verify strict exited with $strictExit"
+          }
+
+          if ($strictJson.summary.violations -gt 0) {
+            $detail = $strictJson.violations[0].detail
+            $summary = "❌ demo-journal: strict FAIL (first_violation=$detail)"
+            Set-SummaryLine($summary)
+            throw "verify strict reported violations"
+          }
+
+          $parityJsonPath = Join-Path $artifactRoot 'parity.json'
+          $parityArgs = @('verify','parity','--events-a',$eventsA,'--events-b',$eventsB,'--trades-a',$tradesA,'--trades-b',$tradesB,'--json')
+          dotnet exec $toolsDll @parityArgs | Tee-Object -FilePath $parityJsonPath | Out-Null
+          $parityExit = $LASTEXITCODE
+          $parityJson = Get-Content $parityJsonPath -Raw | ConvertFrom-Json
+
+          if ($parityExit -ne 0 -or (-not $parityJson.events.match) -or (-not $parityJson.trades.match)) {
+            $firstDiff = $parityJson.events.firstDiff
+            $detail = if ($firstDiff -and $firstDiff.detail) { $firstDiff.detail } else { 'unknown' }
+            $line = if ($firstDiff -and $firstDiff.line) { $firstDiff.line } else { 'n/a' }
+            $summary = "❌ demo-journal: parity FAIL (first_diff=$detail line=$line)"
+            Set-SummaryLine($summary)
+            throw "verify parity failed"
+          }
+
+          $eventsSha = $parityJson.events.hashA
+          $tradesSha = $parityJson.trades.hashA
+
+          Set-SummaryLine("✅ demo-journal: strict OK, parity OK (events_sha=$eventsSha, trades_sha=$tradesSha)")
+          Add-Content -Path $env:GITHUB_ENV -Value "DEMO_JOURNAL_EVENTS_SHA=$eventsSha" -Encoding UTF8
+          Add-Content -Path $env:GITHUB_ENV -Value "DEMO_JOURNAL_TRADES_SHA=$tradesSha" -Encoding UTF8
+
+          $hashFile = Join-Path $artifactRoot 'hashes.txt'
+          @(
+            "events_sha=$eventsSha",
+            "trades_sha=$tradesSha"
+          ) | Set-Content -Path $hashFile -Encoding UTF8
+
+          $journalsDest = Join-Path $artifactRoot 'journals'
+          $demoDest = Join-Path $journalsDest 'DEMO'
+          New-Item -ItemType Directory -Force -Path $demoDest | Out-Null
+
+          foreach ($info in $runInfo.GetEnumerator()) {
+            Copy-Item -Path $info.Value.RunDir -Destination $demoDest -Recurse -Force
+          }
+
+      - name: Upload demo journal artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: demo-journal-${{ matrix.os }}
+          path: artifacts/demo-journal/**
+
+      - name: Record summary
+        if: always()
+        run: |
+          $line = $env:DEMO_JOURNAL_SUMMARY_LINE
+          if ([string]::IsNullOrWhiteSpace($line)) {
+            $line = "❌ demo-journal: summary unavailable"
+          }
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $line
