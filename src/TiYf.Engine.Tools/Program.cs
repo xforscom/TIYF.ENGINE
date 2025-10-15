@@ -819,31 +819,109 @@ static int RunPromote(List<string> args)
                 catch { }
                 return "off";
             }
+
+            static List<(int lineNumber, int sequence, string timestamp, string symbol, string raw)> LoadPenaltyEvents(string eventsPath)
+            {
+                static string ExtractSymbol(string payloadSegment)
+                {
+                    if (string.IsNullOrWhiteSpace(payloadSegment)) return string.Empty;
+                    var trimmed = payloadSegment.Trim();
+                    if (trimmed.Length >= 2 && trimmed[0] == '"' && trimmed[^1] == '"')
+                        trimmed = trimmed.Substring(1, trimmed.Length - 2);
+                    if (trimmed.IndexOf("\"\"", StringComparison.Ordinal) >= 0)
+                        trimmed = trimmed.Replace("\"\"", "\"");
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(trimmed);
+                        if (doc.RootElement.TryGetProperty("symbol", out var sym) && sym.ValueKind == JsonValueKind.String)
+                            return sym.GetString() ?? string.Empty;
+                    }
+                    catch { }
+                    return string.Empty;
+                }
+
+                var lines = File.ReadAllLines(eventsPath);
+                var list = new List<(int, int, string, string, string)>();
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    var line = lines[i];
+                    if (!line.Contains("PENALTY_APPLIED_V1", StringComparison.Ordinal)) continue;
+                    var parts = line.Split(',', 4);
+                    int sequence = -1;
+                    if (parts.Length > 0) int.TryParse(parts[0], out sequence);
+                    string timestamp = parts.Length > 1 ? parts[1] : string.Empty;
+                    string payload = parts.Length > 3 ? parts[3] : string.Empty;
+                    string symbol = ExtractSymbol(payload);
+                    list.Add((i + 1, sequence, timestamp, symbol, line));
+                }
+                return list;
+            }
+
             string basePenalty = ResolvePenaltyMode(baseline!);
             string candPenalty = ResolvePenaltyMode(candidate!);
             try
             {
-                static List<string> LoadPenalty(string eventsPath)
-                {
-                    var lines = File.ReadAllLines(eventsPath);
-                    var list = new List<string>();
-                    for (int i = 2; i < lines.Length; i++) if (lines[i].Contains("PENALTY_APPLIED_V1", StringComparison.Ordinal)) list.Add(lines[i]);
-                    return list;
-                }
-                var penA = LoadPenalty(baseRun.EventsPath);
-                var penB = LoadPenalty(candRunA.EventsPath);
+                var penA = LoadPenaltyEvents(baseRun.EventsPath);
+                var penB = LoadPenaltyEvents(candRunA.EventsPath);
                 int baseCnt = penA.Count, candCnt = penB.Count;
                 bool benignShadowToActiveZero = basePenalty == "shadow" && candPenalty == "active" && candCnt == 0;
                 if (!benignShadowToActiveZero)
                 {
-                    if (basePenalty != candPenalty) { penaltyParity = false; penaltyReason = "penalty_mismatch"; }
+                    void FlagPenaltyMismatch(string hint)
+                    {
+                        penaltyParity = false;
+                        penaltyReason = "penalty_mismatch";
+                        penaltyHint = hint;
+                        reason = "penalty_mismatch";
+                    }
+
+                    if (!string.Equals(basePenalty, candPenalty, StringComparison.Ordinal))
+                    {
+                        FlagPenaltyMismatch($"penalty mode: baseline={basePenalty} candidate={candPenalty}");
+                    }
+                    else if (baseCnt != candCnt)
+                    {
+                        FlagPenaltyMismatch($"penalty count: baseline={baseCnt} candidate={candCnt}");
+                    }
                     else
                     {
-                        int min = Math.Min(baseCnt, candCnt);
-                        for (int i = 0; i < min; i++) if (!string.Equals(penA[i], penB[i], StringComparison.Ordinal)) { penaltyParity = false; penaltyReason = "penalty_mismatch"; penaltyHint = BuildDiffHint(penA[i], penB[i]); break; }
-                        if (penaltyParity && baseCnt != candCnt) { penaltyParity = false; penaltyReason = "penalty_mismatch"; penaltyHint = $"penalty_count base={baseCnt} cand={candCnt}"; }
+                        for (int i = 0; i < baseCnt; i++)
+                        {
+                            var (lineA, seqA, tsA, symA, rawA) = penA[i];
+                            var (lineB, seqB, tsB, symB, rawB) = penB[i];
+                            if (seqA >= 0 && seqB >= 0 && seqA != seqB)
+                            {
+                                FlagPenaltyMismatch($"penalty seq: baseline={seqA} candidate={seqB}");
+                                break;
+                            }
+                            if (!string.Equals(tsA, tsB, StringComparison.Ordinal))
+                            {
+                                FlagPenaltyMismatch($"penalty ts: baseline={tsA} candidate={tsB}");
+                                break;
+                            }
+                            if (!string.IsNullOrEmpty(symA) || !string.IsNullOrEmpty(symB))
+                            {
+                                if (!string.Equals(symA, symB, StringComparison.Ordinal))
+                                {
+                                    FlagPenaltyMismatch($"penalty symbol: baseline={symA} candidate={symB}");
+                                    break;
+                                }
+                            }
+                            if (lineA != lineB)
+                            {
+                                FlagPenaltyMismatch($"penalty line: baseline={lineA} candidate={lineB}");
+                                break;
+                            }
+                            if (!string.Equals(rawA, rawB, StringComparison.Ordinal))
+                            {
+                                var diff = BuildDiffHint(rawA, rawB);
+                                FlagPenaltyMismatch(string.IsNullOrEmpty(diff)
+                                    ? $"penalty diff index {i}"
+                                    : $"penalty diff[{i}]: {diff}");
+                                break;
+                            }
+                        }
                     }
-                    if (!penaltyParity) reason = "penalty_mismatch";
                 }
             }
             catch (Exception ex)
@@ -907,7 +985,7 @@ static int RunPromote(List<string> args)
             accepted,
             reason = string.IsNullOrEmpty(reason) ? "accept" : reason,
             sentiment = new { baseline_mode = baselineMode, candidate_mode = candidateMode, parity = sentimentParity, reason = sentimentReason, diff_hint = diffHint },
-            penalty = new { parity = penaltyParity, reason = penaltyReason, diff_hint = penaltyHint },
+            penalty = new { parity = penaltyParity ? "ok" : "mismatch", reason = penaltyReason, diff_hint = penaltyHint },
             risk = riskParityObj,
             baseline = new { pnl = Round2(baseMetrics.pnl), maxDd = Round2(baseMetrics.maxDd), rows = baseMetrics.rows },
             candidate = new { pnl = Round2(candMetrics.pnl), maxDd = Round2(candMetrics.maxDd), rows = candMetrics.rows, alerts = candAlerts },

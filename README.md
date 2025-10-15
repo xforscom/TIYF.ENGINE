@@ -23,6 +23,17 @@ Modular monolith trading engine MVP (M0). Focus: deterministic replay, bar build
  dotnet run --project src/TiYf.Engine.Sim -- --config .\sample-config.json
 ```
 
+## Demo Smoke (Run it locally)
+
+```powershell
+# Requires Release build (dotnet build -c Release)
+dotnet exec src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll --config tests/fixtures/backtest_m0/config.backtest-m0.json --run-id DEMO-A
+dotnet exec src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll verify strict --events journals/M0/M0-RUN-DEMO-A/events.csv --trades journals/M0/M0-RUN-DEMO-A/trades.csv --schema 1.3.0 --json
+dotnet exec src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll verify parity --events-a journals/M0/M0-RUN-DEMO-A/events.csv --events-b journals/M0/M0-RUN-DEMO-A/events.csv --trades-a journals/M0/M0-RUN-DEMO-A/trades.csv --trades-b journals/M0/M0-RUN-DEMO-A/trades.csv --json
+```
+
+Expected results: `SIM_EXIT=0`, `STRICT_EXIT=0`, `PARITY_EXIT=0`, six trades, zero `ALERT_BLOCK_*` events, and parity status `"match": true` for both journals.
+
 ## Goals (M0)
 
 1. Deterministic clock (test seam)  
