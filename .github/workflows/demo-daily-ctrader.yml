@@ -208,6 +208,38 @@ jobs:
           Copy-Or-Placeholder -Source (Join-Path $PWD.Path 'demo-ctrader.log') -Destination (Join-Path $artifactDir 'demo-ctrader.log')
           Copy-Or-Placeholder -Source (Join-Path $PWD.Path 'preflight.sanity.txt') -Destination (Join-Path $artifactDir 'preflight.sanity.txt')
 
+      - name: Summarize Results
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          function Resolve-Value {
+            param([string]$Value)
+            if ([string]::IsNullOrWhiteSpace($Value)) {
+              return 'unknown'
+            }
+            return $Value
+          }
+
+          function Resolve-Hash {
+            param([string]$Path)
+            if (-not [string]::IsNullOrWhiteSpace($Path) -and (Test-Path -Path $Path)) {
+              return (Get-FileHash -Algorithm SHA256 -Path $Path).Hash.ToUpperInvariant()
+            }
+            return 'unknown'
+          }
+
+          $strictExit = Resolve-Value $env:STRICT_EXIT
+          $parityExit = Resolve-Value $env:PARITY_EXIT
+          $brokerDangling = Resolve-Value $env:BROKER_DANGLING
+          $eventsHash = Resolve-Hash $env:EVENTS_PATH
+          $tradesHash = Resolve-Hash $env:TRADES_PATH
+
+          $resultLine = "STRICT_EXIT=$strictExit; PARITY_EXIT=$parityExit; broker_dangling=$brokerDangling; events_sha=$eventsHash; trades_sha=$tradesHash"
+          Write-Host $resultLine
+          $resultLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
       - name: Upload Artifacts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
