@@ -15,7 +15,9 @@ on:
         type: boolean
 
 permissions:
-  contents: read
+  contents: write
+  issues: write
+  statuses: write
 
 jobs:
   demo-live-smoke-ctrader:
@@ -361,7 +363,7 @@ jobs:
           $artifactDir = Join-Path $workspace 'artifacts'
           Write-Host "Workspace root: $workspace"
           if (Test-Path $artifactDir) {
-            Write-Host "Contents of $artifactDir:"
+            Write-Host ("Contents of {0}:" -f $artifactDir)
             Get-ChildItem -Path $artifactDir
           } else {
             Write-Warning "Artifact directory missing: $artifactDir"
