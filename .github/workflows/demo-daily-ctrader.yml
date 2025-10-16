@@ -127,17 +127,17 @@ jobs:
           }
           echo "Environment = demo"
           $summary += "| Environment | demo |"
-          # Dry run check
-          if ($env:DRY_RUN -eq 'false') {
-            echo "live trading disabled in this build"
-            exit 0
-          }
+          $summaryPath = Join-Path $workspace 'preflight.sanity.txt'
           # Write summary
           $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
           # Write artifact
-          $summaryPath = Join-Path $workspace 'preflight.sanity.txt'
           $summary | Out-File -FilePath $summaryPath -Encoding utf8
           Write-Host "Preflight summary written to $summaryPath"
+          if ($env:DRY_RUN -eq 'false') {
+            Write-Host 'Live trading mode confirmed for this run.'
+          } else {
+            Write-Host 'Dry run mode confirmed; live trading disabled.'
+          }
 
       - name: Restore and build Release
         run: |
