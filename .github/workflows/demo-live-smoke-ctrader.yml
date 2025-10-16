@@ -474,13 +474,19 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            const maxLength = 140;
+            const rawDescription = process.env.RESULT_LINE || 'Demo smoke failed';
+            const description = rawDescription.length > maxLength
+              ? `${rawDescription.slice(0, maxLength - 3)}...`
+              : rawDescription;
+
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
               sha: context.sha,
               state: 'failure',
               context: 'ci:red',
-              description: process.env.RESULT_LINE || 'Demo smoke failed',
+              description,
               target_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
 
@@ -490,13 +496,19 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            const maxLength = 140;
+            const rawDescription = process.env.RESULT_LINE || 'Demo smoke succeeded';
+            const description = rawDescription.length > maxLength
+              ? `${rawDescription.slice(0, maxLength - 3)}...`
+              : rawDescription;
+
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
               sha: context.sha,
               state: 'success',
               context: 'ci:green',
-              description: process.env.RESULT_LINE || 'Demo smoke succeeded',
+              description,
               target_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
 
