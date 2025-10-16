@@ -23,6 +23,12 @@ jobs:
     env:
       RUN_ID: DEMO-CTRADER-LIVE-SMOKE
       DRY_RUN: ${{ inputs.dryRun }}
+      CT_APP_ID: ${{ secrets.CT_APP_ID }}
+      CT_APP_SECRET: ${{ secrets.CT_APP_SECRET }}
+      CT_DEMO_OAUTH_TOKEN: ${{ secrets.CT_DEMO_OAUTH_TOKEN }}
+      CT_DEMO_REFRESH_TOKEN: ${{ secrets.CT_DEMO_REFRESH_TOKEN }}
+      CT_DEMO_ACCOUNT_ID: ${{ secrets.CT_DEMO_ACCOUNT_ID }}
+      CT_DEMO_BROKER: ${{ secrets.CT_DEMO_BROKER }}
     steps:
       - name: Checkout
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
