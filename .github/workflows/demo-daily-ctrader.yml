@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 30
     defaults:
       run:
-        shell: pwsh
+        shell: powershell
     environment: ctrader-demo
     env:
       RUN_ID: DEMO-CTRADER-DAILY-${{ github.run_number }}
