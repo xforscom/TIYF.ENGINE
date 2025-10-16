@@ -3,11 +3,6 @@ name: demo-live-smoke-ctrader
 on:
   workflow_dispatch:
     inputs:
-      useHostedFallback:
-        description: 'Use hosted fallback runner if self-hosted is unavailable'
-        required: false
-        default: false
-        type: boolean
       dryRun:
         description: 'Dry run mode (skip live trading)'
         required: false
@@ -19,7 +14,7 @@ permissions:
 
 jobs:
   demo-live-smoke-ctrader:
-    runs-on: ${{ inputs.useHostedFallback == 'true' && 'windows-latest' || fromJson('["self-hosted","Windows","X64","tiyf-demo-live"]') }}
+    runs-on: self-hosted
     timeout-minutes: 30
     defaults:
       run:
@@ -94,7 +89,12 @@ jobs:
           # CT_DEMO_ACCOUNT_ID
           if ($env:CT_DEMO_ACCOUNT_ID) {
             $numeric = $env:CT_DEMO_ACCOUNT_ID -match '^\d+$'
-            echo "Account ID present; numeric=$($numeric ? 'YES' : 'NO')"
+            if ($numeric) {
+              $numericLabel = 'YES'
+            } else {
+              $numericLabel = 'NO'
+            }
+            echo "Account ID present; numeric=$numericLabel"
             if ($numeric) {
               $summary += "| Account ID | ✅ |"
             } else {
