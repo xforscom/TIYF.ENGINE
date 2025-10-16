@@ -10,6 +10,10 @@ Standard Operating Procedure for demo runs in TiYf Engine.
 
 All demo jobs share the same concurrency group—queue new smoke runs instead of forcing overlap.
 
+## Daily run expectations
+
+Latest validation: [demo-live-smoke-ctrader run 18564487963](https://github.com/xforscom/TIYF.ENGINE/actions/runs/18564487963) and [demo-daily-ctrader run 18564530606](https://github.com/xforscom/TIYF.ENGINE/actions/runs/18564530606) both completed with `STRICT_EXIT=0`, `PARITY_EXIT=0`, `broker_dangling=false`.
+
 ## Preflight Expectations
 
 The workflow preflight writes `preflight.sanity.txt` to the artifact bundle. Confirm it reports:
