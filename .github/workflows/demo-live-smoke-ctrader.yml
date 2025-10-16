@@ -20,6 +20,7 @@ permissions:
 jobs:
   demo-live-smoke-ctrader:
     runs-on: ${{ inputs.useHostedFallback == true && 'windows-latest' || '[self-hosted, windows, tiyf-demo-live]' }}
+    timeout-minutes: 30
     defaults:
       run:
         shell: pwsh
@@ -177,4 +178,3 @@ concurrency:
   group: demo-live-smoke-ctrader
   cancel-in-progress: false
 
-timeout-minutes: 30
