@@ -6,7 +6,7 @@ on:
       useHostedFallback:
         description: 'Use hosted fallback runner if self-hosted is unavailable'
         required: false
-        default: 'false'
+        default: false
         type: boolean
       dryRun:
         description: 'Dry run mode (skip live trading)'
@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   demo-live-smoke-ctrader:
-    runs-on: ${{ fromJson((inputs.useHostedFallback && '["windows-latest"]') || '["self-hosted","Windows","X64","tiyf-demo-live"]') }}
+    runs-on: ${{ inputs.useHostedFallback == 'true' && 'windows-latest' || fromJson('["self-hosted","Windows","X64","tiyf-demo-live"]') }}
     timeout-minutes: 30
     defaults:
       run:

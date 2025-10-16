@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   demo-daily-ctrader:
-    runs-on: ${{ fromJson((inputs.useHostedFallback && '["windows-latest"]') || '["self-hosted","Windows","X64","tiyf-demo-live"]') }}
+    runs-on: ${{ inputs.useHostedFallback == 'true' && 'windows-latest' || fromJson('["self-hosted","Windows","X64","tiyf-demo-live"]') }}
     timeout-minutes: 30
     defaults:
       run:
