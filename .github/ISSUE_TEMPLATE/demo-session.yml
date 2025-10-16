@@ -1,0 +1,27 @@
+name: Demo Session
+description: Checklist for live demo sessions
+body:
+  - type: textarea
+    attributes:
+      label: Config Used
+      description: Paste the config JSON or path used for the demo.
+    validations:
+      required: true
+  - type: checkboxes
+    attributes:
+      label: Verification Checks
+      options:
+        - label: SIM_EXIT=0
+          required: true
+        - label: STRICT_EXIT=0
+          required: true
+        - label: PARITY_EXIT=0
+          required: true
+        - label: broker_dangling=false
+          required: true
+  - type: input
+    attributes:
+      label: Artifacts Links
+      description: Links to uploaded artifacts (events.csv, trades.csv, etc.)
+    validations:
+      required: true

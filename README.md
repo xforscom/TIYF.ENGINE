@@ -12,6 +12,11 @@ Modular monolith trading engine MVP (M0). Focus: deterministic replay, bar build
 - `tests/TiYf.Engine.Tests` – Unit & early integration tests
 - `docs/adr` – Architecture decision records
 
+## Navigation
+
+- [Demo Run Guide](docs/DEMO-RUN.md) – Demo configuration, broker mode, expected outputs, and workflow links.
+- [Demo Ops SOP](docs/Demo-Ops-SOP.md) – Start/stop/collect instructions and halt-on-failure rules.
+
 ## Run (Prereq: .NET 8 SDK)
 
 ```powershell

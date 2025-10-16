@@ -1,0 +1,185 @@
+name: demo-runner-health
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Mondays at 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+jobs:
+  runner-health:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Gather runner status
+        id: gather
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const core = require('@actions/core');
+            const fs = require('fs');
+            const path = require('path');
+
+            const targetLabel = 'tiyf-demo-live';
+            const { data } = await github.rest.actions.listSelfHostedRunnersForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+
+            const runners = data.runners || [];
+            const matchesLabel = runner => {
+              if (!runner || !Array.isArray(runner.labels)) {
+                return false;
+              }
+              const labels = runner.labels.map(label => (label.name || '').toLowerCase());
+              return labels.includes('self-hosted') && labels.includes('windows') && labels.includes(targetLabel);
+            };
+
+            const monitored = runners.filter(matchesLabel);
+            const primary = monitored.length ? monitored[0] : null;
+            const status = primary ? (primary.status || 'unknown') : 'not-found';
+            const busy = primary ? !!primary.busy : null;
+            const conclusion = status === 'online' ? 'healthy' : 'unhealthy';
+
+            const health = {
+              timestamp: new Date().toISOString(),
+              targetLabel,
+              monitoredCount: monitored.length,
+              conclusion,
+              runner: primary
+                ? {
+                    id: primary.id,
+                    name: primary.name,
+                    os: primary.os,
+                    status,
+                    busy,
+                    labels: primary.labels.map(label => label.name)
+                  }
+                : null
+            };
+
+            const json = JSON.stringify(health, null, 2);
+            const outputPath = path.join(process.env.GITHUB_WORKSPACE, 'health.json');
+            fs.writeFileSync(outputPath, json);
+
+            const encoded = Buffer.from(json, 'utf8').toString('base64');
+            core.setOutput('healthPath', outputPath);
+            core.setOutput('healthJsonBase64', encoded);
+            core.setOutput('conclusion', conclusion);
+            core.exportVariable('RUNNER_HEALTH_CONCLUSION', conclusion);
+            core.exportVariable('RUNNER_HEALTH_PATH', outputPath);
+            core.exportVariable('RUNNER_HEALTH_JSON_BASE64', encoded);
+
+            await core.summary
+              .addHeading('Runner Health')
+              .addRaw(`Conclusion: ${conclusion}\n`)
+              .addRaw(`Target label: ${targetLabel}\n`)
+              .addRaw(`Monitored runners: ${monitored.length}\n`)
+              .addCodeBlock(json, 'json')
+              .write();
+
+            console.log(json);
+
+      - name: Update Runner Health issue
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const encoded = process.env.RUNNER_HEALTH_JSON_BASE64 || '';
+            const conclusion = process.env.RUNNER_HEALTH_CONCLUSION || (encoded ? 'unknown' : 'error');
+            const json = encoded ? Buffer.from(encoded, 'base64').toString('utf8') : '{}';
+            const health = encoded ? JSON.parse(json) : {};
+            const lines = [
+              `Status: ${conclusion}`,
+              `Checked at: ${health.timestamp || 'n/a'}`,
+              `Runner label: ${health.targetLabel || 'n/a'}`,
+              `Runner name: ${health.runner ? health.runner.name : 'not-found'}`,
+              `Runner status: ${health.runner ? health.runner.status : 'n/a'}`,
+              `Runner busy: ${health.runner ? health.runner.busy : 'n/a'}`,
+              '',
+              '```json',
+              json,
+              '```'
+            ];
+            const body = lines.join('\n');
+            const title = 'Runner Health';
+
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+            const existing = issues.find(issue => issue.title === title);
+
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['ops']
+              });
+            }
+
+      - name: Notify ops webhook on unhealthy status
+        run: |
+          if ($env:RUNNER_HEALTH_CONCLUSION -eq 'healthy') {
+            Write-Host 'Runner reported healthy; skipping webhook.'
+            return
+          }
+          $webhook = "${{ secrets.DEMO_ALERT_WEBHOOK }}"
+          if ([string]::IsNullOrWhiteSpace($webhook) -or $webhook -eq 'null') {
+            Write-Host 'DEMO_ALERT_WEBHOOK not configured; skipping alert.'
+            return
+          }
+          $encoded = $env:RUNNER_HEALTH_JSON_BASE64
+          $healthJson = if ([string]::IsNullOrWhiteSpace($encoded)) {
+            '{}' 
+          } else {
+            [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($encoded))
+          }
+          $payload = @{
+            text = "Runner health status is $($env:RUNNER_HEALTH_CONCLUSION). See workflow https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            details = $healthJson
+          } | ConvertTo-Json -Compress
+          try {
+            Invoke-RestMethod -Uri $webhook -Method Post -Body $payload -ContentType 'application/json'
+          } catch {
+            Write-Warning "Failed to send webhook notification: $($_.Exception.Message)"
+          }
+
+      - name: Check artifact files
+        if: always()
+        run: |
+          $workspace = $env:GITHUB_WORKSPACE
+          Write-Host "Workspace root: $workspace"
+          Get-ChildItem -Path $workspace
+          $healthPath = Join-Path $workspace 'health.json'
+          if (Test-Path $healthPath) {
+            Write-Host "health.json present at $healthPath"
+          } else {
+            Write-Warning "health.json missing at $healthPath"
+            "WARNING: health.json missing before upload" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          }
+
+      - name: Upload health artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: demo-runner-health-${{ github.run_number }}
+          path: ${{ github.workspace }}/health.json
+          retention-days: 30
