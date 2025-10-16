@@ -57,6 +57,7 @@ jobs:
       - name: Preflight Values Checklist
         run: |
           $ErrorActionPreference = 'Stop'
+          $workspace = $env:GITHUB_WORKSPACE
           $summary = @()
           $summary += "| Check | Status |"
           $summary += "|-------|--------|"
@@ -132,7 +133,9 @@ jobs:
           # Write summary
           $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
           # Write artifact
-          $summary | Out-File -FilePath 'preflight.sanity.txt' -Encoding utf8
+          $summaryPath = Join-Path $workspace 'preflight.sanity.txt'
+          $summary | Out-File -FilePath $summaryPath -Encoding utf8
+          Write-Host "Preflight summary written to $summaryPath"
 
       - name: Restore and build Release
         run: |
@@ -180,21 +183,38 @@ jobs:
           "PARITY_EXIT=$parityExit" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Collect Artifacts
+        working-directory: ${{ github.workspace }}
         run: |
           $ErrorActionPreference = 'Stop'
-          New-Item -ItemType Directory -Path 'artifacts' -Force
-          Copy-Item -Path $env:EVENTS_PATH -Destination 'artifacts/events.csv' -Force
-          Copy-Item -Path $env:TRADES_PATH -Destination 'artifacts/trades.csv' -Force
-          Copy-Item -Path 'strict.json' -Destination 'artifacts/strict.json' -Force
-          Copy-Item -Path 'parity.json' -Destination 'artifacts/parity.json' -Force
-          Copy-Item -Path 'demo-ctrader.log' -Destination 'artifacts/demo-ctrader.log' -Force
-          Copy-Item -Path 'preflight.sanity.txt' -Destination 'artifacts/preflight.sanity.txt' -Force
+          $artifactDir = Join-Path $PWD.Path 'artifacts'
+          New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+
+          function Copy-Or-Placeholder {
+            param(
+              [string]$Source,
+              [string]$Destination
+            )
+
+            if (-not [string]::IsNullOrWhiteSpace($Source) -and (Test-Path -Path $Source)) {
+              Copy-Item -Path $Source -Destination $Destination -Force
+            } else {
+              New-Item -ItemType File -Path $Destination -Force | Out-Null
+            }
+          }
+
+          Copy-Or-Placeholder -Source $env:EVENTS_PATH -Destination (Join-Path $artifactDir 'events.csv')
+          Copy-Or-Placeholder -Source $env:TRADES_PATH -Destination (Join-Path $artifactDir 'trades.csv')
+          Copy-Or-Placeholder -Source (Join-Path $PWD.Path 'strict.json') -Destination (Join-Path $artifactDir 'strict.json')
+          Copy-Or-Placeholder -Source (Join-Path $PWD.Path 'parity.json') -Destination (Join-Path $artifactDir 'parity.json')
+          Copy-Or-Placeholder -Source (Join-Path $PWD.Path 'demo-ctrader.log') -Destination (Join-Path $artifactDir 'demo-ctrader.log')
+          Copy-Or-Placeholder -Source (Join-Path $PWD.Path 'preflight.sanity.txt') -Destination (Join-Path $artifactDir 'preflight.sanity.txt')
 
       - name: Upload Artifacts
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: demo-live-smoke-ctrader-${{ env.RUN_ID }}
-          path: artifacts/**
+          path: ${{ github.workspace }}/artifacts
 
 concurrency:
   group: demo-live-smoke-ctrader
