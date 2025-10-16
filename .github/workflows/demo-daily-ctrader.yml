@@ -35,8 +35,13 @@ jobs:
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
 
       - name: Relax PowerShell execution policy
-        shell: cmd
-        run: powershell -NonInteractive -ExecutionPolicy Bypass -Command "Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force"
+        run: |
+          try {
+            Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force -ErrorAction Stop
+            Write-Host 'Execution policy set to RemoteSigned for CurrentUser.'
+          } catch {
+            Write-Warning "Execution policy change failed or is overridden: $($_.Exception.Message)"
+          }
 
       - name: Configure .NET install directory
         shell: cmd
