@@ -1,5 +1,5 @@
-runner-label:
-  allow:
+runner:
+  labels:
     - ubuntu-latest
     - windows-latest
     - macos-latest
