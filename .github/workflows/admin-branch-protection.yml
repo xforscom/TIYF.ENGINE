@@ -54,12 +54,18 @@ jobs:
             const branch = (inputs.branch ?? 'main').trim() || 'main';
             const checksCsv = (inputs.checks ?? '').trim();
             const manualToken = (inputs.admin_token ?? '').trim();
-            const secretToken = process.env.GITHUB_TOKEN || process.env.ADMIN_TOKEN_FOR_WORKFLOW || '';
-            const activeToken = secretToken || manualToken;
+            const secretToken = (process.env.ADMIN_TOKEN_FOR_WORKFLOW ?? '').trim();
+            const githubToken = (process.env.GITHUB_TOKEN ?? '').trim();
+            let activeToken = secretToken || manualToken;
 
             if (!activeToken) {
-              core.setFailed('No admin token available. Configure the ADMIN_TOKEN secret or provide an admin_token input when manually dispatching.');
-              return;
+              if (!githubToken) {
+                core.setFailed('No admin token available. Configure the ADMIN_TOKEN secret or provide an admin_token input when manually dispatching.');
+                return;
+              }
+
+              activeToken = githubToken;
+              core.warning('Using the default GITHUB_TOKEN which may lack permissions to update branch protection.');
             }
 
             const contexts = (checksCsv ? checksCsv.split(',') : defaultChecks)
@@ -70,7 +76,9 @@ jobs:
               return;
             }
 
-            const adminGithub = secretToken ? github : new github.constructor({ auth: manualToken });
+            const adminGithub = activeToken === githubToken
+              ? github
+              : new github.constructor({ auth: activeToken });
             const { owner, repo } = context.repo;
 
             const payload = {
@@ -95,11 +103,23 @@ jobs:
               allow_fork_syncing: true,
             };
 
-            await adminGithub.request('PUT /repos/{owner}/{repo}/branches/{branch}/protection', {
-              owner,
-              repo,
-              branch,
-              ...payload,
-            });
+            try {
+              await adminGithub.request('PUT /repos/{owner}/{repo}/branches/{branch}/protection', {
+                owner,
+                repo,
+                branch,
+                ...payload,
+              });
 
-            core.info(`Branch protection updated successfully for ${branch}.`);
+              core.info(`Branch protection updated successfully for ${branch}.`);
+            } catch (error) {
+              const message = error?.message ?? String(error);
+              const status = error?.status ?? error?.response?.status ?? 0;
+
+              if (status === 403 && /resource not accessible by integration/i.test(message)) {
+                core.warning(`Insufficient permissions to update branch protection (status ${status}). Skipping update.`);
+                return;
+              }
+
+              throw error;
+            }
