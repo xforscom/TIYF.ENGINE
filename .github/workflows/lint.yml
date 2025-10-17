@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
     defaults:
       run:
         shell: bash
@@ -29,6 +29,11 @@ jobs:
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
         with:
           dotnet-version: '8.0.x'
+
+      - name: Setup Python 3
+        uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d
+        with:
+          python-version: '3.x'
 
       - name: Install lint toolchain
         run: |
@@ -44,8 +49,12 @@ jobs:
           tar -xzf "/tmp/${ACTIONLINT_TARBALL}" --directory "$HOME/.local/bin" actionlint
           chmod +x "$HOME/.local/bin/actionlint"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          python3 -m pip install --user --no-cache-dir yamllint
-          echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
+          if ! command -v jq >/dev/null 2>&1; then
+            curl -sSL "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64" -o "$HOME/.local/bin/jq"
+            chmod +x "$HOME/.local/bin/jq"
+          fi
+          python -m pip install --user --no-cache-dir yamllint
+          echo "$(python -m site --user-base)/bin" >> "$GITHUB_PATH"
 
       - name: Restore solution
         run: |

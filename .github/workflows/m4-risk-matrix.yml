@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
     steps:
       - uses: actions/checkout@v4
       - name: Setup .NET
@@ -31,7 +31,7 @@ jobs:
 
   run-matrix:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
     strategy:
       fail-fast: false
       matrix:
@@ -48,6 +48,15 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - name: Ensure jq tool
+        run: |
+          set -euo pipefail
+          if ! command -v jq >/dev/null 2>&1; then
+            mkdir -p "$HOME/.local/bin"
+            curl -sSL "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64" -o "$HOME/.local/bin/jq"
+            chmod +x "$HOME/.local/bin/jq"
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          fi
       - name: Run simulation (mode=${{ matrix.mode }})
         env:
           MODE: ${{ matrix.mode }}
@@ -55,7 +64,6 @@ jobs:
           set -euo pipefail
           OUTCFG=$(mktemp)
           CFG='tests/fixtures/backtest_m0/config.backtest-m0.json'
-          if ! command -v jq >/dev/null 2>&1; then sudo apt-get update && sudo apt-get install -y jq; fi
           # Resolve risk mode mapping
           case "$MODE" in
             off) RISK=off ;;
@@ -119,7 +127,7 @@ jobs:
 
   invariants:
     needs: run-matrix
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
     steps:
       - uses: actions/checkout@v4
       - name: Download parity artifacts

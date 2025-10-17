@@ -8,12 +8,22 @@ on:
 
 jobs:
   penalty:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - name: Ensure jq tool
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v jq >/dev/null 2>&1; then
+            mkdir -p "$HOME/.local/bin"
+            curl -sSL "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64" -o "$HOME/.local/bin/jq"
+            chmod +x "$HOME/.local/bin/jq"
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          fi
       - name: Build + Run + Assert penalty scaffold
         shell: bash
         run: |
@@ -25,7 +35,6 @@ jobs:
           echo "[Step] Build solution"
           dotnet build "$SLN" -c Release --nologo
           echo "[Step] Create penalty-enabled config"
-          if ! command -v jq >/dev/null; then sudo apt-get update && sudo apt-get install -y jq; fi
           jq '.featureFlags.penalty="shadow" | .featureFlags.sentiment="off" | .penaltyConfig={"forcePenalty":true} | .ciPenaltyScaffold=true' "$ROOT/tests/fixtures/backtest_m0/config.backtest-m0.json" > "$TMP"
           echo "[Step] Run sim with penalty"
           rm -rf "$ROOT/journals" || true

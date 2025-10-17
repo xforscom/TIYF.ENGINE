@@ -30,7 +30,7 @@ permissions: {}
 
 jobs:
   apply:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
     environment:
       name: ADMIN_TOKEN
     steps:

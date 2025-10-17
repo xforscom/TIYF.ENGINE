@@ -40,11 +40,7 @@ jobs:
 
   verify:
     needs: build
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
     defaults:
       run:
         shell: pwsh
@@ -93,7 +89,7 @@ jobs:
           $envSanityPath = Join-Path $artifactRoot 'env.sanity'
           $envDetails = @(
             "os=$env:RUNNER_OS",
-            "job_os=${{ matrix.os }}",
+            "job_os=tiyf-vps",
             "github_sha=$env:GITHUB_SHA",
             "workflow=$env:GITHUB_WORKFLOW",
             "run_attempt=$env:GITHUB_RUN_ATTEMPT",
@@ -257,7 +253,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: demo-journal-${{ matrix.os }}
+          name: demo-journal-${{ github.run_number }}
           path: artifacts/demo-journal/**
 
       - name: Record summary

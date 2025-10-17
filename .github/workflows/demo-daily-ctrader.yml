@@ -23,13 +23,13 @@ permissions:
 
 jobs:
   demo-daily-ctrader:
-    runs-on: windows-latest
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
     timeout-minutes: 30
     strategy:
       fail-fast: false
     defaults:
       run:
-        shell: powershell
+        shell: pwsh
     environment: ctrader-demo
     env:
       RUN_ID: DEMO-CTRADER-DAILY-${{ github.run_number }}
@@ -41,6 +41,41 @@ jobs:
       CT_DEMO_ACCOUNT_ID: ${{ secrets.CT_DEMO_ACCOUNT_ID }}
       CT_DEMO_BROKER: ${{ secrets.CT_DEMO_BROKER }}
     steps:
+      - name: Install PowerShell 7
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          POWERSHELL_VERSION="7.4.6"
+          INSTALL_ROOT="$HOME/powershell"
+
+          if [ -x "$INSTALL_ROOT/pwsh" ]; then
+            echo "$INSTALL_ROOT" >> "$GITHUB_PATH"
+            exit 0
+          fi
+
+          if [ -x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh" ]; then
+            echo "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64" >> "$GITHUB_PATH"
+            exit 0
+          fi
+
+          mkdir -p "$INSTALL_ROOT"
+          curl -sSL -o powershell.tar.gz "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz"
+          tar -xzf powershell.tar.gz -C "$INSTALL_ROOT"
+          rm powershell.tar.gz
+
+          if [ -x "$INSTALL_ROOT/pwsh" ]; then
+            chmod +x "$INSTALL_ROOT/pwsh"
+            echo "$INSTALL_ROOT" >> "$GITHUB_PATH"
+          elif [ -x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh" ]; then
+            chmod +x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh"
+            echo "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64" >> "$GITHUB_PATH"
+          else
+            echo "Failed to locate pwsh after extraction" >&2
+            find "$INSTALL_ROOT" -maxdepth 3 -type f -name 'pwsh' -print || true
+            exit 1
+          fi
+
       - name: Checkout
         id: checkout
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
@@ -54,14 +89,6 @@ jobs:
           } catch {
             Write-Warning "Execution policy change failed or is overridden: $($_.Exception.Message)"
           }
-
-      - name: Configure .NET install directory
-        id: configure_dotnet_dir
-        shell: cmd
-        run: |
-          set "INSTALL_DIR=%RUNNER_TEMP%\dotnet"
-          if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
-          echo DOTNET_INSTALL_DIR=%INSTALL_DIR%>> "%GITHUB_ENV%"
 
       - name: Setup .NET 8
         id: setup_dotnet

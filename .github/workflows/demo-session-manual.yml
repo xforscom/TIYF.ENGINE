@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   demo-session:
-    runs-on: windows-latest
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
     defaults:
       run:
         shell: pwsh
@@ -30,6 +30,41 @@ jobs:
       RUN_ID: ${{ inputs.run_id || format('DEMO-SESSION-{0}', github.run_number) }}
       BROKER_ENABLED: ${{ inputs.broker_enabled }}
     steps:
+      - name: Install PowerShell 7
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          POWERSHELL_VERSION="7.4.6"
+          INSTALL_ROOT="$HOME/powershell"
+
+          if [ -x "$INSTALL_ROOT/pwsh" ]; then
+            echo "$INSTALL_ROOT" >> "$GITHUB_PATH"
+            exit 0
+          fi
+
+          if [ -x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh" ]; then
+            echo "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64" >> "$GITHUB_PATH"
+            exit 0
+          fi
+
+          mkdir -p "$INSTALL_ROOT"
+          curl -sSL -o powershell.tar.gz "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz"
+          tar -xzf powershell.tar.gz -C "$INSTALL_ROOT"
+          rm powershell.tar.gz
+
+          if [ -x "$INSTALL_ROOT/pwsh" ]; then
+            chmod +x "$INSTALL_ROOT/pwsh"
+            echo "$INSTALL_ROOT" >> "$GITHUB_PATH"
+          elif [ -x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh" ]; then
+            chmod +x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh"
+            echo "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64" >> "$GITHUB_PATH"
+          else
+            echo "Failed to locate pwsh after extraction" >&2
+            find "$INSTALL_ROOT" -maxdepth 3 -type f -name 'pwsh' -print || true
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
 
@@ -45,7 +80,7 @@ jobs:
           dotnet build TiYf.Engine.sln -c Release --no-restore --nologo
 
       - name: Create Demo Session Issue
-        id: create-issue
+        id: create_issue
         uses: actions/github-script@v7
         with:
           script: |
@@ -74,8 +109,12 @@ jobs:
               body: body,
               labels: ['demo-session']
             });
-            core.setOutput('issue-number', issue.data.number);
-            core.setOutput('issue-url', issue.data.html_url);
+            const issueNumber = issue.data.number;
+            const issueUrl = issue.data.html_url;
+            core.setOutput('issue_number', issueNumber);
+            core.setOutput('issue_url', issueUrl);
+            core.exportVariable('DEMO_SESSION_ISSUE_NUMBER', String(issueNumber));
+            core.exportVariable('DEMO_SESSION_ISSUE_URL', issueUrl);
 
       - name: Run DemoFeed
         run: |
@@ -134,11 +173,13 @@ jobs:
 
       - name: Update Issue with Results
         uses: actions/github-script@v7
-        env:
-          ISSUE_NUMBER: ${{ steps.create-issue.outputs.issue-number }}
         with:
           script: |
-            const issueNumber = process.env.ISSUE_NUMBER;
+            const issueNumber = process.env.DEMO_SESSION_ISSUE_NUMBER;
+            const issueNumberValue = Number(issueNumber);
+            if (!Number.isFinite(issueNumberValue)) {
+              throw new Error('DEMO_SESSION_ISSUE_NUMBER missing or invalid');
+            }
             const runUrl = context.payload.workflow_run?.html_url || 'N/A';
             const artifactsUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const simExit = 0; // Assuming success
@@ -171,6 +212,6 @@ jobs:
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: issueNumber,
+              issue_number: issueNumberValue,
               body: comment
             });

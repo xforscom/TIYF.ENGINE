@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
     outputs:
       build_exit: ${{ steps.build_release.outputs.exit_code }}
     steps:
@@ -21,6 +21,12 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+      - uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d
+        with:
+          python-version: '3.x'
       - uses: actions/setup-node@v4
         with:
           node-version: '20.x'
@@ -53,18 +59,13 @@ jobs:
 
   nightly-canary:
     needs: build
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-    runs-on: ${{ matrix.os }}
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
     defaults:
       run:
         shell: bash
     env:
       DOTNET_NOLOGO: true
+      CANARY_RUNNER_LABEL: tiyf-vps
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -80,7 +81,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ROOT="$GITHUB_WORKSPACE/scratch/nightly/${{ matrix.os }}"
+          ROOT="$GITHUB_WORKSPACE/scratch/nightly/${{ env.CANARY_RUNNER_LABEL }}"
           rm -rf "$ROOT"
           mkdir -p "$ROOT/bin" "$ROOT/runs" "$ROOT/artifacts/parity" "$ROOT/state"
           SRC_ROOT="release-binaries/src"
@@ -120,7 +121,7 @@ jobs:
           # shellcheck disable=SC2269
           TOOLS_PATH="${TOOLS:-}"
           BASE_CFG="$GITHUB_WORKSPACE/tests/fixtures/backtest_m0/config.backtest-m0.json"
-          RUN_BASE="${RUNNER_TEMP}/nightly-${{ matrix.os }}"
+          RUN_BASE="${RUNNER_TEMP}/nightly-${{ env.CANARY_RUNNER_LABEL }}"
           mkdir -p "$RUN_BASE"
           TMP_DIR="$GITHUB_WORKSPACE/.tmp"
           mkdir -p "$TMP_DIR"
@@ -128,7 +129,7 @@ jobs:
           SUMMARY="$ROOT/artifacts/parity_summary.csv"
           printf 'mode,trades_sha,penalty_count,events_sha,run_dir,status,hint,sim_exit,parity_exit\n' > "$SUMMARY"
           SUMMARY_MD="$ROOT/artifacts/summary.md"
-          printf '### Nightly canary parity (%s)\n\n' "${{ matrix.os }}" > "$SUMMARY_MD"
+          printf '### Nightly canary parity (%s)\n\n' "${{ env.CANARY_RUNNER_LABEL }}" > "$SUMMARY_MD"
 
           MODES=(off shadow active penalty-active)
           for MODE in "${MODES[@]}"; do
@@ -367,7 +368,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nightly-canary-${{ matrix.os }}
+          name: nightly-canary-${{ env.CANARY_RUNNER_LABEL }}
           path: |
             ${{ steps.runmodes.outputs.summary_csv }}
             ${{ steps.runmodes.outputs.summary_md }}

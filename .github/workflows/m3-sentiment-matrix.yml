@@ -8,7 +8,7 @@ on:
 
 jobs:
   sentiment:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
     strategy:
       fail-fast: false
       matrix:
@@ -18,6 +18,15 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - name: Ensure jq tool
+        run: |
+          set -euo pipefail
+          if ! command -v jq >/dev/null 2>&1; then
+            mkdir -p "$HOME/.local/bin"
+            curl -sSL "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64" -o "$HOME/.local/bin/jq"
+            chmod +x "$HOME/.local/bin/jq"
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          fi
       - name: Restore
         run: dotnet restore
       - name: Build Release
@@ -29,7 +38,6 @@ jobs:
           set -euo pipefail
           CFG=tests/fixtures/backtest_m0/config.backtest-m0.candidate.json
           TEMP_CFG=$(mktemp /tmp/sentiment-XXXX.json)
-          if ! command -v jq >/dev/null; then sudo apt-get update && sudo apt-get install -y jq; fi
           if [ "$MODE" = "active" ]; then
             jq '.featureFlags.sentiment="active" | .featureFlags.riskProbe="disabled" | .sentimentConfig={"window":5,"volGuardSigma":1e-7}' "$CFG" > "$TEMP_CFG"
           elif [ "$MODE" = "shadow" ]; then
@@ -50,7 +58,7 @@ jobs:
           path: artifacts/${{ matrix.mode }}
 
   invariants:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
     needs: sentiment
     steps:
       - uses: actions/checkout@v4
