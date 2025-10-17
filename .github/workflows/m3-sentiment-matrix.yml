@@ -115,10 +115,16 @@ jobs:
           find artifacts/parity -maxdepth 2 -name hashes.txt -print || echo "No parity artifacts found"
           if [ ! -d artifacts/parity ]; then echo "ERROR: parity artifacts directory missing"; exit 1; fi
           # Off vs shadow trades hash equality (using parity hashes)
-          OFF_HASH_FILE=$(grep -rl "CI-off" artifacts/parity || true)
-          SHADOW_HASH_FILE=$(grep -rl "CI-shadow" artifacts/parity || true)
-          ACTIVE_HASH_FILE=$(grep -rl "CI-active" artifacts/parity || true)
-          if [ -z "$OFF_HASH_FILE" ] || [ -z "$SHADOW_HASH_FILE" ] || [ -z "$ACTIVE_HASH_FILE" ]; then echo "ERROR: missing one or more parity hash files"; ls -R artifacts/parity; exit 1; fi
+          OFF_HASH_FILE="artifacts/parity/CI-off/hashes.txt"
+          SHADOW_HASH_FILE="artifacts/parity/CI-shadow/hashes.txt"
+          ACTIVE_HASH_FILE="artifacts/parity/CI-active/hashes.txt"
+          for file in "$OFF_HASH_FILE" "$SHADOW_HASH_FILE" "$ACTIVE_HASH_FILE"; do
+            if [ ! -f "$file" ]; then
+              echo "ERROR: missing parity hash file $file"
+              ls -R artifacts/parity || true
+              exit 1
+            fi
+          done
           get_val(){ grep "^$1=" "$2" | head -n1 | cut -d'=' -f2; }
           OFF_TR_SHA=$(get_val trades_sha "$OFF_HASH_FILE")
           SHADOW_TR_SHA=$(get_val trades_sha "$SHADOW_HASH_FILE")
