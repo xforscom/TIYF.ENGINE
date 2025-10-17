@@ -1,10 +1,12 @@
+---
 runner:
   labels:
-    - ubuntu-latest
-    - windows-latest
-    - macos-latest
-    - self-hosted
-    - Linux
-    - Windows
-    - X64
-    - tiyf-vps
+    allow:
+      - ubuntu-latest
+      - windows-latest
+      - macos-latest
+      - self-hosted
+      - Linux
+      - Windows
+      - X64
+      - tiyf-vps
