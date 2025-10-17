@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   demo-session:
-    runs-on: windows-latest
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
     defaults:
       run:
         shell: pwsh
