@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   demo-smoke:
-    runs-on: [self-hosted, Linux, X64, tiyf-vps]
+    runs-on: windows-latest
     defaults:
       run:
         shell: pwsh
