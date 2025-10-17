@@ -74,20 +74,26 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p journals/M0 artifacts/parity
-          for mode in off shadow active; do
-            src="downloaded/journals-${mode}"
-            if [ ! -d "$src" ]; then
-              echo "Missing artifact directory for $mode" >&2
-              ls -R downloaded || true
-              exit 1
+          found=0
+          for entry in downloaded/*; do
+            [ -d "$entry" ] || continue
+            name=$(basename "$entry")
+            if [[ "$name" == M0-RUN-CI-* ]]; then
+              echo "Staging journals from $name"
+              cp -r "$entry" journals/M0/
+              found=1
+              continue
             fi
-            find "$src" -maxdepth 4 -type f -name 'events.csv' -print || true
-            pattern="*CI-${mode}*"
-            find "$src" -maxdepth 1 -mindepth 1 -type d -name "$pattern" -exec cp -r {} journals/M0/ \;
-            if [ -d "$src/parity" ]; then
-              cp -r "$src/parity/." artifacts/parity/ || true
+            if [ "$name" = "parity" ]; then
+              echo "Copying parity artifacts"
+              cp -r "$entry/." artifacts/parity/ || true
             fi
           done
+          if [ "$found" -eq 0 ]; then
+            echo "No CI journal directories located in downloaded/" >&2
+            ls -R downloaded || true
+            exit 1
+          fi
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
