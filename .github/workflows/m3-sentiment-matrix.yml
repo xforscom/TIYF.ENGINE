@@ -5,6 +5,7 @@ on:
     branches: [ feat/m3-active ]
   pull_request:
     branches: [ feat/m3-active ]
+  workflow_dispatch: {}
 
 jobs:
   sentiment:
