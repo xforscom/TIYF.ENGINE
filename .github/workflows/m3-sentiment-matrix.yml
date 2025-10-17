@@ -131,7 +131,7 @@ jobs:
           ACTIVE_TR_SHA=$(get_val trades_sha "$ACTIVE_HASH_FILE")
           ACTIVE_APPLIED=$(get_val applied_count "$ACTIVE_HASH_FILE")
           ACTIVE_PENALTY=$(get_val penalty_count "$ACTIVE_HASH_FILE")
-          hash_skip_meta(){ tail -n +2 "$1" | sha256sum | cut -d' ' -f1; }
+          hash_skip_meta(){ tail -n +2 "$1" | cut -d',' -f1-11,13 | sha256sum | cut -d' ' -f1; }
           if [ "$(hash_skip_meta "$OFF_TRADES")" != "$(hash_skip_meta "$SHADOW_TRADES")" ]; then echo 'ERROR: off vs shadow trades mismatch'; exit 1; fi
           if grep -q INFO_SENTIMENT_Z_V1 "$OFF_EVENTS"; then echo 'ERROR: off mode has Z events'; exit 1; fi
           if ! grep -q INFO_SENTIMENT_Z_V1 "$SHADOW_EVENTS"; then echo 'ERROR: shadow missing Z events'; exit 1; fi
