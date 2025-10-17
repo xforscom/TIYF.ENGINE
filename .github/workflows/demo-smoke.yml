@@ -20,9 +20,21 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          if ! command -v pwsh >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y powershell
+          set -e
+          POWERSHELL_VERSION="7.4.6"
+          INSTALL_ROOT="$HOME/powershell"
+
+          if [ -x "$INSTALL_ROOT/pwsh" ]; then
+            echo "$INSTALL_ROOT" >> "$GITHUB_PATH"
+          elif ! command -v pwsh >/dev/null 2>&1; then
+            mkdir -p "$INSTALL_ROOT"
+            curl -sSL -o powershell.tar.gz "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz"
+            tar -xzf powershell.tar.gz -C "$INSTALL_ROOT" --strip-components=1
+            rm powershell.tar.gz
+            chmod +x "$INSTALL_ROOT/pwsh"
+            echo "$INSTALL_ROOT" >> "$GITHUB_PATH"
+          else
+            echo "PowerShell already available in PATH"
           fi
 
       - name: Checkout
