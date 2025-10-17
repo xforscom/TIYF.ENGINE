@@ -416,7 +416,6 @@ jobs:
             const orderedSteps = [
               { name: 'Checkout', outcome: '${{ steps.checkout.outcome }}' },
               { name: 'Relax PowerShell execution policy', outcome: '${{ steps.relax_policy.outcome }}' },
-              { name: 'Configure .NET install directory', outcome: '${{ steps.configure_dotnet_dir.outcome }}' },
               { name: 'Setup .NET 8', outcome: '${{ steps.setup_dotnet.outcome }}' },
               { name: 'Preflight Values Checklist', outcome: '${{ steps.preflight.outcome }}' },
               { name: 'Restore and build Release', outcome: '${{ steps.restore_build.outcome }}' },
