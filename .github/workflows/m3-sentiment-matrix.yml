@@ -63,9 +63,36 @@ jobs:
     needs: sentiment
     steps:
       - uses: actions/checkout@v4
+      - name: Download journals artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: downloaded
+          pattern: journals-*
+          merge-multiple: true
+      - name: Prepare journals workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p journals/M0 artifacts/parity
+          for mode in off shadow active; do
+            src="downloaded/journals-${mode}"
+            if [ ! -d "$src" ]; then
+              echo "Missing artifact directory for $mode" >&2
+              ls -R downloaded || true
+              exit 1
+            fi
+            find "$src" -maxdepth 4 -type f -name 'events.csv' -print || true
+            pattern="*CI-${mode}*"
+            find "$src" -maxdepth 1 -mindepth 1 -type d -name "$pattern" -exec cp -r {} journals/M0/ \;
+            if [ -d "$src/parity" ]; then
+              cp -r "$src/parity/." artifacts/parity/ || true
+            fi
+          done
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore
       - name: Build Release
         run: dotnet build -c Release --no-restore
       - name: Validate Cross-Mode Invariants
