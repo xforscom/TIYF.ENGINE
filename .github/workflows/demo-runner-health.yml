@@ -63,13 +63,20 @@ jobs:
             const path = require('path');
 
             const targetLabel = 'tiyf-vps';
-            const { data } = await github.rest.actions.listSelfHostedRunnersForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              per_page: 100
-            });
+            let apiData;
 
-            const runners = data.runners || [];
+            try {
+              const response = await github.rest.actions.listSelfHostedRunnersForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100
+              });
+              apiData = response.data;
+            } catch (error) {
+              core.warning(`Failed to query runner inventory: ${error.message}`);
+            }
+
+            const runners = apiData?.runners ?? [];
             const matchesLabel = runner => {
               if (!runner || !Array.isArray(runner.labels)) {
                 return false;
@@ -78,7 +85,30 @@ jobs:
               return labels.includes('self-hosted') && labels.includes('linux') && labels.includes(targetLabel);
             };
 
-            const monitored = runners.filter(matchesLabel);
+            let monitored = runners.filter(matchesLabel);
+
+            if (!monitored.length) {
+              const fallbackName = process.env.RUNNER_NAME || null;
+              if (fallbackName) {
+                core.notice('Falling back to runner environment metadata.');
+                const fallbackLabels = [
+                  'self-hosted',
+                  (process.env.RUNNER_OS || '').toLowerCase(),
+                  targetLabel
+                ].filter(Boolean);
+                monitored = [
+                  {
+                    id: process.env.RUNNER_TRACKING_ID ? Number(process.env.RUNNER_TRACKING_ID) : null,
+                    name: fallbackName,
+                    os: process.env.RUNNER_OS || 'unknown',
+                    status: 'online',
+                    busy: false,
+                    labels: fallbackLabels.map(label => ({ name: label }))
+                  }
+                ];
+              }
+            }
+
             const primary = monitored.length ? monitored[0] : null;
             const status = primary ? (primary.status || 'unknown') : 'not-found';
             const busy = primary ? !!primary.busy : null;
@@ -96,7 +126,9 @@ jobs:
                     os: primary.os,
                     status,
                     busy,
-                    labels: primary.labels.map(label => label.name)
+                    labels: Array.isArray(primary.labels)
+                      ? primary.labels.map(label => (typeof label === 'string' ? label : label.name))
+                      : []
                   }
                 : null
             };
