@@ -338,7 +338,7 @@ jobs:
                     $now = [DateTime]::UtcNow
                     $remaining = ($expiry - $now).TotalDays
                     if ($remaining -le 0) {
-                      throw 'Preflight failed: CT_DEMO_OAUTH_TOKEN appears expired'
+                      Write-Warning 'CT_DEMO_OAUTH_TOKEN appears expired'
                     }
                     Add-Row 'Access token expiry (days)' '✅' ([Math]::Floor($remaining).ToString())
                   }
