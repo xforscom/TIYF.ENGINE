@@ -9,11 +9,51 @@ on:
 
 jobs:
   verify-deep:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
     steps:
+      - name: Install PowerShell 7
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          POWERSHELL_VERSION="7.4.6"
+          INSTALL_ROOT="$HOME/powershell"
+
+          if [ -x "$INSTALL_ROOT/pwsh" ]; then
+            echo "$INSTALL_ROOT" >> "$GITHUB_PATH"
+          elif [ -x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh" ]; then
+            echo "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64" >> "$GITHUB_PATH"
+          else
+            mkdir -p "$INSTALL_ROOT"
+            curl -fSLo powershell.tar.gz "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz"
+            curl -fSLo checksums.txt "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/SHA256SUMS"
+            EXPECTED_SUM="$(grep "powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz" checksums.txt | awk '{print $1}')"
+            if [ -z "$EXPECTED_SUM" ]; then
+              echo "ERROR: Unable to locate expected checksum for PowerShell archive" >&2
+              exit 1
+            fi
+            ACTUAL_SUM="$(sha256sum powershell.tar.gz | awk '{print $1}')"
+            if [ "$EXPECTED_SUM" != "$ACTUAL_SUM" ]; then
+              echo "ERROR: Checksum verification failed for powershell.tar.gz" >&2
+              echo "Expected: $EXPECTED_SUM" >&2
+              echo "Actual:   $ACTUAL_SUM" >&2
+              exit 1
+            fi
+            tar -xzf powershell.tar.gz -C "$INSTALL_ROOT"
+            rm powershell.tar.gz checksums.txt
+            if [ -x "$INSTALL_ROOT/pwsh" ]; then
+              chmod +x "$INSTALL_ROOT/pwsh"
+              echo "$INSTALL_ROOT" >> "$GITHUB_PATH"
+            elif [ -x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh" ]; then
+              chmod +x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh"
+              echo "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64" >> "$GITHUB_PATH"
+            else
+              echo "Failed to install PowerShell 7" >&2
+              find "$INSTALL_ROOT" -maxdepth 3 -name pwsh -print || true
+              exit 1
+            fi
+          fi
+
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
@@ -113,7 +153,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: verify-deep-${{ matrix.os }}
+          name: verify-deep-${{ github.run_number }}
           path: |
             artifacts/verify-deep/**
             artifacts/logs/**

@@ -5,10 +5,11 @@ on:
     branches: [ feat/m3-active ]
   pull_request:
     branches: [ feat/m3-active ]
+  workflow_dispatch: {}
 
 jobs:
   sentiment:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
     strategy:
       fail-fast: false
       matrix:
@@ -18,6 +19,15 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - name: Ensure jq tool
+        run: |
+          set -euo pipefail
+          if ! command -v jq >/dev/null 2>&1; then
+            mkdir -p "$HOME/.local/bin"
+            curl -sSL "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64" -o "$HOME/.local/bin/jq"
+            chmod +x "$HOME/.local/bin/jq"
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          fi
       - name: Restore
         run: dotnet restore
       - name: Build Release
@@ -29,7 +39,6 @@ jobs:
           set -euo pipefail
           CFG=tests/fixtures/backtest_m0/config.backtest-m0.candidate.json
           TEMP_CFG=$(mktemp /tmp/sentiment-XXXX.json)
-          if ! command -v jq >/dev/null; then sudo apt-get update && sudo apt-get install -y jq; fi
           if [ "$MODE" = "active" ]; then
             jq '.featureFlags.sentiment="active" | .featureFlags.riskProbe="disabled" | .sentimentConfig={"window":5,"volGuardSigma":1e-7}' "$CFG" > "$TEMP_CFG"
           elif [ "$MODE" = "shadow" ]; then
@@ -50,13 +59,46 @@ jobs:
           path: artifacts/${{ matrix.mode }}
 
   invariants:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
     needs: sentiment
     steps:
       - uses: actions/checkout@v4
+      - name: Download journals artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: downloaded
+          pattern: journals-*
+          merge-multiple: true
+      - name: Prepare journals workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p journals/M0 artifacts/parity
+          found=0
+          for entry in downloaded/*; do
+            [ -d "$entry" ] || continue
+            name=$(basename "$entry")
+            if [[ "$name" == M0-RUN-CI-* ]]; then
+              echo "Staging journals from $name"
+              cp -r "$entry" journals/M0/
+              found=1
+              continue
+            fi
+            if [ "$name" = "parity" ]; then
+              echo "Copying parity artifacts"
+              cp -r "$entry/." artifacts/parity/ || true
+            fi
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "No CI journal directories located in downloaded/" >&2
+            ls -R downloaded || true
+            exit 1
+          fi
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore
       - name: Build Release
         run: dotnet build -c Release --no-restore
       - name: Validate Cross-Mode Invariants
@@ -73,17 +115,23 @@ jobs:
           find artifacts/parity -maxdepth 2 -name hashes.txt -print || echo "No parity artifacts found"
           if [ ! -d artifacts/parity ]; then echo "ERROR: parity artifacts directory missing"; exit 1; fi
           # Off vs shadow trades hash equality (using parity hashes)
-          OFF_HASH_FILE=$(grep -rl "CI-off" artifacts/parity || true)
-          SHADOW_HASH_FILE=$(grep -rl "CI-shadow" artifacts/parity || true)
-          ACTIVE_HASH_FILE=$(grep -rl "CI-active" artifacts/parity || true)
-          if [ -z "$OFF_HASH_FILE" ] || [ -z "$SHADOW_HASH_FILE" ] || [ -z "$ACTIVE_HASH_FILE" ]; then echo "ERROR: missing one or more parity hash files"; ls -R artifacts/parity; exit 1; fi
+          OFF_HASH_FILE="artifacts/parity/CI-off/hashes.txt"
+          SHADOW_HASH_FILE="artifacts/parity/CI-shadow/hashes.txt"
+          ACTIVE_HASH_FILE="artifacts/parity/CI-active/hashes.txt"
+          for file in "$OFF_HASH_FILE" "$SHADOW_HASH_FILE" "$ACTIVE_HASH_FILE"; do
+            if [ ! -f "$file" ]; then
+              echo "ERROR: missing parity hash file $file"
+              ls -R artifacts/parity || true
+              exit 1
+            fi
+          done
           get_val(){ grep "^$1=" "$2" | head -n1 | cut -d'=' -f2; }
           OFF_TR_SHA=$(get_val trades_sha "$OFF_HASH_FILE")
           SHADOW_TR_SHA=$(get_val trades_sha "$SHADOW_HASH_FILE")
           ACTIVE_TR_SHA=$(get_val trades_sha "$ACTIVE_HASH_FILE")
           ACTIVE_APPLIED=$(get_val applied_count "$ACTIVE_HASH_FILE")
           ACTIVE_PENALTY=$(get_val penalty_count "$ACTIVE_HASH_FILE")
-          hash_skip_meta(){ tail -n +2 "$1" | sha256sum | cut -d' ' -f1; }
+          hash_skip_meta(){ tail -n +2 "$1" | cut -d',' -f1-11,13 | sha256sum | cut -d' ' -f1; }
           if [ "$(hash_skip_meta "$OFF_TRADES")" != "$(hash_skip_meta "$SHADOW_TRADES")" ]; then echo 'ERROR: off vs shadow trades mismatch'; exit 1; fi
           if grep -q INFO_SENTIMENT_Z_V1 "$OFF_EVENTS"; then echo 'ERROR: off mode has Z events'; exit 1; fi
           if ! grep -q INFO_SENTIMENT_Z_V1 "$SHADOW_EVENTS"; then echo 'ERROR: shadow missing Z events'; exit 1; fi

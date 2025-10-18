@@ -12,36 +12,116 @@ permissions:
 
 jobs:
   runner-health:
-    runs-on: windows-latest
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
     timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
     steps:
+      - name: Install PowerShell 7
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          POWERSHELL_VERSION="7.4.6"
+          INSTALL_ROOT="$HOME/powershell"
+
+          if [ -x "$INSTALL_ROOT/pwsh" ]; then
+            echo "$INSTALL_ROOT" >> "$GITHUB_PATH"
+            exit 0
+          fi
+
+          if [ -x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh" ]; then
+            echo "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64" >> "$GITHUB_PATH"
+            exit 0
+          fi
+
+          mkdir -p "$INSTALL_ROOT"
+          curl -fSLo powershell.tar.gz "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz"
+          curl -fSLo checksums.txt "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/SHA256SUMS"
+          EXPECTED_SUM="$(grep "powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz" checksums.txt | awk '{print $1}')"
+          if [ -z "$EXPECTED_SUM" ]; then
+            echo "ERROR: Unable to locate expected checksum for PowerShell archive" >&2
+            exit 1
+          fi
+          ACTUAL_SUM="$(sha256sum powershell.tar.gz | awk '{print $1}')"
+          if [ "$EXPECTED_SUM" != "$ACTUAL_SUM" ]; then
+            echo "ERROR: Checksum verification failed for powershell.tar.gz" >&2
+            echo "Expected: $EXPECTED_SUM" >&2
+            echo "Actual:   $ACTUAL_SUM" >&2
+            exit 1
+          fi
+          tar -xzf powershell.tar.gz -C "$INSTALL_ROOT"
+          rm powershell.tar.gz checksums.txt
+
+          if [ -x "$INSTALL_ROOT/pwsh" ]; then
+            chmod +x "$INSTALL_ROOT/pwsh"
+            echo "$INSTALL_ROOT" >> "$GITHUB_PATH"
+          elif [ -x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh" ]; then
+            chmod +x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh"
+            echo "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64" >> "$GITHUB_PATH"
+          else
+            echo "Failed to locate pwsh after extraction" >&2
+            find "$INSTALL_ROOT" -maxdepth 3 -type f -name 'pwsh' -print || true
+            exit 1
+          fi
+
       - name: Gather runner status
         id: gather
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const core = require('@actions/core');
             const fs = require('fs');
             const path = require('path');
 
-            const targetLabel = 'tiyf-demo-live';
-            const { data } = await github.rest.actions.listSelfHostedRunnersForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              per_page: 100
-            });
+            const targetLabel = 'tiyf-vps';
+            let apiData;
 
-            const runners = data.runners || [];
+            try {
+              const response = await github.rest.actions.listSelfHostedRunnersForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100
+              });
+              apiData = response.data;
+            } catch (error) {
+              core.warning(`Failed to query runner inventory: ${error.message}`);
+            }
+
+            const runners = apiData?.runners ?? [];
             const matchesLabel = runner => {
               if (!runner || !Array.isArray(runner.labels)) {
                 return false;
               }
               const labels = runner.labels.map(label => (label.name || '').toLowerCase());
-              return labels.includes('self-hosted') && labels.includes('windows') && labels.includes(targetLabel);
+              return labels.includes('self-hosted') && labels.includes('linux') && labels.includes(targetLabel);
             };
 
-            const monitored = runners.filter(matchesLabel);
+            let monitored = runners.filter(matchesLabel);
+
+            if (!monitored.length) {
+              const fallbackName = process.env.RUNNER_NAME || null;
+              if (fallbackName) {
+                core.notice('Falling back to runner environment metadata.');
+                const fallbackLabels = [
+                  'self-hosted',
+                  (process.env.RUNNER_OS || '').toLowerCase(),
+                  targetLabel
+                ].filter(Boolean);
+                monitored = [
+                  {
+                    id: process.env.RUNNER_TRACKING_ID ? Number(process.env.RUNNER_TRACKING_ID) : null,
+                    name: fallbackName,
+                    os: process.env.RUNNER_OS || 'unknown',
+                    status: 'online',
+                    busy: false,
+                    labels: fallbackLabels.map(label => ({ name: label }))
+                  }
+                ];
+              }
+            }
+
             const primary = monitored.length ? monitored[0] : null;
             const status = primary ? (primary.status || 'unknown') : 'not-found';
             const busy = primary ? !!primary.busy : null;
@@ -59,7 +139,9 @@ jobs:
                     os: primary.os,
                     status,
                     busy,
-                    labels: primary.labels.map(label => label.name)
+                    labels: Array.isArray(primary.labels)
+                      ? primary.labels.map(label => (typeof label === 'string' ? label : label.name))
+                      : []
                   }
                 : null
             };

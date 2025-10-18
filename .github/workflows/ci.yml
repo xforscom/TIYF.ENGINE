@@ -4,10 +4,11 @@ on:
     branches: [ main, feat/m4-seed ]
   pull_request:
     branches: [ main, feat/m4-seed ]
+  workflow_dispatch: {}
 
 jobs:
   build-test:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
