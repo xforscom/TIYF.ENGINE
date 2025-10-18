@@ -247,7 +247,7 @@ jobs:
 
           for ($index = 0; $index -lt $expected.Count; $index++) {
             if ($actual[$index] -ne $expected[$index]) {
-              throw "Universe order drift detected at position $index: expected $($expected[$index]), found $($actual[$index])"
+              throw "Universe order drift detected at position ${index}: expected $($expected[$index]), found $($actual[$index])"
             }
           }
 
