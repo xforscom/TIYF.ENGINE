@@ -5,6 +5,10 @@ on:
     - cron: '0 0 * * *'  # Daily at midnight UTC
   workflow_dispatch:
     inputs:
+      adapter:
+        description: 'Adapter mode (stub | ctrader-demo)'
+        required: false
+        default: 'stub'
       useHostedFallback:
         description: 'Use hosted fallback runner if self-hosted is unavailable'
         required: false
@@ -32,6 +36,9 @@ jobs:
         shell: pwsh
     environment: ctrader-demo
     env:
+      ADAPTER_REQUESTED: ${{ github.event.inputs.adapter || 'stub' }}
+      EXPECTED_UNIVERSE_LINE: EURUSD, GBPUSD, USDJPY, USDCHF, USDCAD, AUDUSD, NZDUSD, XAUUSD
+      DISK_REQUIRED_GB: '20'
       RUN_ID: DEMO-CTRADER-DAILY-${{ github.run_number }}
       DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || inputs.dryRun }}
       CT_APP_ID: ${{ secrets.CT_APP_ID }}
@@ -93,6 +100,170 @@ jobs:
         id: checkout
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
 
+      - name: Adapter context
+        id: adapter_context
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $adapterRaw = $env:ADAPTER_REQUESTED
+          if ($null -eq $adapterRaw) { $adapterRaw = '' }
+          $adapter = $adapterRaw.Trim().ToLowerInvariant()
+          if ([string]::IsNullOrWhiteSpace($adapter)) { $adapter = 'stub' }
+          if ($adapter -notin @('stub','ctrader-demo')) {
+            throw "Invalid adapter selection '$adapter'. Expected stub or ctrader-demo."
+          }
+
+          $workspace = $env:GITHUB_WORKSPACE
+          if ([string]::IsNullOrWhiteSpace($workspace)) {
+            throw 'GITHUB_WORKSPACE not set'
+          }
+
+          $configFile = if ($adapter -eq 'ctrader-demo') { 'sample-config.demo-ctrader.json' } else { 'sample-config.demo.json' }
+          $configPath = Join-Path $workspace $configFile
+          if (-not (Test-Path -Path $configPath)) {
+            throw "Required config file not found: $configPath"
+          }
+
+          $configHash = (Get-FileHash -Algorithm SHA256 -Path $configPath).Hash.ToUpperInvariant()
+          $runNumber = if ([string]::IsNullOrWhiteSpace($env:GITHUB_RUN_NUMBER)) { 'UNKNOWN' } else { $env:GITHUB_RUN_NUMBER }
+          $runId = if ($adapter -eq 'ctrader-demo') { "DEMO-CTRADER-DAILY-$runNumber" } else { "DEMO-STUB-DAILY-$runNumber" }
+          $logPath = if ($adapter -eq 'ctrader-demo') { 'demo-ctrader.log' } else { 'demo-stub.log' }
+          $artifactName = "vps-demo-artifacts-adapter-$adapter"
+          $brokerEnabled = if ($adapter -eq 'ctrader-demo') { 'true' } else { 'false' }
+          $connectivityPattern = 'Adapter = CTrader OpenAPI \(demo\)|Connected to cTrader endpoint|OrderSend'
+          $connectivityRequired = if ($adapter -eq 'ctrader-demo') { 'true' } else { 'false' }
+          $adapterBanner = "Adapter = $adapter"
+          $rollbackHint = 'Rollback: re-dispatch with adapter=stub'
+
+          "ADAPTER_MODE=$adapter" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "RUN_ID=$runId" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CONFIG_PATH=$configPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CONFIG_HASH=$configHash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "LOG_PATH=$logPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ARTIFACT_NAME=$artifactName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "BROKER_ENABLED=$brokerEnabled" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CONNECTIVITY_PATTERN=$connectivityPattern" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CONNECTIVITY_REQUIRED=$connectivityRequired" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ADAPTER_BANNER=$adapterBanner" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ROLLBACK_HINT=$rollbackHint" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          "adapter=$adapter" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "artifact_name=$artifactName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "log_path=$logPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "config_path=$configPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+          $runnerLabels = if ([string]::IsNullOrWhiteSpace($env:RUNNER_LABELS)) { 'unknown' } else { $env:RUNNER_LABELS }
+          Write-Host "Selected adapter: $adapter"
+          Write-Host "Runner labels: $runnerLabels"
+          Write-Host "Runner OS: $env:RUNNER_OS"
+          Write-Host "Config path: $configPath"
+          Write-Host "Config hash: $configHash"
+          Write-Host "Log file: $logPath"
+          Write-Host $rollbackHint
+
+          $summary = @(
+            '### Adapter context',
+            "- Adapter: $adapter",
+            "- Config: $configFile ($configHash)",
+            "- Runner: $env:RUNNER_NAME ($env:RUNNER_OS)",
+            "- Log file: $logPath",
+            "- Rollback: re-dispatch with adapter=stub"
+          )
+          $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+      - name: Verify disk headroom
+        id: disk_headroom
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=${DISK_REQUIRED_GB:-20}
+          available=$(df -BG "${GITHUB_WORKSPACE}" | awk 'NR==2 {gsub("G","", $4); print $4}')
+          available_int=${available%%.*}
+          echo "Disk available: ${available_int} GiB (required: ${required} GiB)"
+          if [ "${available_int}" -lt "${required}" ]; then
+            echo "Disk space below threshold" >&2
+            exit 1
+          fi
+
+      - name: Validate config safety rails
+        id: validate_config
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $configPath = $env:CONFIG_PATH
+          if ([string]::IsNullOrWhiteSpace($configPath)) {
+            throw 'CONFIG_PATH not set'
+          }
+          if (-not (Test-Path -Path $configPath)) {
+            throw "Config path does not exist: $configPath"
+          }
+
+          $configJson = Get-Content -Path $configPath -Raw
+          if ([string]::IsNullOrWhiteSpace($configJson)) {
+            throw "Config file $configPath is empty"
+          }
+
+          $config = $configJson | ConvertFrom-Json -Depth 10
+          if ($null -eq $config) {
+            throw "Failed to parse JSON from $configPath"
+          }
+
+          if ($null -eq $config.risk) {
+            throw 'Config missing risk section'
+          }
+
+          $perTrade = [double]$config.risk.perTradeRiskPct
+          $leverage = [double]$config.risk.realLeverageCap
+
+          if ($perTrade -gt 0.05) {
+            throw "perTradeRiskPct too high: $perTrade"
+          }
+          if ($leverage -gt 2.0) {
+            throw "realLeverageCap too high: $leverage"
+          }
+
+          if ($null -eq $config.universe) {
+            throw 'Config missing universe section'
+          }
+
+          $expected = @('EURUSD','GBPUSD','USDJPY','USDCHF','USDCAD','AUDUSD','NZDUSD','XAUUSD')
+          $actual = @()
+          foreach ($symbol in $config.universe) {
+            if ([string]::IsNullOrWhiteSpace($symbol)) {
+              continue
+            }
+            $actual += $symbol.ToString().ToUpperInvariant()
+          }
+
+          if ($actual.Count -ne $expected.Count) {
+            throw "Universe count mismatch. Expected $($expected.Count); found $($actual.Count)"
+          }
+
+          $diff = Compare-Object -ReferenceObject $expected -DifferenceObject $actual -SyncWindow 0
+          if ($diff) {
+            $details = ($diff | ForEach-Object { "$_" }) -join '; '
+            throw "Universe drift detected: $details"
+          }
+
+          for ($index = 0; $index -lt $expected.Count; $index++) {
+            if ($actual[$index] -ne $expected[$index]) {
+              throw "Universe order drift detected at position $index: expected $($expected[$index]), found $($actual[$index])"
+            }
+          }
+
+          $orderedUniverse = $expected
+          $universeLine = 'Universe = ' + ($orderedUniverse -join ', ')
+          "UNIVERSE_LINE=$universeLine" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          $summary = @(
+            '### Config safety rails',
+            "- perTradeRiskPct=$perTrade",
+            "- realLeverageCap=$leverage",
+            "- universe=$($orderedUniverse -join ', ')",
+            "- Config hash: $env:CONFIG_HASH"
+          )
+          $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
       - name: Relax PowerShell execution policy
         id: relax_policy
         run: |
@@ -110,101 +281,113 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Preflight Values Checklist
+        if: ${{ steps.adapter_context.outputs.adapter == 'ctrader-demo' }}
         id: preflight
         run: |
           $ErrorActionPreference = 'Stop'
+
           $workspace = $env:GITHUB_WORKSPACE
-          $summary = @()
-          $summary += "| Check | Status |"
-          $summary += "|-------|--------|"
-          # CT_APP_ID
-          if ($env:CT_APP_ID) {
-            echo "App ID present"
-            $summary += "| App ID | ✅ |"
-          } else {
-            $summary += "| App ID | ❌ |"
-            throw "Preflight failed: CT_APP_ID missing"
+          if ([string]::IsNullOrWhiteSpace($workspace)) {
+            throw 'GITHUB_WORKSPACE not set'
           }
-          # Account mode guard
+
+          $summary = @(
+            '| Check | Status | Notes |',
+            '|-------|--------|-------|'
+          )
+
+          function Add-Row {
+            param([string]$Check, [string]$Status, [string]$Notes)
+            $script:summary += "| $Check | $Status | $Notes |"
+          }
+
           if ($env:RUN_ID -notmatch 'DEMO') {
-            $summary += "| Account mode | ❌ |"
-            throw "Preflight failed: RUN_ID must indicate demo mode"
-          } else {
-            $summary += "| Account mode | ✅ |"
+            Add-Row 'Account mode' '❌' 'RUN_ID must indicate demo mode'
+            throw 'Preflight failed: RUN_ID must indicate demo mode'
           }
-          # CT_APP_SECRET
+          Add-Row 'Account mode' '✅' $env:RUN_ID
+
+          if ($env:CT_APP_ID) {
+            Write-Host 'CT_APP_ID present (masked)'
+            Add-Row 'App ID' '✅' 'present'
+          } else {
+            Add-Row 'App ID' '❌' 'missing'
+            throw 'Preflight failed: CT_APP_ID missing'
+          }
+
           if ($env:CT_APP_SECRET) {
-            echo "Client secret present"
-            $summary += "| Client secret | ✅ |"
+            Write-Host 'CT_APP_SECRET present (masked)'
+            Add-Row 'Client secret' '✅' 'present'
           } else {
-            $summary += "| Client secret | ❌ |"
-            throw "Preflight failed: CT_APP_SECRET missing"
+            Add-Row 'Client secret' '❌' 'missing'
+            throw 'Preflight failed: CT_APP_SECRET missing'
           }
-          # CT_DEMO_OAUTH_TOKEN
+
           if ($env:CT_DEMO_OAUTH_TOKEN) {
-            echo "Access token present"
-            $summary += "| Access token | ✅ |"
+            Write-Host 'CT_DEMO_OAUTH_TOKEN present (masked)'
+            Add-Row 'Access token' '✅' 'present'
             if ($env:CT_DEMO_OAUTH_TOKEN -match '\.') {
               $parts = $env:CT_DEMO_OAUTH_TOKEN.Split('.')
               if ($parts.Length -ge 2) {
                 try {
-                  $payloadJson = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($parts[1].Replace('-', '+').Replace('_', '/').PadRight($parts[1].Length + (4 - ($parts[1].Length % 4)) % 4, '=')))
+                  $payloadSegment = $parts[1].Replace('-', '+').Replace('_', '/').PadRight($parts[1].Length + (4 - ($parts[1].Length % 4)) % 4, '=')
+                  $payloadJson = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($payloadSegment))
                   $payload = $payloadJson | ConvertFrom-Json
                   if ($payload.exp) {
                     $expiry = [DateTimeOffset]::FromUnixTimeSeconds([int64]$payload.exp).UtcDateTime
                     $now = [DateTime]::UtcNow
-                    $days = ($expiry - $now).TotalDays
-                    if ($days -le 0) {
-                      throw "Preflight failed: CT_DEMO_OAUTH_TOKEN appears expired"
+                    $remaining = ($expiry - $now).TotalDays
+                    if ($remaining -le 0) {
+                      throw 'Preflight failed: CT_DEMO_OAUTH_TOKEN appears expired'
                     }
-                    $summary += "| Access token expiry (days) | $([Math]::Floor($days)) |"
+                    Add-Row 'Access token expiry (days)' '✅' ([Math]::Floor($remaining).ToString())
                   }
                 } catch {
                   Write-Warning "Unable to parse token expiry: $($_.Exception.Message)"
+                  Add-Row 'Access token expiry (days)' '⚠️' 'Unable to parse expiry'
                 }
               }
             }
           } else {
-            $summary += "| Access token | ❌ |"
-            throw "Preflight failed: CT_DEMO_OAUTH_TOKEN missing"
+            Add-Row 'Access token' '❌' 'missing'
+            throw 'Preflight failed: CT_DEMO_OAUTH_TOKEN missing'
           }
-          # CT_DEMO_REFRESH_TOKEN
+
           if ($env:CT_DEMO_REFRESH_TOKEN) {
-            echo "Refresh token present"
-            $summary += "| Refresh token | ✅ |"
+            Write-Host 'CT_DEMO_REFRESH_TOKEN present (masked)'
+            Add-Row 'Refresh token' '✅' 'present'
           } else {
-            $summary += "| Refresh token | ❌ |"
-            throw "Preflight failed: CT_DEMO_REFRESH_TOKEN missing"
+            Add-Row 'Refresh token' '❌' 'missing'
+            throw 'Preflight failed: CT_DEMO_REFRESH_TOKEN missing'
           }
-          # CT_DEMO_ACCOUNT_ID
+
           if ($env:CT_DEMO_ACCOUNT_ID) {
             $numeric = $env:CT_DEMO_ACCOUNT_ID -match '^\d+$'
-            echo "Account ID present; numeric=$numeric"
             if (-not $numeric) {
-              $summary += "| Account ID | ❌ |"
-              throw "Preflight failed: CT_DEMO_ACCOUNT_ID not numeric"
+              Add-Row 'Account ID' '❌' 'must be numeric'
+              throw 'Preflight failed: CT_DEMO_ACCOUNT_ID not numeric'
             }
-            $summary += "| Account ID | ✅ |"
+            Add-Row 'Account ID' '✅' 'numeric'
           } else {
-            $summary += "| Account ID | ❌ |"
-            throw "Preflight failed: CT_DEMO_ACCOUNT_ID missing"
+            Add-Row 'Account ID' '❌' 'missing'
+            throw 'Preflight failed: CT_DEMO_ACCOUNT_ID missing'
           }
-          # CT_DEMO_BROKER
+
           if ($env:CT_DEMO_BROKER) {
-            $firstTwo = $env:CT_DEMO_BROKER.Substring(0, [Math]::Min(2, $env:CT_DEMO_BROKER.Length))
-            echo "broker=${firstTwo}… (present)"
-            $summary += "| Broker | ✅ |"
+            Write-Host 'CT_DEMO_BROKER present (masked)'
+            Add-Row 'Broker' '✅' 'present'
           } else {
-            echo "broker= (missing)"
-            $summary += "| Broker | ❌ |"
-            throw "Preflight failed: CT_DEMO_BROKER missing"
+            Add-Row 'Broker' '❌' 'missing'
+            throw 'Preflight failed: CT_DEMO_BROKER missing'
           }
-          echo "Environment = demo"
-          $summary += "| Environment | demo |"
+
+          Add-Row 'Secret masking' '✅' 'GitHub masks values as ***'
+
           $summaryPath = Join-Path $workspace 'preflight.sanity.txt'
           $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
           $summary | Out-File -FilePath $summaryPath -Encoding utf8
           Write-Host "Preflight summary written to $summaryPath"
+
           if ($env:DRY_RUN -eq 'false') {
             Write-Host 'Live trading mode confirmed for this run.'
           } else {
@@ -224,8 +407,13 @@ jobs:
         id: run_demofeed
         run: |
           $ErrorActionPreference = 'Stop'
-          $logPath = 'demo-ctrader.log'
-          $args = @('--run-id', $env:RUN_ID, '--broker-enabled', 'true', '--broker-fill-mode', 'ioc-market')
+          $logPath = if ([string]::IsNullOrWhiteSpace($env:LOG_PATH)) { 'demo.log' } else { $env:LOG_PATH }
+          $adapterLine = if ([string]::IsNullOrWhiteSpace($env:ADAPTER_BANNER)) { 'Adapter = stub' } else { $env:ADAPTER_BANNER }
+          $universeLine = if ([string]::IsNullOrWhiteSpace($env:UNIVERSE_LINE)) { 'Universe = ' + $env:EXPECTED_UNIVERSE_LINE } else { $env:UNIVERSE_LINE }
+          $configLine = "Config = $env:CONFIG_PATH"
+
+          $brokerFlag = if ([string]::IsNullOrWhiteSpace($env:BROKER_ENABLED)) { 'false' } else { $env:BROKER_ENABLED }
+          $args = @('--run-id', $env:RUN_ID, '--broker-enabled', $brokerFlag, '--broker-fill-mode', 'ioc-market')
           $maxAttempts = 2
           $delaySeconds = 15
           $success = $false
@@ -239,7 +427,8 @@ jobs:
               Remove-Item -Path $logPath -Force
             }
 
-            dotnet exec src/TiYf.Engine.DemoFeed/bin/Release/net8.0/TiYf.Engine.DemoFeed.dll @args | Tee-Object -FilePath $logPath
+            @($adapterLine, $universeLine, $configLine) | Tee-Object -FilePath $logPath
+            dotnet exec src/TiYf.Engine.DemoFeed/bin/Release/net8.0/TiYf.Engine.DemoFeed.dll @args | Tee-Object -FilePath $logPath -Append
             $exitCode = $LASTEXITCODE
             $eventsLine = $null
             $tradesLine = $null
@@ -268,7 +457,7 @@ jobs:
           }
 
           if (-not $success) {
-            throw "DemoFeed failed after $maxAttempts attempts; inspect demo-ctrader.log"
+            throw "DemoFeed failed after $maxAttempts attempts; inspect $logPath"
           }
 
           if ([string]::IsNullOrWhiteSpace($brokerDangling) -or $brokerDangling -ne 'false') {
@@ -298,6 +487,45 @@ jobs:
           if ($parityExit -ne 0) { throw "verify parity exited with $parityExit" }
           "PARITY_EXIT=$parityExit" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Enforce post-run gates
+        id: enforce_gates
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $strict = if ([string]::IsNullOrWhiteSpace($env:STRICT_EXIT)) { 'unknown' } else { $env:STRICT_EXIT }
+          $parity = if ([string]::IsNullOrWhiteSpace($env:PARITY_EXIT)) { 'unknown' } else { $env:PARITY_EXIT }
+          $dangling = if ([string]::IsNullOrWhiteSpace($env:BROKER_DANGLING)) { 'unknown' } else { $env:BROKER_DANGLING }
+
+          if ($strict -ne '0') {
+            throw "STRICT_EXIT expected 0 but was $strict"
+          }
+          if ($parity -ne '0') {
+            throw "PARITY_EXIT expected 0 but was $parity"
+          }
+          if ($dangling -ne 'false') {
+            throw "broker_dangling expected false but was $dangling"
+          }
+
+          Write-Host 'STRICT_EXIT, PARITY_EXIT, and broker_dangling passed post-run gates.'
+
+      - name: Verify cTrader connectivity log
+        if: ${{ steps.adapter_context.outputs.adapter == 'ctrader-demo' }}
+        id: verify_connectivity
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $logFile = if ([string]::IsNullOrWhiteSpace($env:LOG_PATH)) { 'demo.log' } else { $env:LOG_PATH }
+          if (-not (Test-Path -Path $logFile)) {
+            throw "Log file not found: $logFile"
+          }
+
+          $pattern = if ([string]::IsNullOrWhiteSpace($env:CONNECTIVITY_PATTERN)) { 'Adapter = CTrader OpenAPI \(demo\)|Connected to cTrader endpoint|OrderSend' } else { $env:CONNECTIVITY_PATTERN }
+          $matches = Select-String -Path $logFile -Pattern $pattern
+          if (-not $matches) {
+            throw "No connectivity proof found in $logFile using pattern '$pattern'"
+          }
+
+          $first = $matches | Select-Object -First 1
+          Write-Host "Connectivity proof line: $($first.Line)"
+
       - name: Collect Artifacts
         id: collect_artifacts
         if: always()
@@ -324,7 +552,8 @@ jobs:
           Copy-Or-Placeholder -Source $env:TRADES_PATH -Destination (Join-Path $artifactDir 'trades.csv')
           Copy-Or-Placeholder -Source (Join-Path $PWD.Path 'strict.json') -Destination (Join-Path $artifactDir 'strict.json')
           Copy-Or-Placeholder -Source (Join-Path $PWD.Path 'parity.json') -Destination (Join-Path $artifactDir 'parity.json')
-          Copy-Or-Placeholder -Source (Join-Path $PWD.Path 'demo-ctrader.log') -Destination (Join-Path $artifactDir 'demo-ctrader.log')
+          $logFile = if ([string]::IsNullOrWhiteSpace($env:LOG_PATH)) { 'demo.log' } else { $env:LOG_PATH }
+          Copy-Or-Placeholder -Source (Join-Path $PWD.Path $logFile) -Destination (Join-Path $artifactDir $logFile)
           Copy-Or-Placeholder -Source (Join-Path $PWD.Path 'preflight.sanity.txt') -Destination (Join-Path $artifactDir 'preflight.sanity.txt')
 
       - name: Summarize Results
@@ -358,8 +587,27 @@ jobs:
 
           $resultLine = "STRICT_EXIT=$strictExit; PARITY_EXIT=$parityExit; broker_dangling=$brokerDangling; events_sha=$eventsHash; trades_sha=$tradesHash"
           Write-Host $resultLine
-          $resultLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
-          "Artifacts retained for 30 days (repository default)." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+          $adapterMode = Resolve-Value $env:ADAPTER_MODE
+          $configPath = Resolve-Value $env:CONFIG_PATH
+          $configHash = Resolve-Value $env:CONFIG_HASH
+          $logPath = Resolve-Value $env:LOG_PATH
+          $commitSha = Resolve-Value $env:GITHUB_SHA
+          $rollbackHint = Resolve-Value $env:ROLLBACK_HINT
+
+          $summaryLines = @(
+            '### Result summary',
+            $resultLine,
+            "Adapter: $adapterMode",
+            "Config: $configPath",
+            "Config hash: $configHash",
+            "Commit: $commitSha",
+            "Log: $logPath",
+            $rollbackHint,
+            'Artifacts retained for 30 days (repository default).'
+          )
+
+          $summaryLines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
           "RESULT_LINE=$resultLine" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "EVENTS_SHA=$eventsHash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "TRADES_SHA=$tradesHash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -413,7 +661,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: demo-daily-ctrader-${{ env.RUN_ID }}
+          name: ${{ steps.adapter_context.outputs.artifact_name }}
           path: |
             ${{ github.workspace }}/artifacts
             ${{ github.workspace }}/checks.csv
