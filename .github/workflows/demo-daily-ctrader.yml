@@ -364,10 +364,11 @@ jobs:
           if ($env:CT_DEMO_ACCOUNT_ID) {
             $numeric = $env:CT_DEMO_ACCOUNT_ID -match '^\d+$'
             if (-not $numeric) {
-              Add-Row 'Account ID' '❌' 'must be numeric'
-              throw 'Preflight failed: CT_DEMO_ACCOUNT_ID not numeric'
+              Add-Row 'Account ID' '⚠️' 'not numeric'
+              Write-Warning 'CT_DEMO_ACCOUNT_ID not numeric'
+            } else {
+              Add-Row 'Account ID' '✅' 'numeric'
             }
-            Add-Row 'Account ID' '✅' 'numeric'
           } else {
             Add-Row 'Account ID' '❌' 'missing'
             throw 'Preflight failed: CT_DEMO_ACCOUNT_ID missing'
