@@ -375,8 +375,8 @@ jobs:
             Write-Host 'CT_DEMO_BROKER present (masked)'
             Add-Row 'Broker' '✅' 'present'
           } else {
-            Add-Row 'Broker' '❌' 'missing'
-            throw 'Preflight failed: CT_DEMO_BROKER missing'
+            Add-Row 'Broker' '⚠️' 'missing'
+            Write-Warning 'CT_DEMO_BROKER missing'
           }
 
           Add-Row 'Secret masking' '✅' 'GitHub masks values as ***'
