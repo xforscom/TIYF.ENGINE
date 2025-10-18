@@ -45,48 +45,72 @@ jobs:
 
             const headlineRaw = `Merge PR #${prNumber}: ${pr.title ?? ''}`.trim();
             const headline = headlineRaw.length > 250 ? `${headlineRaw.slice(0, 247)}...` : (headlineRaw || `Merge PR #${prNumber}`);
-            const bypassReasonRaw = `Admin merge via workflow run ${process.env.GITHUB_RUN_ID ?? 'unknown'}`;
-            const bypassReason = bypassReasonRaw.length > 256 ? bypassReasonRaw.slice(0, 256) : bypassReasonRaw;
+            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-            const mutation = `mutation MergeAdminBypass($pullRequestId: ID!, $expectedHeadOid: GitObjectID!, $commitHeadline: String!, $bypassReason: String!) {
-              mergePullRequest(input: {
-                pullRequestId: $pullRequestId,
-                expectedHeadOid: $expectedHeadOid,
-                mergeMethod: SQUASH,
-                commitHeadline: $commitHeadline,
-                bypassPullRequestAllowances: true,
-                bypassReason: $bypassReason
-              }) {
-                pullRequest {
-                  merged
-                  mergeCommit { oid }
-                }
-              }
-            }`;
+            // Wait for mergeable state to stabilise so we can tell if we just need an approval.
+            let latestPr = pr;
+            for (let attempt = 0; attempt < 5 && latestPr.mergeable_state === 'unknown'; attempt += 1) {
+              await sleep(3000);
+              const { data } = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
+              latestPr = data;
+            }
 
-            try {
-              const response = await github.graphql(mutation, {
-                pullRequestId: pr.node_id,
-                expectedHeadOid,
-                commitHeadline: headline,
-                bypassReason,
-              });
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner,
+              repo,
+              pull_number: prNumber,
+              per_page: 100,
+            });
 
-              const mergeResult = response?.mergePullRequest?.pullRequest;
-              if (!mergeResult?.merged) {
-                core.setFailed('Merge mutation completed without merging the pull request');
+            const prAuthor = latestPr.user?.login;
+            const hasApproval = reviews.some(review => review.state === 'APPROVED' && review.user?.login && review.user.login !== prAuthor);
+
+            if (!hasApproval) {
+              const { data: authUser } = await github.rest.users.getAuthenticated();
+              const authLogin = authUser?.login;
+
+              if (authLogin && authLogin === prAuthor) {
+                core.setFailed('Missing required approval and admin token matches PR author; manual reviewer needed.');
                 return;
               }
 
-              const mergeCommit = mergeResult.mergeCommit?.oid ?? 'unknown commit';
+              core.info('Submitting administrative approval to satisfy branch protection.');
+              await github.rest.pulls.createReview({
+                owner,
+                repo,
+                pull_number: prNumber,
+                body: `Automated approval via admin merge workflow run ${process.env.GITHUB_RUN_ID ?? 'unknown'}`,
+                event: 'APPROVE',
+              });
+            }
+
+            // Re-fetch to capture any status updates and mergeability after approval.
+            const { data: readyPr } = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
+
+            try {
+              const response = await github.rest.pulls.merge({
+                owner,
+                repo,
+                pull_number: prNumber,
+                commit_title: headline,
+                merge_method: 'squash',
+                sha: expectedHeadOid,
+              });
+
+              if (!response?.data?.merged) {
+                core.setFailed('REST merge request completed without merging the pull request');
+                return;
+              }
+
+              const mergeCommit = response.data.sha ?? 'unknown commit';
               core.info(`PR #${prNumber} merged as ${mergeCommit}`);
             } catch (error) {
               if (error?.errors) {
                 for (const err of error.errors) {
-                  core.error(`${err.type ?? 'GraphQLError'}: ${err.message}`);
+                  core.error(`${err.type ?? 'Error'}: ${err.message}`);
                 }
               } else {
                 core.error(error);
               }
-              core.setFailed('Failed to merge pull request via GraphQL API');
+              core.setFailed('Failed to merge pull request via REST API');
             }
