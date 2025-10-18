@@ -124,7 +124,7 @@ jobs:
           $brokerEnabled = if ($adapter -eq 'ctrader-demo') { 'true' } else { 'false' }
           $connectivityPattern = 'Adapter = CTrader OpenAPI \(demo\)|Connected to cTrader endpoint|OrderSend'
           $connectivityRequired = if ($adapter -eq 'ctrader-demo') { 'true' } else { 'false' }
-          $adapterBanner = "Adapter = $adapter"
+          $adapterBanner = if ($adapter -eq 'ctrader-demo') { 'Adapter = CTrader OpenAPI (demo)' } else { "Adapter = $adapter" }
           $rollbackHint = 'Rollback: re-dispatch with adapter=stub'
 
           if ($adapter -eq 'ctrader-demo' -and $env:BROKER_ENABLED -ne 'true') {
