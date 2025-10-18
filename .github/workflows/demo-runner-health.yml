@@ -2,7 +2,7 @@ name: demo-runner-health
 
 on:
   schedule:
-    - cron: '0 6 * * 1'  # Mondays at 06:00 UTC
+    - cron: '0 5 * * *'  # Daily at 05:00 UTC
   workflow_dispatch:
 
 permissions:
@@ -167,6 +167,18 @@ jobs:
               .write();
 
             console.log(json);
+
+      - name: Check disk capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h
+          AVAILABLE_KiB=$(df --output=avail -k / | tail -n 1 | tr -d ' ')
+          echo "Available KiB on root: $AVAILABLE_KiB"
+          if [ "$AVAILABLE_KiB" -lt $((20 * 1024 * 1024)) ]; then
+            echo "ERROR: Less than 20GiB available on root filesystem" >&2
+            exit 1
+          fi
 
       - name: Update Runner Health issue
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
