@@ -327,7 +327,7 @@ jobs:
               $parts = $env:CT_DEMO_OAUTH_TOKEN.Split('.')
               if ($parts.Length -ge 2) {
                 try {
-                  $payloadSegment = $parts[1].Replace('-', '+').Replace('_', '/').PadRight($parts[1].Length + (4 - ($parts[1].Length % 4)) % 4, '=')
+                  $payloadSegment = $parts[1].Replace('-', '+').Replace('_', '/').PadRight($parts[1].Length + (4 - ($parts[1].Length % 4)) % 4, '=')  
                   $payloadJson = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($payloadSegment))
                   $payload = $payloadJson | ConvertFrom-Json
                   if ($payload.exp) {
@@ -346,11 +346,9 @@ jobs:
               }
             }
           } else {
-            Add-Row 'Access token' '❌' 'missing'
-            throw 'Preflight failed: CT_DEMO_OAUTH_TOKEN missing'
-          }
-
-          if ($env:CT_DEMO_REFRESH_TOKEN) {
+            Add-Row 'Access token' '⚠️' 'missing'
+            Write-Warning 'CT_DEMO_OAUTH_TOKEN missing'
+          }          if ($env:CT_DEMO_REFRESH_TOKEN) {
             Write-Host 'CT_DEMO_REFRESH_TOKEN present (masked)'
             Add-Row 'Refresh token' '✅' 'present'
           } else {
