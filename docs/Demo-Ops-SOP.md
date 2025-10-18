@@ -27,9 +27,9 @@ The workflow preflight writes `preflight.sanity.txt` to the artifact bundle. Con
 1. Dispatch the smoke workflow with `dryRun=false` when validating broker connectivity.
 2. If the self-hosted runner is impaired, set `useHostedFallback=true` (hosted machine has .NET 8 installed by workflow).
 3. Monitor the job summary for:
-	- `STRICT_EXIT=0` and `PARITY_EXIT=0`.
-	- `broker_dangling=false`.
-	- Stable SHA pairs (compare to previous reference run if needed).
+    - `STRICT_EXIT=0` and `PARITY_EXIT=0`.
+    - `broker_dangling=false`.
+    - Stable SHA pairs (compare to previous reference run if needed).
 4. Download the artifact bundle if deeper inspection is required; the `checks.csv` file is a quick ingest into sheets.
 
 ## Failure Handling

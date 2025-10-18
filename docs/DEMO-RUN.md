@@ -1,79 +1,50 @@
-dotnet build -c Release
-dotnet exec src/TiYf.Engine.DemoFeed/bin/Release/net8.0/TiYf.Engine.DemoFeed.dll --run-id DEMO-TEST --broker-enabled true --broker-fill-mode ioc-market
-dotnet exec src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll verify strict --events journals/DEMO/DEMO-TEST/events.csv --trades journals/DEMO/DEMO-TEST/trades.csv --schema 1.3.0
-# Demo Run Guide
+# Demo Run Operations
 
-The demo workflows validate the TiYf Engine broker integration in a deterministic environment. Use this guide to understand what each workflow does, what artifacts to expect, and how to interpret the run summaries.
+## Purpose
+- Allow operators to switch between the stub broker and the cTrader demo adapter without modifying workflow logic.
+- Guard live-touching runs with deterministic config hashes, disk headroom checks, and secret preflight gates.
+- Produce predictable artifacts and summaries so incidents can be triaged and rolled back quickly.
 
-## Demo Configuration
+## Workflows at a Glance
+| Workflow | Trigger | Primary Use | Notes |
+| --- | --- | --- | --- |
+| `demo-live-smoke-ctrader` | `workflow_dispatch` | Manual smoke before demo trading | Accepts `adapter`, `dryRun`, `useHostedFallback`. Updates Demo Session issue, flips commit status, and can ping `DEMO_ALERT_WEBHOOK` on failure. |
+| `demo-daily-ctrader` | Cron (00:00 UTC) + `workflow_dispatch` | Scheduled end-to-end guardrail | Shares the same inputs; scheduled runs force `dryRun=false` to exercise broker wiring nightly. |
+| `demo-session-manual` | `workflow_dispatch` | Operator-led session with issue transcript | Inputs: `adapter`, optional `run_id`, `broker_enabled` (auto-aligned with adapter). Generates a fresh Demo Session issue entry. |
 
-- **Scenario**: `tests/fixtures/backtest_m0/config.backtest-m0.json` with schema 1.3.0.
-- **Broker Mode**: Always enabled (`--broker-enabled true --broker-fill-mode ioc-market`).
-- **Determinism Targets**:
-  - 6 trades with stable ordering.
-  - No `ALERT_BLOCK_*` events.
-  - `broker_dangling=false` after every run.
-- **Verifier Contracts**: `verify strict` and `verify parity` MUST exit with code `0` every time.
+All jobs target the self-hosted runner labelled `[self-hosted, Linux, X64, tiyf-vps]`, install PowerShell 7, set execution policy to `RemoteSigned`, and provision .NET 8 before executing DemoFeed.
 
-## Workflows
+## Adapter Modes
+- `stub` (default) disables broker integration and uses `sample-config.demo.json`.
+- `ctrader-demo` enables broker calls, swaps to `sample-config.demo-ctrader.json`, and requires repository secrets `CT_APP_ID`, `CT_APP_SECRET`, `CT_DEMO_OAUTH_TOKEN`, `CT_DEMO_REFRESH_TOKEN`, `CT_DEMO_ACCOUNT_ID`, `CT_DEMO_BROKER`.
+- Rollback path is always "re-dispatch with `adapter=stub`"; the workflows echo this in their summaries for quick reference.
 
-- `demo-live-smoke-ctrader.yml`: Manual smoke validation before live interventions. Includes workspace-aware preflight, retrying `DemoFeed`, result hashing, and resiliency around artifact capture.
-- `demo-daily-ctrader.yml`: Scheduled midnight UTC run with the same guard rails as the smoke job. Default `dryRun=false` on the schedule so it exercises live broker credentials nightly.
-- `demo-runner-health.yml`: Weekly watchdog that inspects the self-hosted Windows runner fleet and raises an issue/webhook alert when any demo runner is offline.
+## Automatic Safeguards
+- Disk headroom gate: run aborts if less than 20 GiB remain on the runner workspace volume.
+- Config safety rails: risk limits must satisfy `perTradeRiskPct <= 0.05` and `realLeverageCap <= 2.0`; the eight-symbol universe must match `EURUSD, GBPUSD, USDJPY, USDCHF, USDCAD, AUDUSD, NZDUSD, XAUUSD` in both content and order.
+- cTrader preflight: when `adapter=ctrader-demo`, secrets are validated and summarized to `preflight.sanity.txt`; missing, non-numeric, or expired values fail the run before DemoFeed starts.
+- Run identity guard: `RUN_ID` must contain `DEMO`; the manual workflow rewrites `broker_enabled` to the safe value for the selected adapter and logs a warning if it overrides the operator input.
 
-Both demo runs gate on a single concurrency slot to guarantee “one demo at a time”. They expose `useHostedFallback` for manual runs when the self-hosted runner is unavailable; set it to `true` in `workflow_dispatch` to land on `windows-latest`.
+## Execution Outline
+1. Checkout repository and compute adapter context (config path, SHA256 hash, log name, artifact name).
+2. Validate disk headroom and configuration safety rules; execute the cTrader secret checklist when required.
+3. Restore and build `TiYf.Engine.sln` in Release, then run DemoFeed (smoke/daily retry automatically; the manual session executes once) while injecting `--broker-enabled` according to the adapter mode.
+4. Capture verifier outputs, broker health (`broker_dangling` must be `false`), connectivity proof for cTrader runs, and hashes for generated journals.
+5. Publish result summaries, step reports, `checks.csv`, and the `artifacts/` payload prior to uploading with 30-day retention.
 
-## Job Summary Format
+## Observability and Artifacts
+- Log files begin with banner lines such as `Adapter = …`, `Universe = …`, and `Config = …`. For cTrader runs the workflow searches `demo-ctrader.log` for `Adapter = CTrader OpenAPI (demo)|Connected to cTrader endpoint|OrderSend`; missing evidence fails the job.
+- Artifacts upload under `vps-demo-artifacts-adapter-<adapter>` and contain `events.csv`, `trades.csv`, strict/parity JSON, the DemoFeed log (`demo-ctrader.log` or `demo-stub.log`), and `preflight.sanity.txt` when generated. Placeholder files are written when a source artifact is absent so consumers see a consistent layout.
+- `checks.csv` at the workspace root records UTC timestamp, strict/parity exit codes, `broker_dangling`, SHA hashes, and runner identity. The same data is summarised in the `RESULT_LINE` stored in the step summary.
 
-Every run appends a deterministic summary line to the job summary:
+## Failure Handling
+- Smoke and daily workflows set GitHub commit statuses (`ci:red` or `ci:green`), comment on the "Demo Session" issue with the first failing step, and optionally post to the ops webhook.
+- The manual session workflow appends a transcript comment to its Demo Session issue, embedding the summary line and artifact link for later audit.
+- All workflows retain artifacts and summaries on failure, enabling operators to diff hashes across runs without rerunning immediately.
 
-```
-STRICT_EXIT=0; PARITY_EXIT=0; broker_dangling=false; events_sha=<SHA256>; trades_sha=<SHA256>
-Artifacts retained for 30 days (repository default).
-```
-
-- Any non-zero exit code or `broker_dangling` other than `false` causes an immediate failure.
-- The SHA pairs allow quick parity comparisons across runs without downloading the CSVs.
-
-## Artifacts
-
-Artifacts are uploaded under `demo-*-ctrader-<RUN_ID>` with 30-day retention. On failure the collector still produces placeholder files so triage has a consistent structure:
-
-| File | Purpose |
-| --- | --- |
-| `events.csv`, `trades.csv` | Primary journals copied from the runner workspace (placeholder if generation failed).
-| `strict.json`, `parity.json` | Verifier outputs.
-| `demo-ctrader.log` | Combined DemoFeed stdout.
-| `preflight.sanity.txt` | Workspace-aware secret sanity checks.
-| `checks.csv` | One line CSV containing UTC timestamp, strict/parity exits, broker flag, SHA hashes, and runner name for quick spreadsheet ingest.
-
-## Failure Signaling
-
-On red runs the workflows automatically:
-
-- Comment (or open) the `Demo Session` issue with the first failing step and the summary line.
-- Flip commit statuses `ci:red` / `ci:green` so Sentry release automation inherits the same signal.
-- Invoke the configured ops webhook (set repository/environment secret `DEMO_ALERT_WEBHOOK`) with a short payload.
-
-If the self-hosted runner fleet is down, the `Runner Health` issue receives an update from the watchdog job. The same webhook fires so the on-call channel sees the degraded state.
-
-## Running Locally
-
-```powershell
-# Build release binaries
-dotnet build -c Release
-
-# Execute the demo feed (dry run by default)
-dotnet exec src/TiYf.Engine.DemoFeed/bin/Release/net8.0/TiYf.Engine.DemoFeed.dll `
-  --run-id DEMO-LOCAL `
-  --broker-enabled true `
-  --broker-fill-mode ioc-market
-
-# Verify determinism
-dotnet exec src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll verify strict `
-  --events journals/DEMO/DEMO-LOCAL/events.csv `
-  --trades journals/DEMO/DEMO-LOCAL/trades.csv `
-  --schema 1.3.0
-```
-
-Expected output: `STRICT VERIFY: OK`, `PARITY VERIFY: OK`, and `broker_dangling=false` in the DemoFeed log.
+## Operator Checklist
+- Choose the adapter: prefer `stub` after risky changes; escalate to `ctrader-demo` only after confirming secrets and desired trading window.
+- Verify the `tiyf-vps` runner is online and has the required disk space before dispatching.
+- For cTrader runs, review repository secrets ahead of time; the preflight gate will halt the run, but proactive checks reduce noise.
+- Capture artifact URLs and the posted `RESULT_LINE` when filing incident notes; include `preflight.sanity.txt` for compliance evidence.
+- If a cTrader run misbehaves, immediately re-run with `adapter=stub` to restore nightly coverage while the incident is investigated.

@@ -40,6 +40,7 @@ dotnet exec src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll verif
 Expected results: `SIM_EXIT=0`, `STRICT_EXIT=0`, `PARITY_EXIT=0`, six trades, zero `ALERT_BLOCK_*` events, and parity status `"match": true` for both journals.
 
 Demo feed broker flags (PR-B demo stub):
+
 - `--broker-enabled` turns the deterministic stub on for the run (defaults to disabled).
 - `--broker-fill-mode` currently only accepts `ioc-market`.
 - `--broker-seed` is accepted for forward compatibility but ignored in PR-B.
@@ -225,17 +226,7 @@ Fixture: `tests/fixtures/backtest_m0/promotion.json`
 Introduces two shadow-only capabilities that do not alter trading outcomes:
 
 1. Data QA Early Tolerance Pipeline
-   - Order: Analyze (pure) -> ApplyTolerance (drop/suppress issues) -> Journal -> Gate.
-   - If all issues filtered, emits DATA_QA_BEGIN_V1 / zero DATA_QA_ISSUE_V1 rows / DATA_QA_SUMMARY_V1 with `"passed":true` and NO DATA_QA_ABORT_V1.
-   - Tolerance parameters (example high thresholds) neutralize known fixture gaps:
-     - `maxMissingBarsPerInstrument >= 999`
-     - `allowDuplicates = true`
-     - `spikeZ >= 50` (or `dropSpikes=false`)
-   - Analyzer stays pure (no embedded suppression logic) ensuring reproducible scan semantics.
-
-  Note on K tolerance: when `maxMissingBarsPerInstrument = K`, the tolerance drops the earliest K missing-bar gaps per symbol (ordered by timestamp). Any overflow remains and will still trigger a fail/abort in active mode.
-
-2. Sentiment Volatility Guard (shadow mode)
+1. Sentiment Volatility Guard (shadow mode)
    - Enable via `featureFlags.sentiment = "shadow"` plus optional `sentimentConfig` block:
 
 ```json
@@ -453,9 +444,9 @@ Introduces deterministic risk guardrails with three modes: `off`, `shadow`, `act
 
 Deterministic trade parity MUST hold between `off` and `shadow` modes (identical `trades_sha`). Divergence in `active` is allowed only when a guardrail would block (exposure or drawdown) producing an alert.
 
-### Event Ordering (Per Bar)
+### Event Ordering (Per Bar) — Recap
 
-```
+```text
 BAR_V1 → [Sentiment events (if enabled): INFO_SENTIMENT_Z_V1 → (INFO_SENTIMENT_CLAMP_V1) → (INFO_SENTIMENT_APPLIED_V1 in active sentiment)] → INFO_RISK_EVAL_V1 → [ALERT_BLOCK_NET_EXPOSURE] → [ALERT_BLOCK_DRAWDOWN] → (trade emitted OR suppressed)
 ```
 
@@ -565,4 +556,4 @@ ALERT_BLOCK_DRAWDOWN,{"symbol":"EURUSD","run_drawdown_ccy":1500,"cap":1500,"ts":
 Proprietary – All rights reserved. Internal evaluation and development only. No redistribution, sublicensing, or external publication without written authorization. See `LICENSE` for terms.
 
 ---
-_Visibility switched to private on: 2025-10-07 (UTC). Public badges / publishing references have been removed or deprecated._
+*Visibility switched to private on: 2025-10-07 (UTC). Public badges / publishing references have been removed or deprecated.*
