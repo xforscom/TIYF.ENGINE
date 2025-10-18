@@ -19,6 +19,10 @@ on:
         required: false
         default: true
         type: boolean
+      alertEnv:
+        description: 'Alert routing environment (prod | staging)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -252,6 +256,43 @@ jobs:
             "- Runner: $env:RUNNER_NAME ($env:RUNNER_OS)",
             "- Log file: $logPath",
             "- Rollback: re-dispatch with adapter=stub"
+          )
+          $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+      - name: Resolve alert webhook
+        id: resolve_alert
+        env:
+          ALERT_ENV_INPUT: ${{ github.event.inputs.alertEnv }}
+          ALERT_ENV_DEFAULT: ${{ vars.ALERT_ENV }}
+          WEBHOOK_PROD: ${{ secrets.DEMO_ALERT_WEBHOOK_PROD }}
+          WEBHOOK_STAGING: ${{ secrets.DEMO_ALERT_WEBHOOK_STAGING }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $alertEnvCandidate = if ([string]::IsNullOrWhiteSpace($env:ALERT_ENV_INPUT)) { $env:ALERT_ENV_DEFAULT } else { $env:ALERT_ENV_INPUT }
+          $alertEnvRaw = if ([string]::IsNullOrWhiteSpace($alertEnvCandidate)) { 'prod' } else { $alertEnvCandidate }
+          if ([string]::IsNullOrWhiteSpace($alertEnvRaw)) {
+            $alertEnv = 'prod'
+          } else {
+            $alertEnv = $alertEnvRaw.Trim().ToLowerInvariant()
+          }
+
+          if ($alertEnv -notin @('prod','staging')) {
+            throw "Unsupported ALERT_ENV '$alertEnv'. Expected prod or staging."
+          }
+
+          $webhook = if ($alertEnv -eq 'prod') { $env:WEBHOOK_PROD } else { $env:WEBHOOK_STAGING }
+
+          if ([string]::IsNullOrWhiteSpace($webhook) -or $webhook -eq 'null') {
+            throw "Missing webhook secret for ALERT_ENV=$alertEnv"
+          }
+
+          "RESOLVED_ALERT_ENV=$alertEnv" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ALERT_WEBHOOK=$webhook" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          $summary = @(
+            '### Alert routing',
+            "- ALERT_ENV=$alertEnv"
           )
           $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
@@ -816,16 +857,20 @@ jobs:
       - name: Send ops webhook
         if: failure()
         run: |
-          $webhook = "${{ secrets.DEMO_ALERT_WEBHOOK }}"
+          $ErrorActionPreference = 'Stop'
+          $alertEnv = if ([string]::IsNullOrWhiteSpace($env:RESOLVED_ALERT_ENV)) { 'prod' } else { $env:RESOLVED_ALERT_ENV }
+          $webhook = $env:ALERT_WEBHOOK
           if ([string]::IsNullOrWhiteSpace($webhook) -or $webhook -eq 'null') {
-            Write-Host 'DEMO_ALERT_WEBHOOK not configured; skipping alert.'
+            Write-Host 'Alert webhook not configured; skipping alert.'
             return
           }
           $payload = @{
-            text = "Demo daily run failed on $env:GITHUB_RUN_ID. Result: $env:RESULT_LINE"
+            content = "Demo daily run failed on $env:GITHUB_RUN_ID. Result: $env:RESULT_LINE"
           } | ConvertTo-Json -Compress
           try {
             Invoke-RestMethod -Uri $webhook -Method Post -Body $payload -ContentType 'application/json'
+          } catch {
+            Write-Host "Failure alert dispatched to $alertEnv webhook."
           } catch {
             Write-Warning "Failed to send webhook notification: $($_.Exception.Message)"
           }
@@ -851,6 +896,33 @@ jobs:
               description,
               target_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
+
+      - name: Send staging validation alert
+        if: success()
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $alertEnv = if ([string]::IsNullOrWhiteSpace($env:RESOLVED_ALERT_ENV)) { 'prod' } else { $env:RESOLVED_ALERT_ENV }
+          if ($alertEnv -ne 'staging') {
+            Write-Host "ALERT_ENV is '$alertEnv'; skipping staging validation alert."
+            return
+          }
+          $webhook = $env:ALERT_WEBHOOK
+          if ([string]::IsNullOrWhiteSpace($webhook) -or $webhook -eq 'null') {
+            Write-Host 'Staging alert webhook not configured; skipping alert.'
+            return
+          }
+
+          $result = if ([string]::IsNullOrWhiteSpace($env:RESULT_LINE)) { 'Demo daily staging validation passed' } else { $env:RESULT_LINE }
+          $payload = @{
+            content = "Demo daily staging validation passed on $env:GITHUB_RUN_ID. Result: $result"
+          } | ConvertTo-Json -Compress
+
+          try {
+            Invoke-RestMethod -Uri $webhook -Method Post -Body $payload -ContentType 'application/json'
+            Write-Host 'Staging validation alert dispatched.'
+          } catch {
+            Write-Warning "Failed to send staging validation alert: $($_.Exception.Message)"
+          }
 
       - name: Set commit status (ci:green)
         if: success()
