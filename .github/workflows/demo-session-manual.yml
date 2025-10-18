@@ -27,6 +27,7 @@ permissions:
 jobs:
   demo-session:
     runs-on: [self-hosted, Linux, X64, tiyf-vps]
+    environment: ctrader-demo
     defaults:
       run:
         shell: pwsh
@@ -36,6 +37,12 @@ jobs:
       DISK_REQUIRED_GB: '20'
       RUN_ID: ${{ inputs.run_id || format('DEMO-SESSION-{0}', github.run_number) }}
       BROKER_ENABLED: ${{ inputs.broker_enabled }}
+      CT_APP_ID: ${{ secrets.CT_APP_ID }}
+      CT_APP_SECRET: ${{ secrets.CT_APP_SECRET }}
+      CT_DEMO_OAUTH_TOKEN: ${{ secrets.CT_DEMO_OAUTH_TOKEN }}
+      CT_DEMO_REFRESH_TOKEN: ${{ secrets.CT_DEMO_REFRESH_TOKEN }}
+      CT_DEMO_ACCOUNT_ID: ${{ secrets.CT_DEMO_ACCOUNT_ID }}
+      CT_DEMO_BROKER: ${{ secrets.CT_DEMO_BROKER }}
     steps:
       - name: Install PowerShell 7
         if: runner.os == 'Linux'
@@ -311,16 +318,16 @@ jobs:
             Write-Host 'CT_APP_ID present (masked)'
             Add-Row 'App ID' '✅' 'present'
           } else {
-            Add-Row 'App ID' '⚠️' 'missing'
-            Write-Warning 'CT_APP_ID missing'
+            Add-Row 'App ID' '❌' 'missing'
+            throw 'Preflight failed: CT_APP_ID missing'
           }
 
           if ($env:CT_APP_SECRET) {
             Write-Host 'CT_APP_SECRET present (masked)'
             Add-Row 'Client secret' '✅' 'present'
           } else {
-            Add-Row 'Client secret' '⚠️' 'missing'
-            Write-Warning 'CT_APP_SECRET missing'
+            Add-Row 'Client secret' '❌' 'missing'
+            throw 'Preflight failed: CT_APP_SECRET missing'
           }
 
           if ($env:CT_DEMO_OAUTH_TOKEN) {
@@ -330,7 +337,7 @@ jobs:
               $parts = $env:CT_DEMO_OAUTH_TOKEN.Split('.')
               if ($parts.Length -ge 2) {
                 try {
-                  $payloadSegment = $parts[1].Replace('-', '+').Replace('_', '/').PadRight($parts[1].Length + (4 - ($parts[1].Length % 4)) % 4, '=')  
+                  $payloadSegment = $parts[1].Replace('-', '+').Replace('_', '/').PadRight($parts[1].Length + (4 - ($parts[1].Length % 4)) % 4, '=')
                   $payloadJson = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($payloadSegment))
                   $payload = $payloadJson | ConvertFrom-Json
                   if ($payload.exp) {
@@ -338,7 +345,7 @@ jobs:
                     $now = [DateTime]::UtcNow
                     $remaining = ($expiry - $now).TotalDays
                     if ($remaining -le 0) {
-                      Write-Warning 'CT_DEMO_OAUTH_TOKEN appears expired'
+                      throw 'Preflight failed: CT_DEMO_OAUTH_TOKEN appears expired'
                     }
                     Add-Row 'Access token expiry (days)' '✅' ([Math]::Floor($remaining).ToString())
                   }
@@ -349,9 +356,11 @@ jobs:
               }
             }
           } else {
-            Add-Row 'Access token' '⚠️' 'missing'
-            Write-Warning 'CT_DEMO_OAUTH_TOKEN missing'
-          }          if ($env:CT_DEMO_REFRESH_TOKEN) {
+            Add-Row 'Access token' '❌' 'missing'
+            throw 'Preflight failed: CT_DEMO_OAUTH_TOKEN missing'
+          }
+
+          if ($env:CT_DEMO_REFRESH_TOKEN) {
             Write-Host 'CT_DEMO_REFRESH_TOKEN present (masked)'
             Add-Row 'Refresh token' '✅' 'present'
           } else {
@@ -362,11 +371,10 @@ jobs:
           if ($env:CT_DEMO_ACCOUNT_ID) {
             $numeric = $env:CT_DEMO_ACCOUNT_ID -match '^\d+$'
             if (-not $numeric) {
-              Add-Row 'Account ID' '⚠️' 'not numeric'
-              Write-Warning 'CT_DEMO_ACCOUNT_ID not numeric'
-            } else {
-              Add-Row 'Account ID' '✅' 'numeric'
+              Add-Row 'Account ID' '❌' 'must be numeric'
+              throw 'Preflight failed: CT_DEMO_ACCOUNT_ID not numeric'
             }
+            Add-Row 'Account ID' '✅' 'numeric'
           } else {
             Add-Row 'Account ID' '❌' 'missing'
             throw 'Preflight failed: CT_DEMO_ACCOUNT_ID missing'
@@ -376,8 +384,8 @@ jobs:
             Write-Host 'CT_DEMO_BROKER present (masked)'
             Add-Row 'Broker' '✅' 'present'
           } else {
-            Add-Row 'Broker' '⚠️' 'missing'
-            Write-Warning 'CT_DEMO_BROKER missing'
+            Add-Row 'Broker' '❌' 'missing'
+            throw 'Preflight failed: CT_DEMO_BROKER missing'
           }
 
           Add-Row 'Secret masking' '✅' 'GitHub masks values as ***'

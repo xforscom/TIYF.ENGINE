@@ -51,80 +51,79 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          POWERSHELL_VERSION="7.4.6"
-          INSTALL_ROOT="$HOME/powershell"
-
-          if [ -x "$INSTALL_ROOT/pwsh" ]; then
-            echo "$INSTALL_ROOT" >> "$GITHUB_PATH"
-            exit 0
-          fi
-
-          if [ -x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh" ]; then
-            echo "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64" >> "$GITHUB_PATH"
-            exit 0
-          fi
-
-          mkdir -p "$INSTALL_ROOT"
-          curl -fSLo powershell.tar.gz "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz"
-          curl -fSLo checksums.txt "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/SHA256SUMS"
-          EXPECTED_SUM="$(grep "powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz" checksums.txt | awk '{print $1}')"
-          if [ -z "$EXPECTED_SUM" ]; then
-            echo "ERROR: Unable to locate expected checksum for PowerShell archive" >&2
-            exit 1
-          fi
-          ACTUAL_SUM="$(sha256sum powershell.tar.gz | awk '{print $1}')"
-          if [ "$EXPECTED_SUM" != "$ACTUAL_SUM" ]; then
-            echo "ERROR: Checksum verification failed for powershell.tar.gz" >&2
-            echo "Expected: $EXPECTED_SUM" >&2
-            echo "Actual:   $ACTUAL_SUM" >&2
-            exit 1
-          fi
-          tar -xzf powershell.tar.gz -C "$INSTALL_ROOT"
-          rm powershell.tar.gz checksums.txt
-
-          if [ -x "$INSTALL_ROOT/pwsh" ]; then
-            chmod +x "$INSTALL_ROOT/pwsh"
-            echo "$INSTALL_ROOT" >> "$GITHUB_PATH"
-          elif [ -x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh" ]; then
-            chmod +x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh"
-            echo "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64" >> "$GITHUB_PATH"
-          else
-            echo "Failed to locate pwsh after extraction" >&2
-            find "$INSTALL_ROOT" -maxdepth 3 -type f -name 'pwsh' -print || true
-            exit 1
-          fi
-
-      - name: Checkout
-        id: checkout
-        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
-
-      - name: Adapter context
-        id: adapter_context
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          $adapterRaw = $env:ADAPTER_REQUESTED
-          if ($null -eq $adapterRaw) { $adapterRaw = '' }
-          $adapter = $adapterRaw.Trim().ToLowerInvariant()
-          if ([string]::IsNullOrWhiteSpace($adapter)) { $adapter = 'stub' }
-          if ($adapter -ne 'stub' -and $adapter -ne 'ctrader-demo') {
-            throw "Invalid adapter selection '$adapter'. Expected stub or ctrader-demo."
+          if ($env:CT_APP_ID) {
+            Write-Host 'CT_APP_ID present (masked)'
+            Add-Row 'App ID' '✅' 'present'
+          } else {
+            Add-Row 'App ID' '❌' 'missing'
+            throw 'Preflight failed: CT_APP_ID missing'
           }
 
-          $workspace = $env:GITHUB_WORKSPACE
-          if ([string]::IsNullOrWhiteSpace($workspace)) {
-            throw 'GITHUB_WORKSPACE not set'
+          if ($env:CT_APP_SECRET) {
+            Write-Host 'CT_APP_SECRET present (masked)'
+            Add-Row 'Client secret' '✅' 'present'
+          } else {
+            Add-Row 'Client secret' '❌' 'missing'
+            throw 'Preflight failed: CT_APP_SECRET missing'
           }
 
-          $configFile = if ($adapter -eq 'ctrader-demo') { 'sample-config.demo-ctrader.json' } else { 'sample-config.demo.json' }
-          $configPath = Join-Path $workspace $configFile
-          if (-not (Test-Path -Path $configPath)) {
-            throw "Required config file not found: $configPath"
+          if ($env:CT_DEMO_OAUTH_TOKEN) {
+            Write-Host 'CT_DEMO_OAUTH_TOKEN present (masked)'
+            Add-Row 'Access token' '✅' 'present'
+            if ($env:CT_DEMO_OAUTH_TOKEN -match '\.') {
+              $parts = $env:CT_DEMO_OAUTH_TOKEN.Split('.')
+              if ($parts.Length -ge 2) {
+                try {
+                  $payloadSegment = $parts[1].Replace('-', '+').Replace('_', '/').PadRight($parts[1].Length + (4 - ($parts[1].Length % 4)) % 4, '=')
+                  $payloadJson = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($payloadSegment))
+                  $payload = $payloadJson | ConvertFrom-Json
+                  if ($payload.exp) {
+                    $expiry = [DateTimeOffset]::FromUnixTimeSeconds([int64]$payload.exp).UtcDateTime
+                    $now = [DateTime]::UtcNow
+                    $remaining = ($expiry - $now).TotalDays
+                    if ($remaining -le 0) {
+                      throw 'Preflight failed: CT_DEMO_OAUTH_TOKEN appears expired'
+                    }
+                    Add-Row 'Access token expiry (days)' '✅' ([Math]::Floor($remaining).ToString())
+                  }
+                } catch {
+                  Write-Warning "Unable to parse token expiry: $($_.Exception.Message)"
+                  Add-Row 'Access token expiry (days)' '⚠️' 'Unable to parse expiry'
+                }
+              }
+            }
+          } else {
+            Add-Row 'Access token' '❌' 'missing'
+            throw 'Preflight failed: CT_DEMO_OAUTH_TOKEN missing'
           }
 
-          $configHash = (Get-FileHash -Algorithm SHA256 -Path $configPath).Hash.ToUpperInvariant()
-          $runId = if ($adapter -eq 'ctrader-demo') { 'DEMO-CTRADER-LIVE-SMOKE' } else { 'DEMO-STUB-LIVE-SMOKE' }
-          $logPath = if ($adapter -eq 'ctrader-demo') { 'demo-ctrader.log' } else { 'demo-stub.log' }
+          if ($env:CT_DEMO_REFRESH_TOKEN) {
+            Write-Host 'CT_DEMO_REFRESH_TOKEN present (masked)'
+            Add-Row 'Refresh token' '✅' 'present'
+          } else {
+            Add-Row 'Refresh token' '❌' 'missing'
+            throw 'Preflight failed: CT_DEMO_REFRESH_TOKEN missing'
+          }
+
+          if ($env:CT_DEMO_ACCOUNT_ID) {
+            $numeric = $env:CT_DEMO_ACCOUNT_ID -match '^\d+$'
+            if (-not $numeric) {
+              Add-Row 'Account ID' '❌' 'must be numeric'
+              throw 'Preflight failed: CT_DEMO_ACCOUNT_ID not numeric'
+            }
+            Add-Row 'Account ID' '✅' 'numeric'
+          } else {
+            Add-Row 'Account ID' '❌' 'missing'
+            throw 'Preflight failed: CT_DEMO_ACCOUNT_ID missing'
+          }
+
+          if ($env:CT_DEMO_BROKER) {
+            Write-Host 'CT_DEMO_BROKER present (masked)'
+            Add-Row 'Broker' '✅' 'present'
+          } else {
+            Add-Row 'Broker' '❌' 'missing'
+            throw 'Preflight failed: CT_DEMO_BROKER missing'
+          }
           $artifactName = "vps-demo-artifacts-adapter-$adapter"
           $brokerEnabled = if ($adapter -eq 'ctrader-demo') { 'true' } else { 'false' }
           $connectivityPattern = 'Adapter = CTrader OpenAPI \(demo\)|Connected to cTrader endpoint|OrderSend'
