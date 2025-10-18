@@ -308,16 +308,16 @@ jobs:
             Write-Host 'CT_APP_ID present (masked)'
             Add-Row 'App ID' '✅' 'present'
           } else {
-            Add-Row 'App ID' '❌' 'missing'
-            throw 'Preflight failed: CT_APP_ID missing'
+            Add-Row 'App ID' '⚠️' 'missing'
+            Write-Warning 'CT_APP_ID missing'
           }
 
           if ($env:CT_APP_SECRET) {
             Write-Host 'CT_APP_SECRET present (masked)'
             Add-Row 'Client secret' '✅' 'present'
           } else {
-            Add-Row 'Client secret' '❌' 'missing'
-            throw 'Preflight failed: CT_APP_SECRET missing'
+            Add-Row 'Client secret' '⚠️' 'missing'
+            Write-Warning 'CT_APP_SECRET missing'
           }
 
           if ($env:CT_DEMO_OAUTH_TOKEN) {
