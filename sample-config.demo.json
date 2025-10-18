@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.3.0",
+  "run": {
+    "runId": "RUN-DEMO"
+  },
+  "adapter": {
+    "type": "stub"
+  },
+  "universe": [
+    "EURUSD",
+    "GBPUSD",
+    "USDJPY",
+    "USDCHF",
+    "USDCAD",
+    "AUDUSD",
+    "NZDUSD",
+    "XAUUSD"
+  ],
+  "risk": {
+    "perTradeRiskPct": 0.05,
+    "realLeverageCap": 2.0
+  }
+}
