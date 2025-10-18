@@ -176,7 +176,7 @@ jobs:
           AVAILABLE_KiB=$(df --output=avail -k / | tail -n 1 | tr -d ' ')
           echo "Available KiB on root: $AVAILABLE_KiB"
           if [ "$AVAILABLE_KiB" -lt $((20 * 1024 * 1024)) ]; then
-            echo "ERROR: Less than 20GiB available on root filesystem" >&2
+            echo "ERROR: Less than 20 GiB available on root filesystem" >&2
             exit 1
           fi
 
