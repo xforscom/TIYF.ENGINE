@@ -50,8 +50,17 @@ jobs:
           chmod +x "$HOME/.local/bin/actionlint"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           if ! command -v jq >/dev/null 2>&1; then
-            curl -sSL "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64" -o "$HOME/.local/bin/jq"
-            chmod +x "$HOME/.local/bin/jq"
+            JQ_VERSION="1.7.1"
+            JQ_BIN="jq-linux-amd64"
+            JQ_URL="https://github.com/jqlang/jq/releases/download/jq-${JQ_VERSION}/${JQ_BIN}"
+            JQ_SHA256_URL="https://github.com/jqlang/jq/releases/download/jq-${JQ_VERSION}/sha256sum.txt"
+            TMP_JQ="/tmp/${JQ_BIN}"
+            curl -fsSL "$JQ_URL" -o "$TMP_JQ"
+            curl -fsSL "$JQ_SHA256_URL" -o "/tmp/jq_sha256sum.txt"
+            grep "${JQ_BIN}" /tmp/jq_sha256sum.txt > /tmp/jq.sha256
+            (cd /tmp && sha256sum --check --status jq.sha256)
+            install -m 0755 "$TMP_JQ" "$HOME/.local/bin/jq"
+            rm -f /tmp/jq_sha256sum.txt /tmp/jq.sha256 "$TMP_JQ"
           fi
           python -m pip install --user --no-cache-dir yamllint
           echo "$(python -m site --user-base)/bin" >> "$GITHUB_PATH"
