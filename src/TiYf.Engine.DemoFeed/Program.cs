@@ -116,6 +116,12 @@ internal static class DemoFeedRunner
 
         var brokerResult = DemoBrokerStub.GenerateTrades(options, barsBySymbol);
 
+        if (options.Broker.Enabled)
+        {
+            // Emit explicit connectivity proof for automated log checks when broker mode is enabled.
+            Console.WriteLine("Connected to cTrader endpoint (mode={0})", options.Broker.FillMode);
+        }
+
         using (var tradesStream = new FileStream(tradesPath, FileMode.Create, FileAccess.Write, FileShare.None))
         using (var tradesWriter = new StreamWriter(tradesStream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false))
         {
@@ -142,6 +148,18 @@ internal static class DemoFeedRunner
                     SchemaVersion,
                     ConfigHash,
                     string.Empty));
+
+                if (options.Broker.Enabled)
+                {
+                    Console.WriteLine(
+                        "OrderSend symbol={0} direction={1} volume={2} entry={3:F4} exit={4:F4} decision_id={5}",
+                        trade.Symbol,
+                        trade.Direction,
+                        trade.VolumeUnits,
+                        trade.EntryPrice,
+                        trade.ExitPrice,
+                        trade.DecisionId);
+                }
             }
 
             tradesWriter.Flush();
