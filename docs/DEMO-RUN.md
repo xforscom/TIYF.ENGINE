@@ -8,8 +8,8 @@
 ## Workflows at a Glance
 | Workflow | Trigger | Primary Use | Notes |
 | --- | --- | --- | --- |
-| `demo-live-smoke-ctrader` | `workflow_dispatch` | Manual smoke before demo trading | Accepts `adapter`, `dryRun`, `useHostedFallback`. Updates Demo Session issue, flips commit status, and can ping `DEMO_ALERT_WEBHOOK` on failure. |
-| `demo-daily-ctrader` | Cron (00:00 UTC) + `workflow_dispatch` | Scheduled end-to-end guardrail | Shares the same inputs; scheduled runs force `dryRun=false` to exercise broker wiring nightly. |
+| `demo-live-smoke-ctrader` | `workflow_dispatch` | Manual smoke before demo trading | Accepts `adapter`, `dryRun`, `useHostedFallback`, `alertEnv`, `enableAlertPing`. Updates Demo Session issue, flips commit status, and pings the repo secret resolved from `ALERT_ENV` when the toggle is enabled for prod evidence. |
+| `demo-daily-ctrader` | Cron (00:00 UTC) + `workflow_dispatch` | Scheduled end-to-end guardrail | Shares the same inputs; scheduled runs force `dryRun=false`, reuse the alert routing resolver, and require `enableAlertPing=true` only when operators want a prod success-path proof. |
 | `demo-session-manual` | `workflow_dispatch` | Operator-led session with issue transcript | Inputs: `adapter`, optional `run_id`, `broker_enabled` (auto-aligned with adapter). Generates a fresh Demo Session issue entry. |
 
 All jobs target the self-hosted runner labelled `[self-hosted, Linux, X64, tiyf-vps]`, install PowerShell 7, set execution policy to `RemoteSigned`, and provision .NET 8 before executing DemoFeed.
@@ -36,6 +36,13 @@ All jobs target the self-hosted runner labelled `[self-hosted, Linux, X64, tiyf-
 - Log files begin with banner lines such as `Adapter = …`, `Universe = …`, and `Config = …`. For cTrader runs the workflow searches `demo-ctrader.log` for `Adapter = CTrader OpenAPI (demo)|Connected to cTrader endpoint|OrderSend`; missing evidence fails the job.
 - Artifacts upload under `vps-demo-artifacts-adapter-<adapter>` and contain `events.csv`, `trades.csv`, strict/parity JSON, the DemoFeed log (`demo-ctrader.log` or `demo-stub.log`), and `preflight.sanity.txt` when generated. Placeholder files are written when a source artifact is absent so consumers see a consistent layout.
 - `checks.csv` at the workspace root records UTC timestamp, strict/parity exit codes, `broker_dangling`, SHA hashes, and runner identity. The same data is summarised in the `RESULT_LINE` stored in the step summary.
+
+## Alert Routing
+- `ALERT_ENV` input (or repository variable fallback) accepts `prod` or `staging`; the resolver defaults to `prod` when not supplied.
+- Webhooks live in repository secrets `DEMO_ALERT_WEBHOOK_PROD` and `DEMO_ALERT_WEBHOOK_STAGING`. The selected secret name is logged (masked) before the ping is attempted.
+- Success pings (`204 No Content`) are emitted only when `ALERT_ENV` resolves to `prod` **and** the `enableAlertPing` input is set to `true`; the HTTP status code is recorded in the run summary for downstream evidence. Non-2xx responses bubble up and fail the workflow to prevent silent alert outage when a ping is attempted.
+- The environment-level `DEMO_ALERT_WEBHOOK` secret is no longer referenced. Clean it up (or repoint it) to avoid drift with the repository-scoped configuration.
+- cTrader credentials (`CT_*`) remain bound to the `ctrader-demo` environment so the adapter preflight keeps guarding runs without leaking secret data.
 
 ## Failure Handling
 - Smoke and daily workflows set GitHub commit statuses (`ci:red` or `ci:green`), comment on the "Demo Session" issue with the first failing step, and optionally post to the ops webhook.
