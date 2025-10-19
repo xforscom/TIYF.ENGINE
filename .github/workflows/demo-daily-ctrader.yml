@@ -286,6 +286,7 @@ jobs:
             throw "Unsupported ALERT_ENV '$alertEnv'. Expected prod or staging."
           }
 
+          $secretName = if ($alertEnv -eq 'prod') { 'DEMO_ALERT_WEBHOOK_PROD' } else { 'DEMO_ALERT_WEBHOOK_STAGING' }
           $webhook = if ($alertEnv -eq 'prod') { $env:WEBHOOK_PROD } else { $env:WEBHOOK_STAGING }
 
           if ([string]::IsNullOrWhiteSpace($webhook) -or $webhook -eq 'null') {
@@ -294,10 +295,14 @@ jobs:
 
           "RESOLVED_ALERT_ENV=$alertEnv" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "ALERT_WEBHOOK=$webhook" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ALERT_SECRET_NAME=$secretName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          Write-Host "Alert env: $alertEnv -> using secrets.$secretName"
 
           $summary = @(
             '### Alert routing',
-            "- ALERT_ENV=$alertEnv"
+            "- ALERT_ENV=$alertEnv",
+            "- Secret source=secrets.$secretName"
           )
           $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
@@ -1001,31 +1006,40 @@ jobs:
               target_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
 
-      - name: Send staging validation alert
+      - name: Send alert ping
         if: success()
         run: |
           $ErrorActionPreference = 'Stop'
+
           $alertEnv = if ([string]::IsNullOrWhiteSpace($env:RESOLVED_ALERT_ENV)) { 'prod' } else { $env:RESOLVED_ALERT_ENV }
-          if ($alertEnv -ne 'staging') {
-            Write-Host "ALERT_ENV is '$alertEnv'; skipping staging validation alert."
-            return
-          }
+          $secretName = if ([string]::IsNullOrWhiteSpace($env:ALERT_SECRET_NAME)) { 'UNKNOWN' } else { $env:ALERT_SECRET_NAME }
           $webhook = $env:ALERT_WEBHOOK
+
           if ([string]::IsNullOrWhiteSpace($webhook) -or $webhook -eq 'null') {
-            Write-Host 'Staging alert webhook not configured; skipping alert.'
+            Write-Host "Alert webhook not configured for $alertEnv; skipping ping."
             return
           }
 
-          $result = if ([string]::IsNullOrWhiteSpace($env:RESULT_LINE)) { 'Demo daily staging validation passed' } else { $env:RESULT_LINE }
-          $payload = @{
-            content = "Demo daily staging validation passed on $env:GITHUB_RUN_ID. Result: $result"
-          } | ConvertTo-Json -Compress
+          $pingMessage = if ($alertEnv -eq 'prod') { 'prod alert ping from CI' } else { 'staging alert ping from CI' }
+          $payload = @{ content = $pingMessage } | ConvertTo-Json -Compress
+
+          Write-Host "Dispatching alert ping. Alert env: $alertEnv (secrets.$secretName)."
 
           try {
-            Invoke-RestMethod -Uri $webhook -Method Post -Body $payload -ContentType 'application/json'
-            Write-Host 'Staging validation alert dispatched.'
+            $response = Invoke-WebRequest -Uri $webhook -Method Post -Body $payload -ContentType 'application/json'
+            $status = [int]$response.StatusCode
+            $statusNote = if ($status -ge 200 -and $status -lt 300) { 'success' } else { 'non-2xx' }
+            Write-Host "Alert ping response status: $status ($statusNote)."
+            if ($status -lt 200 -or $status -ge 300) {
+              throw "Webhook returned non-success status $status"
+            }
           } catch {
-            Write-Warning "Failed to send staging validation alert: $($_.Exception.Message)"
+            $statusCode = 'unknown'
+            if ($_.Exception.Response -and $null -ne $_.Exception.Response.StatusCode) {
+              $statusCode = [int]$_.Exception.Response.StatusCode
+            }
+            Write-Warning "Alert ping failed. HTTP status: $statusCode. Error: $($_.Exception.Message)"
+            throw
           }
 
       - name: Set commit status (ci:green)
