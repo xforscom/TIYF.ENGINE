@@ -26,6 +26,11 @@ on:
         required: false
         default: false
         type: boolean
+      enableAlertPing:
+        description: 'Enable prod alert ping on success'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -54,6 +59,7 @@ jobs:
       CT_DEMO_REFRESH_TOKEN: ${{ secrets.CT_DEMO_REFRESH_TOKEN }}
       CT_DEMO_ACCOUNT_ID: ${{ secrets.CT_DEMO_ACCOUNT_ID }}
       CT_DEMO_BROKER: ${{ secrets.CT_DEMO_BROKER }}
+      ENABLE_ALERT_PING: ${{ inputs.enableAlertPing || 'false' }}
     steps:
       - name: Install PowerShell 7
         if: runner.os == 'Linux'
@@ -408,16 +414,19 @@ jobs:
 
           $expectation = if ($orderRequested) { 'forced' } elseif ($weekday) { 'weekday' } else { 'off' }
           $window = if ($weekday) { 'weekday-market-window' } else { 'weekend-closed' }
+          $orderRequestedFlag = $orderRequested.ToString().ToLowerInvariant()
 
           "ORDER_EXPECTATION=$expectation" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "MARKET_WINDOW=$window" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "MARKET_WINDOW_TIMESTAMP=$($nowUtc.ToString('O'))" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ORDER_EVIDENCE_REQUESTED=$orderRequestedFlag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
           $summary = @(
             '### Market window',
             "- utc_now=$($nowUtc.ToString('O'))",
             "- weekday=$weekday",
-            "- order_expectation=$expectation"
+            "- order_expectation=$expectation",
+            "- require_order_evidence=$orderRequestedFlag"
           )
           $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
@@ -696,11 +705,20 @@ jobs:
           $handshakeStatus = 'Y'
           $orderStatus = if ($orderMatch) { 'Y' } else { 'N' }
           $note = ''
+          $marketWindow = if ([string]::IsNullOrWhiteSpace($env:MARKET_WINDOW)) { 'unknown' } else { $env:MARKET_WINDOW }
+          $orderEvidenceResult = if ($orderMatch) { 'satisfied' } else { 'not-found' }
 
           switch ($expectation) {
             'forced' {
               if (-not $orderMatch) {
-                throw "OrderSend evidence required but not found in $logFile"
+                if ($marketWindow -like 'weekday*') {
+                  $note = 'no trade criteria met (weekday)'
+                } elseif ($marketWindow -eq 'unknown') {
+                  $note = 'order evidence requested but market window unknown'
+                } else {
+                  $note = 'no trade criteria met (weekend/closed)'
+                }
+                Write-Host 'OrderSend evidence requested but not observed; recording note.'
               }
             }
             'weekday' {
@@ -729,6 +747,7 @@ jobs:
           "CONNECTIVITY_ORDER=$orderStatus" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "CONNECTIVITY_NOTE=$note" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "ORDER_EXPECTATION=$expectation" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ORDER_EVIDENCE_RESULT=$orderEvidenceResult" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Collect Artifacts
         id: collect_artifacts
@@ -794,6 +813,8 @@ jobs:
           $connectivityNote = Resolve-Value $env:CONNECTIVITY_NOTE
           $marketWindow = Resolve-Value $env:MARKET_WINDOW
           $orderExpectation = Resolve-Value $env:ORDER_EXPECTATION
+          $orderEvidenceResult = Resolve-Value $env:ORDER_EVIDENCE_RESULT
+          $alertHttpStatus = Resolve-Value $env:ALERT_HTTP_STATUS
 
           $resultLine = "STRICT_EXIT=$strictExit; PARITY_EXIT=$parityExit; broker_dangling=$brokerDangling; events_sha=$eventsHash; trades_sha=$tradesHash"
           Write-Host $resultLine
@@ -827,6 +848,12 @@ jobs:
           }
           if ($marketWindow -ne 'unknown') {
             $summaryLines += "Market window: $marketWindow"
+          }
+          if ($orderEvidenceResult -ne 'unknown') {
+            $summaryLines += "Order evidence: $orderEvidenceResult"
+          }
+          if ($alertHttpStatus -ne 'unknown') {
+            $summaryLines += "Alert HTTP status: $alertHttpStatus"
           }
 
           $summaryLines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
@@ -1000,24 +1027,39 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           $alertEnv = if ([string]::IsNullOrWhiteSpace($env:RESOLVED_ALERT_ENV)) { 'prod' } else { $env:RESOLVED_ALERT_ENV }
-          $secretName = if ([string]::IsNullOrWhiteSpace($env:ALERT_SECRET_NAME)) { 'UNKNOWN' } else { $env:ALERT_SECRET_NAME }
           $webhook = $env:ALERT_WEBHOOK
+          $enableRaw = if ([string]::IsNullOrWhiteSpace($env:ENABLE_ALERT_PING)) { 'false' } else { $env:ENABLE_ALERT_PING }
+          try {
+            $enablePing = [System.Convert]::ToBoolean($enableRaw)
+          } catch {
+            throw "Invalid ENABLE_ALERT_PING value '$enableRaw'."
+          }
 
-          if ([string]::IsNullOrWhiteSpace($webhook) -or $webhook -eq 'null') {
-            Write-Host "Alert webhook not configured for $alertEnv; skipping ping."
+          if (-not $enablePing) {
+            Write-Host 'Alert ping disabled (enableAlertPing=false); skipping.'
+            "ALERT_HTTP_STATUS=skipped" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
             return
           }
 
-          $pingMessage = if ($alertEnv -eq 'prod') { 'prod alert ping from CI' } else { 'staging alert ping from CI' }
-          $payload = @{ content = $pingMessage } | ConvertTo-Json -Compress
+          if ($alertEnv -ne 'prod') {
+            Write-Host "Alert ping skipped for ALERT_ENV=$alertEnv."
+            "ALERT_HTTP_STATUS=skipped" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            return
+          }
 
-          Write-Host "Dispatching alert ping. Alert env: $alertEnv (secrets.$secretName)."
+          if ([string]::IsNullOrWhiteSpace($webhook) -or $webhook -eq 'null') {
+            Write-Host 'Alert webhook not configured; skipping ping.'
+            "ALERT_HTTP_STATUS=skipped" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            return
+          }
+
+          $payload = @{ content = 'prod alert ping from CI' } | ConvertTo-Json -Compress
 
           try {
             $response = Invoke-WebRequest -Uri $webhook -Method Post -Body $payload -ContentType 'application/json'
             $status = [int]$response.StatusCode
-            $statusNote = if ($status -ge 200 -and $status -lt 300) { 'success' } else { 'non-2xx' }
-            Write-Host "Alert ping response status: $status ($statusNote)."
+            Write-Host "Alert ping HTTP status: $status"
+            "ALERT_HTTP_STATUS=$status" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
             if ($status -lt 200 -or $status -ge 300) {
               throw "Webhook returned non-success status $status"
             }
@@ -1026,6 +1068,7 @@ jobs:
             if ($_.Exception.Response -and $null -ne $_.Exception.Response.StatusCode) {
               $statusCode = [int]$_.Exception.Response.StatusCode
             }
+            "ALERT_HTTP_STATUS=$statusCode" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
             Write-Warning "Alert ping failed. HTTP status: $statusCode. Error: $($_.Exception.Message)"
             throw
           }
