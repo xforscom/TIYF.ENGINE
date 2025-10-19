@@ -21,6 +21,11 @@ on:
         description: 'Alert routing environment (prod | staging)'
         required: false
         default: ''
+      requireOrderEvidence:
+        description: 'Require OrderSend evidence when trades trigger'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -376,6 +381,43 @@ jobs:
           )
           $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
+      - name: Determine market window
+        id: market_window
+        env:
+          REQUIRE_ORDER_INPUT: ${{ github.event.inputs.requireOrderEvidence }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $nowUtc = [DateTime]::UtcNow
+          $day = $nowUtc.DayOfWeek
+          $weekday = ($day -ne [System.DayOfWeek]::Saturday) -and ($day -ne [System.DayOfWeek]::Sunday)
+
+          $orderRequested = $false
+          if (-not [string]::IsNullOrWhiteSpace($env:REQUIRE_ORDER_INPUT)) {
+            try {
+              $orderRequested = [System.Convert]::ToBoolean($env:REQUIRE_ORDER_INPUT)
+            } catch {
+              throw "Invalid requireOrderEvidence input '$($env:REQUIRE_ORDER_INPUT)'."
+            }
+          }
+
+          $expectation = if ($orderRequested) { 'forced' } elseif ($weekday) { 'weekday' } else { 'off' }
+          $window = if ($weekday) { 'weekday-market-window' } else { 'weekend-closed' }
+
+          "ORDER_EXPECTATION=$expectation" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MARKET_WINDOW=$window" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MARKET_WINDOW_TIMESTAMP=$($nowUtc.ToString('O'))" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          $summary = @(
+            '### Market window',
+            "- utc_now=$($nowUtc.ToString('O'))",
+            "- weekday=$weekday",
+            "- order_expectation=$expectation"
+          )
+          $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+          Write-Host "Market window: $window (UTC=$($nowUtc.ToString('O')))."
+
       - name: Relax PowerShell execution policy
         id: relax_policy
         run: |
@@ -635,8 +677,51 @@ jobs:
             throw "No connectivity proof found in $logFile using pattern '$pattern'"
           }
 
-          $first = $matches | Select-Object -First 1
-          Write-Host "Connectivity proof line: $($first.Line)"
+          $handshakeMatch = $matches | Where-Object { $_.Line -match 'Connected to cTrader endpoint' } | Select-Object -First 1
+          if (-not $handshakeMatch) {
+            throw "Handshake not detected in $logFile"
+          }
+
+          $orderMatch = $matches | Where-Object { $_.Line -match 'OrderSend' } | Select-Object -First 1
+          $expectationRaw = if ([string]::IsNullOrWhiteSpace($env:ORDER_EXPECTATION)) { 'off' } else { $env:ORDER_EXPECTATION }
+          $expectation = $expectationRaw.Trim().ToLowerInvariant()
+
+          $handshakeStatus = 'Y'
+          $orderStatus = if ($orderMatch) { 'Y' } else { 'N' }
+          $note = ''
+
+          switch ($expectation) {
+            'forced' {
+              if (-not $orderMatch) {
+                throw "OrderSend evidence required but not found in $logFile"
+              }
+            }
+            'weekday' {
+              if (-not $orderMatch) {
+                $note = 'no trade criteria met (weekday)'
+              }
+            }
+            default {
+              if (-not $orderMatch) {
+                $note = 'no trade criteria met (weekend/closed)'
+              }
+            }
+          }
+
+          Write-Host 'Handshake detected in run log.'
+          if ($orderMatch) {
+            Write-Host 'OrderSend evidence detected in run log.'
+          } else {
+            Write-Host 'OrderSend evidence not detected in run log.'
+          }
+          if (-not [string]::IsNullOrWhiteSpace($note)) {
+            Write-Host "Connectivity note: $note"
+          }
+
+          "CONNECTIVITY_HANDSHAKE=$handshakeStatus" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CONNECTIVITY_ORDER=$orderStatus" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CONNECTIVITY_NOTE=$note" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ORDER_EXPECTATION=$expectation" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Collect Artifacts
         id: collect_artifacts
@@ -696,6 +781,12 @@ jobs:
           $brokerDangling = Resolve-Value $env:BROKER_DANGLING
           $eventsHash = Resolve-Hash $env:EVENTS_PATH
           $tradesHash = Resolve-Hash $env:TRADES_PATH
+          $dryRun = Resolve-Value $env:DRY_RUN
+          $handshakeStatus = Resolve-Value $env:CONNECTIVITY_HANDSHAKE
+          $orderStatus = Resolve-Value $env:CONNECTIVITY_ORDER
+          $connectivityNote = Resolve-Value $env:CONNECTIVITY_NOTE
+          $marketWindow = Resolve-Value $env:MARKET_WINDOW
+          $orderExpectation = Resolve-Value $env:ORDER_EXPECTATION
 
           $resultLine = "STRICT_EXIT=$strictExit; PARITY_EXIT=$parityExit; broker_dangling=$brokerDangling; events_sha=$eventsHash; trades_sha=$tradesHash"
           Write-Host $resultLine
@@ -711,6 +802,8 @@ jobs:
             '### Result summary',
             $resultLine,
             "Adapter: $adapterMode",
+            "Dry run: $dryRun",
+            "Connectivity: handshake=$handshakeStatus; order=$orderStatus",
             "Config: $configPath",
             "Config hash: $configHash",
             "Commit: $commitSha",
@@ -718,6 +811,16 @@ jobs:
             $rollbackHint,
             'Artifacts retained for 30 days (repository default).'
           )
+
+          if ($connectivityNote -ne 'unknown') {
+            $summaryLines += "Connectivity note: $connectivityNote"
+          }
+          if ($orderExpectation -ne 'unknown') {
+            $summaryLines += "Order expectation: $orderExpectation"
+          }
+          if ($marketWindow -ne 'unknown') {
+            $summaryLines += "Market window: $marketWindow"
+          }
 
           $summaryLines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
           "RESULT_LINE=$resultLine" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
