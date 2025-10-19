@@ -518,7 +518,9 @@ jobs:
           } else {
             Add-Row 'Access token' '⚠️' 'missing'
             Write-Warning 'CT_DEMO_OAUTH_TOKEN missing'
-          }          if ($env:CT_DEMO_REFRESH_TOKEN) {
+          }
+
+          if ($env:CT_DEMO_REFRESH_TOKEN) {
             Write-Host 'CT_DEMO_REFRESH_TOKEN present (masked)'
             Add-Row 'Refresh token' '✅' 'present'
           } else {
@@ -972,7 +974,6 @@ jobs:
           } | ConvertTo-Json -Compress
           try {
             Invoke-RestMethod -Uri $webhook -Method Post -Body $payload -ContentType 'application/json'
-          } catch {
             Write-Host "Failure alert dispatched to $alertEnv webhook."
           } catch {
             Write-Warning "Failed to send webhook notification: $($_.Exception.Message)"
