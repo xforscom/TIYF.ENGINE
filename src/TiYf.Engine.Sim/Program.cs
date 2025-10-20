@@ -279,6 +279,34 @@ else
     runId = runIdOverride ?? cfg.RunId ?? "RUN";
 }
 var journalRoot = isM0 && !string.IsNullOrWhiteSpace(m0JournalDir) ? m0JournalDir : (cfg.JournalRoot ?? (isM0 ? "journals/M0" : "journals"));
+CTraderAdapterSettings? ctraderSettings = null;
+var sourceAdapter = string.IsNullOrWhiteSpace(cfg.AdapterId) ? "stub" : cfg.AdapterId.Trim().ToLowerInvariant();
+if (raw.RootElement.TryGetProperty("adapter", out var adapterNode) && adapterNode.ValueKind == JsonValueKind.Object)
+{
+    var typeName = adapterNode.TryGetProperty("type", out var typeEl) && typeEl.ValueKind == JsonValueKind.String
+        ? typeEl.GetString()
+        : null;
+    if (!string.IsNullOrWhiteSpace(typeName))
+    {
+        sourceAdapter = typeName.Trim().ToLowerInvariant();
+        if (sourceAdapter.StartsWith("ctrader", StringComparison.Ordinal))
+        {
+            ctraderSettings = CTraderAdapterSettings.FromJson(adapterNode, sourceAdapter);
+        }
+    }
+}
+var brokerId = ctraderSettings?.Broker ?? (string.IsNullOrWhiteSpace(cfg.BrokerId) ? "stub-sim" : cfg.BrokerId.Trim());
+var accountId = ctraderSettings?.AccountId ?? (string.IsNullOrWhiteSpace(cfg.AccountId) ? "account-stub" : cfg.AccountId.Trim());
+if (sourceAdapter.StartsWith("ctrader", StringComparison.Ordinal))
+{
+    if (ctraderSettings is null)
+        throw new InvalidOperationException("cTrader adapter selected but no settings block provided.");
+    if (brokerId.Contains("stub", StringComparison.OrdinalIgnoreCase))
+        throw new InvalidOperationException("cTrader adapter cannot run with stub broker configuration.");
+    if (string.IsNullOrWhiteSpace(accountId) || accountId.Equals("account-stub", StringComparison.OrdinalIgnoreCase))
+        throw new InvalidOperationException("cTrader adapter requires a valid accountId.");
+    Console.WriteLine($"BROKER_MODE={sourceAdapter} (stub=OFF) accountId={accountId}");
+}
 // For M0 determinism & parallel test safety, serialize access to the single run folder via a named mutex
 System.Threading.Mutex? m0Mutex = null; bool m0Locked = false;
 try
@@ -288,7 +316,7 @@ try
         m0Mutex = new System.Threading.Mutex(false, "Global\\TIYF.M0.RUNLOCK");
         // Wait up to 2 minutes to avoid deadlocks in CI; if cannot acquire, proceed best-effort
         try { m0Locked = m0Mutex.WaitOne(TimeSpan.FromMinutes(2)); } catch { m0Locked = false; }
-        var runDir = Path.Combine(journalRoot, runId);
+        var runDir = Path.Combine(journalRoot, sourceAdapter, runId);
         if (Directory.Exists(runDir))
         {
             try { Directory.Delete(runDir, true); } catch { /* best effort */ }
@@ -379,7 +407,7 @@ try
                     window_to = tsBase, // single window placeholder (future: derive)
                     data_version = dataVersion ?? string.Empty
                 });
-                qaEvents.Add(new JournalEvent(0, tsBase, "DATA_QA_BEGIN_V1", beginPayload));
+                qaEvents.Add(new JournalEvent(0, tsBase, "DATA_QA_BEGIN_V1", sourceAdapter, beginPayload));
                 if (dqResult.IssuesList.Count > 0)
                 {
                     foreach (var issue in dqResult.IssuesList
@@ -395,7 +423,7 @@ try
                             ts = issue.Ts,
                             details = issue.Details
                         });
-                        qaEvents.Add(new JournalEvent(0, issue.Ts, "DATA_QA_ISSUE_V1", issuePayload));
+                        qaEvents.Add(new JournalEvent(0, issue.Ts, "DATA_QA_ISSUE_V1", sourceAdapter, issuePayload));
                     }
                 }
                 bool abortedFlagLocal = (!dqResult.Passed && dataQaMode == "active");
@@ -410,7 +438,7 @@ try
                     aborted = abortedFlagLocal,
                     tolerance_profile_hash = toleranceProfileHash
                 });
-                qaEvents.Add(new JournalEvent(0, tsBase, "DATA_QA_SUMMARY_V1", summaryPayload));
+                qaEvents.Add(new JournalEvent(0, tsBase, "DATA_QA_SUMMARY_V1", sourceAdapter, summaryPayload));
                 if (!dqResult.Passed && dataQaMode == "active")
                 {
                     // Derive reason deterministically
@@ -426,7 +454,7 @@ try
                         config_hash = cfgHash,
                         tolerance_profile_hash = toleranceProfileHash
                     });
-                    qaEvents.Add(new JournalEvent(0, tsBase, "DATA_QA_ABORT_V1", abortPayload));
+                    qaEvents.Add(new JournalEvent(0, tsBase, "DATA_QA_ABORT_V1", sourceAdapter, abortPayload));
                     qaAbort = true;
                 }
             }
@@ -485,12 +513,12 @@ static TiYf.Engine.Core.DataQaResult ApplyTolerance(TiYf.Engine.Core.DataQaResul
 }
 
 // Journal writer with optional data_version (open before emitting QA events)
-await using var journal = new FileJournalWriter(journalRoot, runId, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, cfgHash, dataVersion);
+await using var journal = new FileJournalWriter(journalRoot, runId, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, cfgHash, sourceAdapter, brokerId, accountId, dataVersion);
 try
 {
     Console.WriteLine($"RUN_ID_RESOLVED={runId}");
-    Console.WriteLine($"JOURNAL_DIR_EVENTS={Path.Combine(journalRoot, runId, "events.csv")}");
-    Console.WriteLine($"JOURNAL_DIR_TRADES={Path.Combine(journalRoot, runId, "trades.csv")}");
+    Console.WriteLine($"JOURNAL_DIR_EVENTS={Path.Combine(journalRoot, sourceAdapter, runId, "events.csv")}");
+    Console.WriteLine($"JOURNAL_DIR_TRADES={Path.Combine(journalRoot, sourceAdapter, runId, "trades.csv")}");
 }
 catch { }
 if (qaEvents is not null && qaEvents.Count > 0)
@@ -511,43 +539,75 @@ if (qaAbort)
     return;
 }
 // Load snapshot now that paths are final
-var snapshotPath = Path.Combine(journalRoot, runId, "bar-keys.snapshot.json");
+var snapshotPath = Path.Combine(journalRoot, sourceAdapter, runId, "bar-keys.snapshot.json");
 barKeyTracker = BarKeyTrackerPersistence.Load(snapshotPath);
-TradesJournalWriter? tradesWriter = null; PositionTracker? positions = null; IExecutionAdapter? execution = null; TickBook? bookRef = null;
+TradesJournalWriter? tradesWriter = new TradesJournalWriter(journalRoot, runId, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, cfgHash, sourceAdapter, dataVersion);
+PositionTracker? positions = new PositionTracker();
+IExecutionAdapter? execution = null;
+TickBook? bookRef = null;
 if (raw.RootElement.TryGetProperty("name", out var nmEl) && nmEl.ValueKind == JsonValueKind.String && (nmEl.GetString() == "backtest-m0" || (nmEl.GetString()?.StartsWith("backtest-m0", StringComparison.Ordinal) ?? false)))
 {
-    positions = new PositionTracker();
-    tradesWriter = new TradesJournalWriter(journalRoot, runId, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, cfgHash, dataVersion);
     // Build multi-instrument tick book from fixture files if present
-    try
+    if (!sourceAdapter.StartsWith("ctrader", StringComparison.Ordinal))
     {
-        if (raw.RootElement.TryGetProperty("data", out var dataNode) && dataNode.TryGetProperty("ticks", out var ticksNode) && ticksNode.ValueKind == JsonValueKind.Object)
+        try
         {
-            var rows = new List<(string Symbol, DateTime Ts, decimal Bid, decimal Ask)>();
-            foreach (var tkv in ticksNode.EnumerateObject())
+            if (raw.RootElement.TryGetProperty("data", out var dataNode) && dataNode.TryGetProperty("ticks", out var ticksNode) && ticksNode.ValueKind == JsonValueKind.Object)
             {
-                var sym = tkv.Name;
-                var path = tkv.Value.GetString();
-                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) continue;
-                foreach (var line in SafeReadLines(path).Skip(1))
+                var rows = new List<(string Symbol, DateTime Ts, decimal Bid, decimal Ask)>();
+                foreach (var tkv in ticksNode.EnumerateObject())
                 {
-                    if (string.IsNullOrWhiteSpace(line)) continue;
-                    var parts = line.Split(',');
-                    if (parts.Length < 4) continue; // timestamp,bid,ask,volume
-                    var ts = DateTime.Parse(parts[0], null, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal);
-                    var bid = decimal.Parse(parts[1]);
-                    var ask = decimal.Parse(parts[2]);
-                    rows.Add((sym, ts, bid, ask));
+                    var sym = tkv.Name;
+                    var path = tkv.Value.GetString();
+                    if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) continue;
+                    foreach (var line in SafeReadLines(path).Skip(1))
+                    {
+                        if (string.IsNullOrWhiteSpace(line)) continue;
+                        var parts = line.Split(',');
+                        if (parts.Length < 4) continue; // timestamp,bid,ask,volume
+                        var ts = DateTime.Parse(parts[0], null, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal);
+                        var bid = decimal.Parse(parts[1]);
+                        var ask = decimal.Parse(parts[2]);
+                        rows.Add((sym, ts, bid, ask));
+                    }
+                }
+                if (rows.Count > 0)
+                {
+                    bookRef = new TickBook(rows);
+                    execution = new SimulatedExecutionAdapter(bookRef);
                 }
             }
-            bookRef = new TickBook(rows);
-            execution = new SimulatedExecutionAdapter(bookRef);
         }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Failed to build tick book: {ex.Message}");
+        }
+    }
+}
+
+if (sourceAdapter.StartsWith("ctrader", StringComparison.Ordinal))
+{
+    if (ctraderSettings is null) throw new InvalidOperationException("cTrader settings were not initialized.");
+    var httpClient = new HttpClient();
+    if (ctraderSettings.BaseUri.IsAbsoluteUri)
+    {
+        httpClient.BaseAddress = ctraderSettings.BaseUri;
+    }
+    var ctraderAdapter = new CTraderOpenApiExecutionAdapter(httpClient, ctraderSettings, line =>
+    {
+        Console.WriteLine(line);
+        return Task.CompletedTask;
+    });
+    try
+    {
+        await ctraderAdapter.ConnectAsync(CancellationToken.None);
     }
     catch (Exception ex)
     {
-        Console.Error.WriteLine($"Failed to build tick book: {ex.Message}");
+        Console.Error.WriteLine($"cTrader handshake failed: {ex.Message}");
+        throw;
     }
+    execution = ctraderAdapter;
 }
 
 // Extract risk config + equity from raw JSON (tolerant: defaults if missing)
@@ -753,6 +813,7 @@ var loop = new EngineLoop(clock, builders, barKeyTracker!, journal, tickSource, 
     positions: positions,
     tradesWriter: tradesWriter,
     dataVersion: dataVersion,
+    sourceAdapter: sourceAdapter,
     sizeUnitsFx: sizeUnitsFx,
     sizeUnitsXau: sizeUnitsXau,
     riskProbeEnabled: !(raw.RootElement.TryGetProperty("featureFlags", out var ff) && ff.ValueKind == JsonValueKind.Object && ff.TryGetProperty("riskProbe", out var rp) && rp.ValueKind == JsonValueKind.String && rp.GetString() == "disabled"),
@@ -765,6 +826,8 @@ var loop = new EngineLoop(clock, builders, barKeyTracker!, journal, tickSource, 
 await loop.RunAsync();
 
 Console.WriteLine("Engine run complete.");
+if (execution is IAsyncDisposable asyncExecution) await asyncExecution.DisposeAsync();
+else if (execution is IDisposable disposableExecution) disposableExecution.Dispose();
 if (tradesWriter is not null) await tradesWriter.DisposeAsync();
 await journal.DisposeAsync();
 
@@ -773,7 +836,7 @@ if (!string.IsNullOrWhiteSpace(outPath))
 {
     try
     {
-        var sourceEvents = Path.Combine(journalRoot, runId, "events.csv");
+        var sourceEvents = Path.Combine(journalRoot, sourceAdapter, runId, "events.csv");
         if (!File.Exists(sourceEvents))
         {
             Console.Error.WriteLine($"Expected journal file not found at {sourceEvents}");
@@ -812,7 +875,7 @@ try { if (m0Locked) m0Mutex?.ReleaseMutex(); m0Mutex?.Dispose(); } catch { }
 // ------------------------------------------------------------
 try
 {
-    var runDir = Path.Combine(journalRoot, runId);
+    var runDir = Path.Combine(journalRoot, sourceAdapter, runId);
     var eventsPath = Path.Combine(runDir, "events.csv");
     var tradesPath = Path.Combine(runDir, "trades.csv");
     if (File.Exists(eventsPath))

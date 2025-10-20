@@ -46,7 +46,7 @@ public class DataQaTests
         File.WriteAllText(modCfg, outText);
         Console.WriteLine("DATA_QA_PASS_TEST_CONFIG=" + outText);
         var runId = RunSim(root, modCfg);
-        var journalBase = Path.Combine(root, "journals", "M0", $"M0-RUN-{runId}");
+        var journalBase = ResolveRunDirectory(root, runId);
         Assert.True(File.Exists(Path.Combine(journalBase, "events.csv")));
         var lines = File.ReadAllLines(Path.Combine(journalBase, "events.csv"));
         // Locate DATA_QA_SUMMARY_V1 line and parse JSON payload for passed=true
@@ -56,9 +56,9 @@ public class DataQaTests
         Assert.False(string.IsNullOrEmpty(summaryLine), "DATA_QA_SUMMARY_V1 line not found");
         if (summaryLine != null)
         {
-            var parts = summaryLine.Split(',', 4);
-            Assert.True(parts.Length == 4, "Unexpected CSV field count in summary line");
-            var payloadCsvField = parts[3];
+            var parts = summaryLine.Split(',', 5);
+            Assert.True(parts.Length >= 5, "Unexpected CSV field count in summary line");
+            var payloadCsvField = parts[4];
             var json = payloadCsvField.Trim().Trim('"').Replace("\"\"", "\""); // unescape doubled quotes (CSV quotes doubled)
             using var doc = System.Text.Json.JsonDocument.Parse(json);
             var rootEl = doc.RootElement;
@@ -149,15 +149,15 @@ public class DataQaTests
         var modCfg = Path.Combine(tmpDir, "config.json");
         File.WriteAllText(modCfg, finalCfg);
         var runId = RunSim(root, modCfg);
-        var journalBase = Path.Combine(root, "journals", "M0", $"M0-RUN-{runId}");
+        var journalBase = ResolveRunDirectory(root, runId);
         var eventsFile = Path.Combine(journalBase, "events.csv");
         Assert.True(File.Exists(eventsFile));
         var lines = File.ReadAllLines(eventsFile);
         // Expect at least one missing_bar issue
         Assert.Contains(lines, l => l.Contains(",DATA_QA_ISSUE_V1,") && l.Contains("missing_bar"));
         var summaryLine2 = lines.First(l => l.Contains(",DATA_QA_SUMMARY_V1,"));
-        var parts2 = summaryLine2.Split(',', 4);
-        var payload2 = parts2[3].Trim().Trim('"').Replace("\"\"", "\"");
+        var parts2 = summaryLine2.Split(',', 5);
+        var payload2 = parts2[4].Trim().Trim('"').Replace("\"\"", "\"");
         using (var doc2 = System.Text.Json.JsonDocument.Parse(payload2))
         {
             Assert.True(doc2.RootElement.TryGetProperty("passed", out var p) && p.ValueKind == System.Text.Json.JsonValueKind.False, "Expected passed=false in summary");
@@ -193,7 +193,7 @@ public class DataQaTests
         if (!p2.WaitForExit(60000)) { try { p2.Kill(); } catch { } Assert.Fail($"Sim timeout. CMD=dotnet {args2}\nCWD={root}\nSTDOUT:\n{stdout2}\nSTDERR:\n{stderr2}"); }
         if (p2.ExitCode != 0)
         {
-            var journalBase = Path.Combine(root, "journals", "M0", $"M0-RUN-{runId}");
+            var journalBase = ResolveRunDirectory(root, runId);
             Assert.Fail($"Sim non-zero exit. Code={p2.ExitCode}\nCMD=dotnet {args2}\nCWD={root}\nJOURNAL_DIR={journalBase}\nSTDOUT:\n{stdout2}\nSTDERR:\n{stderr2}");
         }
         return runId;
@@ -201,9 +201,26 @@ public class DataQaTests
 
     // Removed duplicate RunSim overload (solutionRoot,cfgPath) to avoid ambiguity.
 
+    private static string ResolveRunDirectory(string solutionRoot, string runId)
+    {
+        var m0Root = Path.Combine(solutionRoot, "journals", "M0");
+        var fallback = Path.Combine(m0Root, $"M0-RUN-{runId}");
+        if (Directory.Exists(fallback)) return fallback;
+        if (Directory.Exists(m0Root))
+        {
+            try
+            {
+                var matches = Directory.GetDirectories(m0Root, $"M0-RUN-{runId}", SearchOption.AllDirectories);
+                if (matches.Length > 0) return matches[0];
+            }
+            catch { /* ignore */ }
+        }
+        return fallback;
+    }
+
     private static (string EventsPath, string TradesPath) LocateJournal(string solutionRoot, string runId)
     {
-        var dir = Path.Combine(solutionRoot, "journals", "M0", $"M0-RUN-{runId}");
+        var dir = ResolveRunDirectory(solutionRoot, runId);
         return (Path.Combine(dir, "events.csv"), Path.Combine(dir, "trades.csv"));
     }
 
@@ -230,8 +247,8 @@ public class DataQaTests
         var lines = File.ReadAllLines(eventsPath);
         var summary = lines.First(l => l.Contains(",DATA_QA_SUMMARY_V1,"));
         Assert.DoesNotContain(lines, l => l.Contains(",DATA_QA_ABORT_V1,"));
-        var parts = summary.Split(',', 4); Assert.True(parts.Length == 4, "summary CSV malformed");
-        var payloadRaw = parts[3];
+        var parts = summary.Split(',', 5); Assert.True(parts.Length >= 5, "summary CSV malformed");
+        var payloadRaw = parts[4];
         var json = payloadRaw.Trim().Trim('"').Replace("\"\"", "\"");
         using (var doc = System.Text.Json.JsonDocument.Parse(json))
         {
@@ -282,8 +299,8 @@ public class DataQaTests
         var (eventsPath, _) = LocateJournal(root, runId);
         var lines = File.ReadAllLines(eventsPath);
         var summary = lines.First(l => l.Contains(",DATA_QA_SUMMARY_V1,"));
-        var parts2 = summary.Split(',', 4); Assert.True(parts2.Length == 4, "summary CSV malformed");
-        var json2 = parts2[3].Trim().Trim('"').Replace("\"\"", "\"");
+        var parts2 = summary.Split(',', 5); Assert.True(parts2.Length >= 5, "summary CSV malformed");
+        var json2 = parts2[4].Trim().Trim('"').Replace("\"\"", "\"");
         using (var doc = System.Text.Json.JsonDocument.Parse(json2))
         {
             var rootEl = doc.RootElement;
@@ -336,7 +353,7 @@ public class DataQaTests
         var (eventsPath, _) = LocateJournal(root, runId);
         var lines = File.ReadAllLines(eventsPath);
         var summary = lines.First(l => l.Contains(",DATA_QA_SUMMARY_V1,"));
-        var payload = summary.Split(',', 4)[3].Trim().Trim('"').Replace("\"\"", "\"");
+        var payload = summary.Split(',', 5)[4].Trim().Trim('"').Replace("\"\"", "\"");
         using var doc = System.Text.Json.JsonDocument.Parse(payload);
         var el = doc.RootElement;
         Assert.True(el.TryGetProperty("passed", out var pEl) && pEl.ValueKind == System.Text.Json.JsonValueKind.True, "Expected passed=true with K=1 tolerance");
@@ -454,7 +471,7 @@ public class DataQaTests
         var (eventsPath, _) = LocateJournal(root, runId);
         var linesOut = File.ReadAllLines(eventsPath);
         var summary = linesOut.First(l => l.Contains(",DATA_QA_SUMMARY_V1,"));
-        var payloadRaw = summary.Split(',', 4)[3].Trim().Trim('"').Replace("\"\"", "\"");
+        var payloadRaw = summary.Split(',', 5)[4].Trim().Trim('"').Replace("\"\"", "\"");
         using var doc = System.Text.Json.JsonDocument.Parse(payloadRaw);
         Assert.True(doc.RootElement.TryGetProperty("passed", out var pEl) && pEl.ValueKind == System.Text.Json.JsonValueKind.False, "Expected passed=false with 2 gaps and K=1");
         // If active mode aborts on failure, the abort line is expected; if the gating logic changes to summary-only, this remains valid by the summary assertion.
@@ -519,11 +536,11 @@ public class DataQaTests
             var sb = new System.Text.StringBuilder();
             foreach (var raw in lines.Skip(firstIdx))
             {
-                var parts = raw.Split(',', 4);
-                if (parts.Length != 4) continue;
+                var parts = raw.Split(',', 5);
+                if (parts.Length < 5) continue;
                 var ts = parts[1];
                 var evt = parts[2];
-                var payloadRaw = parts[3].Trim().Trim('"').Replace("\"\"", "\"");
+                var payloadRaw = parts[4].Trim().Trim('"').Replace("\"\"", "\"");
                 try
                 {
                     using var doc = System.Text.Json.JsonDocument.Parse(payloadRaw);
@@ -673,3 +690,5 @@ public class DataQaTests
     [Fact(Skip = "No current scenario sets aborted=true for missing bars; placeholder for future hard abort trigger test")]
     public void HardAbort_Trigger_Placeholder() { }
 }
+
+

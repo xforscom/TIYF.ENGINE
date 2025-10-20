@@ -133,8 +133,8 @@ public class RiskEnforcementTests
         var work = Path.Combine(Path.GetTempPath(), "RISK-ALE2-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(work);
         var file = Path.Combine(work, "events.csv");
-        var meta = $"schema_version={TiYf.Engine.Core.Infrastructure.Schema.Version},config_hash=HASHXYZ";
-        var header = "sequence,utc_ts,event_type,payload_json";
+        var meta = $"schema_version={TiYf.Engine.Core.Infrastructure.Schema.Version},config_hash=HASHXYZ,adapter_id=stub,broker=demo-stub,account_id=account-stub";
+        var header = "sequence,utc_ts,event_type,src_adapter,payload_json";
         var now = DateTime.UtcNow.ToString("O");
         // Use a GUID decision id to mimic production decision identifiers
         var decisionId = Guid.NewGuid();
@@ -159,7 +159,7 @@ public class RiskEnforcementTests
         };
         // Serialize with System.Text.Json (default invariant formatting for numbers)
         var payload = System.Text.Json.JsonSerializer.Serialize(payloadObj);
-        File.WriteAllLines(file, new[] { meta, header, $"1,{now},ALERT_BLOCK_LEVERAGE,{payload}" });
+        File.WriteAllLines(file, new[] { meta, header, $"1,{now},ALERT_BLOCK_LEVERAGE,stub,{payload}" });
         using var doc = System.Text.Json.JsonDocument.Parse(payload);
         var root = doc.RootElement;
         // Basic presence

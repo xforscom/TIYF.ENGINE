@@ -1,3 +1,4 @@
+using System;
 using System.Globalization;
 using TiYf.Engine.Core;
 
@@ -22,7 +23,7 @@ public sealed record ExecutionFill(
     DateTime UtcTs
 );
 
-public sealed record ExecutionResult(bool Accepted, string Reason, ExecutionFill? Fill);
+public sealed record ExecutionResult(bool Accepted, string Reason, ExecutionFill? Fill, string? BrokerOrderId);
 
 public interface IExecutionAdapter
 {
@@ -61,7 +62,8 @@ public sealed class SimulatedExecutionAdapter : IExecutionAdapter
         var (bid, ask) = _book.Get(order.Symbol, order.UtcTs);
         decimal price = order.Side == TradeSide.Buy ? ask : bid;
         var fill = new ExecutionFill(order.DecisionId, order.Symbol, order.Side, price, order.Units, order.UtcTs);
-        return Task.FromResult(new ExecutionResult(true, string.Empty, fill));
+        var brokerOrderId = $"STUB-{order.DecisionId}";
+        return Task.FromResult(new ExecutionResult(true, string.Empty, fill, brokerOrderId));
     }
 }
 
@@ -83,7 +85,7 @@ public sealed class PositionTracker
 
     public IReadOnlyList<CompletedTrade> Completed => _completed;
 
-    public void OnFill(ExecutionFill fill, string schemaVersion, string configHash, string? dataVersion)
+    public void OnFill(ExecutionFill fill, string schemaVersion, string configHash, string sourceAdapter, string? dataVersion)
     {
         if (!_open.TryGetValue(fill.DecisionId, out var pos))
         {
@@ -118,6 +120,7 @@ public sealed class PositionTracker
             pos.DecisionId,
             schemaVersion,
             configHash,
+            sourceAdapter,
             dataVersion ?? string.Empty
         );
         _completed.Add(trade);
@@ -138,6 +141,7 @@ public sealed record CompletedTrade(
     string DecisionId,
     string SchemaVersion,
     string ConfigHash,
+    string SourceAdapter,
     string DataVersion
 );
 
@@ -149,14 +153,25 @@ public sealed class TradesJournalWriter : IAsyncDisposable
     private readonly string _configHash;
     private readonly string? _dataVersion;
     private bool _flushed;
-    public TradesJournalWriter(string journalRoot, string runId, string schemaVersion, string configHash, string? dataVersion)
+    private readonly string _adapterId;
+
+    public TradesJournalWriter(string journalRoot, string runId, string schemaVersion, string configHash, string adapterId, string? dataVersion)
     {
-        _schemaVersion = schemaVersion; _configHash = configHash; _dataVersion = dataVersion;
-        var dir = Path.Combine(journalRoot, runId);
+        if (string.IsNullOrWhiteSpace(adapterId)) throw new ArgumentException("Adapter id must be provided.", nameof(adapterId));
+        _schemaVersion = schemaVersion;
+        _configHash = configHash;
+        _dataVersion = dataVersion;
+        _adapterId = adapterId;
+        var dir = Path.Combine(journalRoot, adapterId, runId);
         Directory.CreateDirectory(dir);
         _path = Path.Combine(dir, "trades.csv");
     }
-    public void Append(CompletedTrade trade) => _buffer.Add(trade);
+    public void Append(CompletedTrade trade)
+    {
+        if (!string.Equals(trade.SourceAdapter, _adapterId, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Trade src_adapter mismatch. Expected '{_adapterId}' but received '{trade.SourceAdapter}'.");
+        _buffer.Add(trade);
+    }
 
     public async ValueTask DisposeAsync()
     {
@@ -166,7 +181,7 @@ public sealed class TradesJournalWriter : IAsyncDisposable
         await using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
         await using (var sw = new StreamWriter(fs, new System.Text.UTF8Encoding(false)))
         {
-            await sw.WriteLineAsync("utc_ts_open,utc_ts_close,symbol,direction,entry_price,exit_price,volume_units,pnl_ccy,pnl_r,decision_id,schema_version,config_hash,data_version");
+            await sw.WriteLineAsync("utc_ts_open,utc_ts_close,symbol,direction,entry_price,exit_price,volume_units,pnl_ccy,pnl_r,decision_id,schema_version,config_hash,src_adapter,data_version");
             bool isM0 = _buffer.Any(bt => bt.DecisionId.StartsWith("M0-", StringComparison.Ordinal));
             // map symbol->price decimals inferred from observed entry/exit scale if needed (fallback)
             var priceDecimals = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -210,6 +225,7 @@ public sealed class TradesJournalWriter : IAsyncDisposable
                     t.DecisionId,
                     t.SchemaVersion,
                     t.ConfigHash,
+                    t.SourceAdapter,
                     t.DataVersion
                 );
                 await sw.WriteLineAsync(line);

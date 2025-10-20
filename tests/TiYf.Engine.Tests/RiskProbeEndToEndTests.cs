@@ -28,18 +28,19 @@ public class RiskProbeEndToEndTests
         sb.AppendLine($"{aligned.AddMinutes(1):O},101.2,1");
         File.WriteAllText(tickFile, sb.ToString());
         var journalRoot = Path.Combine(root, "out");
-        var cfg = new EngineConfig(Schema.Version, "RUN", "inst.csv", "ticks.csv", journalRoot, "BAR_V1", "sequence", new[] { "I1" }, new[] { "1m" });
+        var cfg = new EngineConfig(Schema.Version, "RUN", "inst.csv", "ticks.csv", journalRoot, "BAR_V1", "sequence", Instruments: new[] { "I1" }, Intervals: new[] { "1m" });
         var ticks = new CsvTickSource(tickFile, new InstrumentId("I1"));
         var clock = new DeterministicSequenceClock(ticks.Select(t => t.UtcTimestamp));
         var tracker = new InMemoryBarKeyTracker();
         var interval = new BarInterval(TimeSpan.FromMinutes(1));
         var builders = new Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> { { (new InstrumentId("I1"), interval), new IntervalBarBuilder(interval) } };
-        var journalWriter = new FileJournalWriter(journalRoot, cfg.RunId, cfg.SchemaVersion, ConfigHash.Compute(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(cfg)));
-        var loop = new EngineLoop(clock, builders, tracker, journalWriter, ticks, cfg.BarOutputEventType, riskFormulas: new RiskFormulas(), basketAggregator: new BasketRiskAggregator(), configHash: "HASH", schemaVersion: cfg.SchemaVersion);
+        var cfgHash = ConfigHash.Compute(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(cfg));
+        var journalWriter = new FileJournalWriter(journalRoot, cfg.RunId, cfg.SchemaVersion, cfgHash, "stub", "demo-stub", "account-stub");
+        var loop = new EngineLoop(clock, builders, tracker, journalWriter, ticks, cfg.BarOutputEventType, riskFormulas: new RiskFormulas(), basketAggregator: new BasketRiskAggregator(), configHash: cfgHash, schemaVersion: cfg.SchemaVersion);
         await loop.RunAsync();
         await journalWriter.DisposeAsync();
 
-        var journalFile = Path.Combine(journalRoot, cfg.RunId, "events.csv");
+        var journalFile = Path.Combine(journalRoot, "stub", cfg.RunId, "events.csv");
         Assert.True(File.Exists(journalFile), "Journal not created");
 
         // Act: run verifier

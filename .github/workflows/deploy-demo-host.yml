@@ -1,0 +1,134 @@
+name: deploy-demo-host
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment label (e.g., demo)'
+        required: true
+        default: 'demo'
+      releaseTag:
+        description: 'Optional release tag/label'
+        required: false
+      dryRun:
+        description: 'Perform deployment steps without changing the remote host'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      DOTNET_VERSION: '8.0.x'
+      RELEASE_ROOT: /opt/tiyf/releases
+      CURRENT_LINK: /opt/tiyf/current
+      SERVICE_NAME: tiyf-engine-demo.service
+      HEALTH_ENDPOINT: http://127.0.0.1:8080/health
+      DRY_RUN: ${{ inputs.dryRun }}
+      RELEASE_TAG_INPUT: ${{ github.event.inputs.releaseTag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
+
+      - name: Shellcheck deploy scripts
+        run: |
+          set -euo pipefail
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update -y >/dev/null
+            sudo apt-get install -y shellcheck >/dev/null
+          fi
+          shellcheck deploy/scripts/remote-deploy.sh
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Publish Engine Host
+        run: |
+          set -euo pipefail
+          dotnet publish src/TiYf.Engine.Host/TiYf.Engine.Host.csproj -c Release -o publish
+
+      - name: Prepare release assets
+        run: |
+          set -euo pipefail
+          mkdir -p publish/systemd
+          cp deploy/systemd/tiyf-engine-demo.service publish/systemd/
+          mkdir -p publish/scripts
+          cp deploy/scripts/remote-deploy.sh publish/scripts/
+
+      - name: Verify systemd unit
+        run: |
+          set -euo pipefail
+          if ! command -v systemd-analyze >/dev/null 2>&1; then
+            sudo apt-get update -y >/dev/null
+            sudo apt-get install -y systemd >/dev/null
+          fi
+          systemd-analyze verify publish/systemd/tiyf-engine-demo.service
+
+      - name: Configure SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Push release to server
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${DEPLOY_HOST}" ] || [ -z "${DEPLOY_USER}" ]; then
+            echo "Deployment host credentials are not configured."
+            exit 1
+          fi
+
+          DRY_RUN="${DRY_RUN:-true}"
+          RELEASE_ID=${GITHUB_SHA::12}
+          if [ -n "${RELEASE_TAG_INPUT}" ]; then
+            RELEASE_ID="${RELEASE_TAG_INPUT}-${RELEASE_ID}"
+          fi
+          REMOTE_PATH="${RELEASE_ROOT%/}/${RELEASE_ID}"
+
+          ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "mkdir -p '${REMOTE_PATH}'"
+
+          RSYNC_FLAGS=""
+          if [ "${DRY_RUN}" = "true" ]; then
+            echo "[dry-run] rsync preview for ${REMOTE_PATH}"
+            RSYNC_FLAGS="--dry-run"
+          fi
+
+          rsync -az --delete ${RSYNC_FLAGS:-} publish/ "${DEPLOY_USER}@${DEPLOY_HOST}:${REMOTE_PATH}/"
+          echo "RELEASE_ID=${RELEASE_ID}" >> "${GITHUB_ENV}"
+
+      - name: Apply release (symlink, systemd, health)
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${DEPLOY_HOST}" ] || [ -z "${DEPLOY_USER}" ]; then
+            echo "Deployment host credentials are not configured."
+            exit 1
+          fi
+
+          if [ -z "${RELEASE_ID:-}" ]; then
+            echo "RELEASE_ID is not populated from previous step."
+            exit 1
+          fi
+
+          DRY_RUN="${DRY_RUN:-true}"
+          ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "DRY_RUN='${DRY_RUN}' RELEASE_ID='${RELEASE_ID}' RELEASE_ROOT='${RELEASE_ROOT}' CURRENT_LINK='${CURRENT_LINK}' SERVICE_NAME='${SERVICE_NAME}' HEALTH_ENDPOINT='${HEALTH_ENDPOINT}' bash -s" \
+            < deploy/scripts/remote-deploy.sh
+

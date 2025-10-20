@@ -1,0 +1,19 @@
+﻿[Unit]
+Description=TiYf Engine Demo Host
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/tiyf/current
+ExecStart=/usr/bin/dotnet /opt/tiyf/current/TiYf.Engine.Host.dll --config /opt/tiyf/current/sample-config.demo-ctrader.json
+Restart=always
+RestartSec=3
+Environment=DOTNET_ENVIRONMENT=Production
+Environment=ENGINE_HOST_PORT=8080
+EnvironmentFile=/etc/tiyf/engine.env
+EnvironmentFile=-/opt/tiyf/current/.env
+User=tiyf
+Group=tiyf
+
+[Install]
+WantedBy=multi-user.target

@@ -17,6 +17,7 @@ internal sealed record DemoTradeRecord(
     long VolumeUnits,
     decimal PnlCcy,
     decimal PnlR,
-    string DecisionId);
+    string DecisionId,
+    string BrokerOrderId);
 
 internal sealed record DemoBrokerResult(IReadOnlyList<DemoTradeRecord> Trades, bool HadDanglingPositions);

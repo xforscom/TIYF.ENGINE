@@ -23,6 +23,13 @@ public static class StrictJournalVerifier
         "INFO_RISK_EVAL_V1","ALERT_BLOCK_NET_EXPOSURE","ALERT_BLOCK_DRAWDOWN"
     };
 
+    private static readonly HashSet<string> AllowedAdapters = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "stub",
+        "ctrader-demo",
+        "ctrader-live"
+    };
+
     private sealed record ParsedEvent(ulong Seq, DateTime Ts, string Type, JsonElement Payload);
 
     public static StrictVerifyReport Verify(StrictVerifyRequest req)
@@ -37,16 +44,54 @@ public static class StrictJournalVerifier
         var lines = File.ReadAllLines(req.EventsPath).Where(l => !string.IsNullOrWhiteSpace(l)).ToList();
         if (lines.Count < 2) V("file_format", 0, null, null, "events missing meta/header");
         string schema = "";
+        string configHash = "";
+        string adapterId = "";
+        string brokerId = "";
+        string accountId = "";
+        string[] headerCols = Array.Empty<string>();
         if (lines.Count >= 1)
         {
             var metaParts = lines[0].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             foreach (var p in metaParts)
             {
-                var kv = p.Split('='); if (kv.Length == 2 && kv[0] == "schema_version") schema = kv[1];
+                var kv = p.Split('=');
+                if (kv.Length != 2) continue;
+                switch (kv[0])
+                {
+                    case "schema_version":
+                        schema = kv[1];
+                        break;
+                    case "config_hash":
+                        configHash = kv[1];
+                        break;
+                    case "adapter_id":
+                        adapterId = kv[1];
+                        break;
+                    case "broker":
+                        brokerId = kv[1];
+                        break;
+                    case "account_id":
+                        accountId = kv[1];
+                        break;
+                }
             }
+        }
+        if (lines.Count >= 2)
+        {
+            headerCols = SplitCsv(lines[1]);
         }
         if (string.IsNullOrWhiteSpace(schema) || string.Compare(schema, req.MinimumSchema, StringComparison.Ordinal) < 0)
             V("schema_version", 0, null, null, $"schema_version {schema} < required {req.MinimumSchema}");
+        if (string.IsNullOrWhiteSpace(configHash)) V("meta", 0, null, null, "config_hash missing in meta");
+        if (string.IsNullOrWhiteSpace(adapterId)) V("meta", 0, null, null, "adapter_id missing in meta");
+        else if (!AllowedAdapters.Contains(adapterId)) V("meta", 0, null, null, $"adapter_id '{adapterId}' not permitted");
+        if (string.IsNullOrWhiteSpace(brokerId)) V("meta", 0, null, null, "broker missing in meta");
+        if (string.IsNullOrWhiteSpace(accountId)) V("meta", 0, null, null, "account_id missing in meta");
+
+        int adapterIdx = Array.IndexOf(headerCols, "src_adapter");
+        if (adapterIdx < 0) V("header", 0, null, null, "src_adapter column missing in events header");
+        int payloadIdx = Array.IndexOf(headerCols, "payload_json");
+        if (payloadIdx < 0) V("header", 0, null, null, "payload_json column missing in events header");
 
         var parsed = new List<ParsedEvent>();
         ulong lastSeq = 0; DateTime lastTs = DateTime.MinValue;
@@ -55,9 +100,19 @@ public static class StrictJournalVerifier
             var line = lines[i];
             if (string.IsNullOrWhiteSpace(line)) continue;
             string[] cols = SplitCsv(line);
-            if (cols.Length < 4) { V("row_format", 0, null, null, $"line {i + 1} malformed"); continue; }
+            if ((payloadIdx < 0 || adapterIdx < 0) && cols.Length < 4) { V("row_format", 0, null, null, $"line {i + 1} malformed"); continue; }
             if (!ulong.TryParse(cols[0], out var seq)) { V("sequence_parse", 0, null, null, $"line {i + 1} sequence invalid"); continue; }
-            var tsRaw = cols[1]; var evtType = cols[2]; var payloadRaw = UnwrapCsvQuoted(cols[3]);
+            var tsRaw = cols[1]; var evtType = cols[2];
+            if (adapterIdx >= 0)
+            {
+                if (adapterIdx >= cols.Length) { V("row_format", seq, null, tsRaw, "src_adapter column missing"); continue; }
+                var rowAdapter = cols[adapterIdx];
+                if (string.IsNullOrWhiteSpace(rowAdapter)) V("src_adapter", seq, null, tsRaw, "src_adapter empty");
+                else if (!string.IsNullOrWhiteSpace(adapterId) && !string.Equals(rowAdapter, adapterId, StringComparison.OrdinalIgnoreCase))
+                    V("src_adapter", seq, null, tsRaw, $"src_adapter '{rowAdapter}' != meta '{adapterId}'");
+            }
+            if (payloadIdx >= 0 && payloadIdx >= cols.Length) { V("row_format", seq, null, tsRaw, "payload_json column missing"); continue; }
+            var payloadRaw = payloadIdx >= 0 && payloadIdx < cols.Length ? UnwrapCsvQuoted(cols[payloadIdx]) : string.Empty;
             if (seq <= lastSeq) V("order_violation", seq, null, tsRaw, "non-increasing sequence"); else lastSeq = seq;
             if (!DateTime.TryParse(tsRaw, null, DateTimeStyles.RoundtripKind, out var ts) || ts.Kind != DateTimeKind.Utc) V("timestamp", seq, null, tsRaw, "invalid or non-UTC timestamp");
             else if (ts < lastTs) V("order_violation", seq, null, tsRaw, "timestamp regression"); else lastTs = ts;
@@ -169,19 +224,42 @@ public static class StrictJournalVerifier
             }
         }
 
-        // Numeric invariants on trades
+        // Numeric invariants & provenance on trades
         var tradeLines = File.ReadAllLines(req.TradesPath).Where(l => !string.IsNullOrWhiteSpace(l)).ToList();
+        var tradeHeader = tradeLines.Count > 0 ? tradeLines[0].Split(',') : Array.Empty<string>();
+        int tradeSchemaIdx = Array.IndexOf(tradeHeader, "schema_version");
+        int tradeConfigIdx = Array.IndexOf(tradeHeader, "config_hash");
+        int tradeAdapterIdx = Array.IndexOf(tradeHeader, "src_adapter");
+        if (tradeSchemaIdx < 0) V("header", 0, null, null, "schema_version column missing in trades header");
+        if (tradeConfigIdx < 0) V("header", 0, null, null, "config_hash column missing in trades header");
+        if (tradeAdapterIdx < 0) V("header", 0, null, null, "src_adapter column missing in trades header");
         if (tradeLines.Count > 1)
         {
             for (int i = 1; i < tradeLines.Count; i++)
             {
                 var parts = tradeLines[i].Split(',');
-                if (parts.Length < 13) { V("trade_row", 0, null, null, $"trade line {i + 1} malformed"); continue; }
+                if (parts.Length < 14) { V("trade_row", 0, null, null, $"trade line {i + 1} malformed"); continue; }
+                var tradeTs = parts.Length > 0 ? parts[0] : string.Empty;
+                var tradeSymbol = parts.Length > 2 ? parts[2] : string.Empty;
                 string pnlCcy = parts[7];
-                if (pnlCcy.Contains('E') || pnlCcy.Contains('e')) V("numeric_format", 0, parts[2], parts[0], "scientific notation in pnl_ccy");
-                if (pnlCcy.Contains(',')) V("numeric_format", 0, parts[2], parts[0], "comma decimal disallowed");
-                // volume integer
-                if (!long.TryParse(parts[6], NumberStyles.Integer, CultureInfo.InvariantCulture, out _)) V("numeric_format", 0, parts[2], parts[0], "volume_units not integer");
+                if (pnlCcy.Contains('E') || pnlCcy.Contains('e')) V("numeric_format", 0, tradeSymbol, tradeTs, "scientific notation in pnl_ccy");
+                if (pnlCcy.Contains(',')) V("numeric_format", 0, tradeSymbol, tradeTs, "comma decimal disallowed");
+                if (!long.TryParse(parts[6], NumberStyles.Integer, CultureInfo.InvariantCulture, out _)) V("numeric_format", 0, tradeSymbol, tradeTs, "volume_units not integer");
+                if (tradeAdapterIdx >= 0)
+                {
+                    if (tradeAdapterIdx >= parts.Length) V("trade_row", 0, tradeSymbol, tradeTs, "trade src_adapter column missing");
+                    else
+                    {
+                        var tradeAdapter = parts[tradeAdapterIdx];
+                        if (string.IsNullOrWhiteSpace(tradeAdapter)) V("src_adapter", 0, tradeSymbol, tradeTs, "trade src_adapter empty");
+                        else if (!string.IsNullOrWhiteSpace(adapterId) && !string.Equals(tradeAdapter, adapterId, StringComparison.OrdinalIgnoreCase))
+                            V("src_adapter", 0, tradeSymbol, tradeTs, $"trade src_adapter '{tradeAdapter}' != meta '{adapterId}'");
+                    }
+                }
+                if (tradeConfigIdx >= 0 && tradeConfigIdx < parts.Length && !string.IsNullOrWhiteSpace(configHash) && !string.Equals(parts[tradeConfigIdx], configHash, StringComparison.OrdinalIgnoreCase))
+                    V("config_hash_mismatch", 0, tradeSymbol, tradeTs, $"trade config_hash '{parts[tradeConfigIdx]}' != meta '{configHash}'");
+                if (tradeSchemaIdx >= 0 && tradeSchemaIdx < parts.Length && !string.IsNullOrWhiteSpace(schema) && !string.Equals(parts[tradeSchemaIdx], schema, StringComparison.OrdinalIgnoreCase))
+                    V("schema_mismatch", 0, tradeSymbol, tradeTs, $"trade schema_version '{parts[tradeSchemaIdx]}' != events '{schema}'");
             }
         }
 

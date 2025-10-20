@@ -21,19 +21,19 @@ public class VerifyStrictTests
     internal (string eventsPath, string tradesPath) BuildHealthyJournal()
     {
         var eventsSb = new StringBuilder();
-        eventsSb.AppendLine("schema_version=1.3.0,config_hash=ABC123");
-        eventsSb.AppendLine("sequence,utc_ts,event_type,payload_json");
+        eventsSb.AppendLine("schema_version=1.3.0,config_hash=ABC123,adapter_id=stub,broker=demo-stub,account_id=account-stub");
+        eventsSb.AppendLine("sequence,utc_ts,event_type,src_adapter,payload_json");
         // BAR (seq 1)
         var ts = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc).ToString("O");
         var barPayload = JsonSerializer.Serialize(new { InstrumentId = new { Value = "EURUSD" }, IntervalSeconds = 60, StartUtc = ts, EndUtc = ts, Open = 1.1000m, High = 1.1005m, Low = 1.0995m, Close = 1.1002m, Volume = 10 });
-        eventsSb.AppendLine($"1,{ts},BAR_V1,{CsvQuote(barPayload)}");
+        eventsSb.AppendLine($"1,{ts},BAR_V1,stub,{CsvQuote(barPayload)}");
         // SENTIMENT Z (seq 2)
         var zPayload = JsonSerializer.Serialize(new { symbol = "EURUSD", z = 0.0m, window = 5, sigma = 0.1m });
-        eventsSb.AppendLine($"2,{ts},INFO_SENTIMENT_Z_V1,{CsvQuote(zPayload)}");
+        eventsSb.AppendLine($"2,{ts},INFO_SENTIMENT_Z_V1,stub,{CsvQuote(zPayload)}");
         var eventsPath = TempFile("events.csv", eventsSb.ToString());
         var tradesSb = new StringBuilder();
-        tradesSb.AppendLine("utc_ts_open,utc_ts_close,symbol,direction,entry_price,exit_price,volume_units,pnl_ccy,pnl_r,decision_id,schema_version,config_hash,data_version");
-        tradesSb.AppendLine($"{ts},{ts},EURUSD,BUY,1.1000,1.1002,100,0.20,0,DEC1,1.3.0,ABC123,");
+        tradesSb.AppendLine("utc_ts_open,utc_ts_close,symbol,direction,entry_price,exit_price,volume_units,pnl_ccy,pnl_r,decision_id,schema_version,config_hash,src_adapter,data_version");
+        tradesSb.AppendLine($"{ts},{ts},EURUSD,BUY,1.1000,1.1002,100,0.20,0,DEC1,1.3.0,ABC123,stub,src_adapter=stub");
         var tradesPath = TempFile("trades.csv", tradesSb.ToString());
         return (eventsPath, tradesPath);
     }
@@ -51,7 +51,7 @@ public class VerifyStrictTests
     {
         var (events, trades) = BuildHealthyJournal();
         // append unknown event
-        File.AppendAllText(events, $"3,2025-01-01T00:00:00Z,FOO_BAR_V99,\"{{}}\"{Environment.NewLine}");
+        File.AppendAllText(events, $"3,2025-01-01T00:00:00Z,FOO_BAR_V99,stub,\"{{}}\"{Environment.NewLine}");
         var outp = ExecCli(events, trades);
         Assert.Contains("STRICT VERIFY: FAIL", outp);
         Assert.Contains("unknown_event", outp);
@@ -63,7 +63,7 @@ public class VerifyStrictTests
         var (events, trades) = BuildHealthyJournal();
         // Add APPLIED missing symbol
         var applied = CsvQuote(JsonSerializer.Serialize(new { scaled_from = 10, scaled_to = 5, reason = "guard" }));
-        File.AppendAllText(events, $"3,2025-01-01T00:00:00Z,INFO_SENTIMENT_APPLIED_V1,{applied}{Environment.NewLine}");
+        File.AppendAllText(events, $"3,2025-01-01T00:00:00Z,INFO_SENTIMENT_APPLIED_V1,stub,{applied}{Environment.NewLine}");
         var outp = ExecCli(events, trades);
         Assert.Contains("missing_field", outp);
     }
@@ -76,7 +76,7 @@ public class VerifyStrictTests
         var content = File.ReadAllText(events).Replace("INFO_SENTIMENT_Z_V1", "INFO_SENTIMENT_APPLIED_V1");
         File.WriteAllText(events, content);
         var z = CsvQuote(JsonSerializer.Serialize(new { symbol = "EURUSD", z = 0m, window = 5, sigma = 0.1m }));
-        File.AppendAllText(events, $"3,2025-01-01T00:00:00Z,INFO_SENTIMENT_Z_V1,{z}{Environment.NewLine}");
+        File.AppendAllText(events, $"3,2025-01-01T00:00:00Z,INFO_SENTIMENT_Z_V1,stub,{z}{Environment.NewLine}");
         var outp = ExecCli(events, trades);
         Assert.Contains("order_violation", outp);
     }
@@ -99,7 +99,7 @@ public class VerifyStrictTests
         var (events, trades) = BuildHealthyJournal();
         // Add APPLIED event with sentinel indicating shadow mode (simulate config mode=shadow by passing mode)
         var appliedOk = CsvQuote(JsonSerializer.Serialize(new { symbol = "EURUSD", scaled_from = 10, scaled_to = 5, reason = "guard" }));
-        File.AppendAllText(events, $"3,2025-01-01T00:00:00Z,INFO_SENTIMENT_APPLIED_V1,{appliedOk}{Environment.NewLine}");
+        File.AppendAllText(events, $"3,2025-01-01T00:00:00Z,INFO_SENTIMENT_APPLIED_V1,stub,{appliedOk}{Environment.NewLine}");
         var outp = ExecCli(events, trades);
         Assert.Contains("mode_violation", outp);
     }
@@ -161,7 +161,7 @@ public class VerifyStrictCliTests
     public void Cli_Strict_UnknownEvent_Exit2()
     {
         var (events, trades) = Healthy();
-        File.AppendAllText(events, $"3,2025-01-01T00:00:00Z,FOO_BAR_V99,\"{{}}\"{Environment.NewLine}");
+        File.AppendAllText(events, $"3,2025-01-01T00:00:00Z,FOO_BAR_V99,stub,\"{{}}\"{Environment.NewLine}");
         var outp = ExecTool($"verify strict --events \"{events}\" --trades \"{trades}\" --schema 1.3.0");
         Assert.Contains("STRICT VERIFY: FAIL", outp);
         Assert.Contains("EXIT=2", outp);

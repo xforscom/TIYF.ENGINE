@@ -579,11 +579,17 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $logPath = if ([string]::IsNullOrWhiteSpace($env:LOG_PATH)) { 'demo.log' } else { $env:LOG_PATH }
           $adapterLine = if ([string]::IsNullOrWhiteSpace($env:ADAPTER_BANNER)) { 'Adapter = stub' } else { $env:ADAPTER_BANNER }
+          $sourceAdapterLine = "adapter_id=$($env:ADAPTER_MODE)"
+          $brokerBanner = if ($env:ADAPTER_MODE -eq 'ctrader-demo') { 'broker=Spotware (demo)' } else { 'broker=stub-simulator' }
+          $accountLine = if ([string]::IsNullOrWhiteSpace($env:CT_DEMO_ACCOUNT_ID)) { 'account_id=unknown' } else { "account_id=$($env:CT_DEMO_ACCOUNT_ID)" }
           $universeLine = if ([string]::IsNullOrWhiteSpace($env:UNIVERSE_LINE)) { 'Universe = ' + $env:EXPECTED_UNIVERSE_LINE } else { $env:UNIVERSE_LINE }
           $configLine = "Config = $env:CONFIG_PATH"
 
           $brokerFlag = if ([string]::IsNullOrWhiteSpace($env:BROKER_ENABLED)) { 'false' } else { $env:BROKER_ENABLED }
-          $args = @('--run-id', $env:RUN_ID, '--broker-enabled', $brokerFlag, '--broker-fill-mode', 'ioc-market')
+          $args = @('--run-id', $env:RUN_ID, '--broker-enabled', $brokerFlag, '--broker-fill-mode', 'ioc-market', '--adapter-id', $env:ADAPTER_MODE)
+          if (-not [string]::IsNullOrWhiteSpace($env:CT_DEMO_ACCOUNT_ID)) {
+            $args += @('--broker-account-id', $env:CT_DEMO_ACCOUNT_ID)
+          }
           $maxAttempts = 2
           $delaySeconds = 15
           $success = $false
@@ -597,7 +603,7 @@ jobs:
               Remove-Item -Path $logPath -Force
             }
 
-            @($adapterLine, $universeLine, $configLine) | Tee-Object -FilePath $logPath
+            @($adapterLine, $sourceAdapterLine, $brokerBanner, $accountLine, $universeLine, $configLine) | Tee-Object -FilePath $logPath
             dotnet exec src/TiYf.Engine.DemoFeed/bin/Release/net8.0/TiYf.Engine.DemoFeed.dll @args | Tee-Object -FilePath $logPath -Append
             $exitCode = $LASTEXITCODE
             $eventsLine = $null
@@ -699,6 +705,13 @@ jobs:
           }
 
           $orderMatch = $matches | Where-Object { $_.Line -match 'OrderSend' } | Select-Object -First 1
+          $adapterMode = if ([string]::IsNullOrWhiteSpace($env:ADAPTER_MODE)) { 'unknown' } else { $env:ADAPTER_MODE }
+          $stubOrderDetected = $false
+          if ($adapterMode -eq 'ctrader-demo' -and $orderMatch -and $orderMatch.Line -match 'brokerOrderId=STUB-') {
+            Write-Warning 'Stub order evidence detected in ctrader-demo mode; ignoring entry.'
+            $orderMatch = $null
+            $stubOrderDetected = $true
+          }
           $expectationRaw = if ([string]::IsNullOrWhiteSpace($env:ORDER_EXPECTATION)) { 'off' } else { $env:ORDER_EXPECTATION }
           $expectation = $expectationRaw.Trim().ToLowerInvariant()
 
@@ -706,7 +719,7 @@ jobs:
           $orderStatus = if ($orderMatch) { 'Y' } else { 'N' }
           $note = ''
           $marketWindow = if ([string]::IsNullOrWhiteSpace($env:MARKET_WINDOW)) { 'unknown' } else { $env:MARKET_WINDOW }
-          $orderEvidenceResult = if ($orderMatch) { 'satisfied' } else { 'not-found' }
+          $orderEvidenceResult = if ($orderMatch) { 'satisfied' } elseif ($stubOrderDetected) { 'rejected-stub' } else { 'not-found' }
 
           switch ($expectation) {
             'forced' {
@@ -830,6 +843,7 @@ jobs:
             '### Result summary',
             $resultLine,
             "Adapter: $adapterMode",
+            "SourceAdapter=$adapterMode",
             "Dry run: $dryRun",
             "Connectivity: handshake=$handshakeStatus; order=$orderStatus",
             "Config: $configPath",
@@ -860,6 +874,7 @@ jobs:
           "RESULT_LINE=$resultLine" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "EVENTS_SHA=$eventsHash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "TRADES_SHA=$tradesHash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SOURCE_ADAPTER=$adapterMode" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Write checks.csv
         id: write_checks

@@ -35,6 +35,9 @@ public sealed record DeepVerifyStats(
     string SchemaVersion,
     string? ConfigHash,
     string? DataVersion,
+    string SourceAdapter,
+    string? BrokerId,
+    string? AccountId,
     int EventCount,
     int TradeCount,
     IReadOnlyDictionary<string, int> EventTypeCounts,
@@ -134,6 +137,9 @@ public static class DeepVerifyEngine
                 schema = summary.Stats.SchemaVersion,
                 configHash = summary.Stats.ConfigHash,
                 dataVersion = summary.Stats.DataVersion,
+                sourceAdapter = summary.Stats.SourceAdapter,
+                brokerId = summary.Stats.BrokerId,
+                accountId = summary.Stats.AccountId,
                 events = summary.Stats.EventCount,
                 trades = summary.Stats.TradeCount,
                 eventTypes = summary.Stats.EventTypeCounts,
@@ -153,6 +159,7 @@ public static class DeepVerifyEngine
         sb.AppendLine($"  - Journal check: {(summary.JournalOk ? "OK" : "FAIL")} ({summary.JournalErrors.Count} issues)");
         sb.AppendLine($"  - Strict check: {(summary.StrictOk ? "OK" : "FAIL")} ({summary.StrictViolations.Count} violations)");
         sb.AppendLine($"  - Blocking alerts: {(summary.Stats.HasBlockingAlerts ? "present" : "none detected")}");
+        sb.AppendLine($"  - Adapter: {summary.Stats.SourceAdapter} broker={summary.Stats.BrokerId ?? "?"} account={summary.Stats.AccountId ?? "?"}");
         if (!summary.JournalOk)
         {
             foreach (var err in summary.JournalErrors.Take(5))
@@ -185,10 +192,35 @@ public static class DeepVerifyEngine
             .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
         bool hasBlockingAlerts = alertCounts.Values.Sum() > 0;
 
+        if (!string.IsNullOrWhiteSpace(tradeAnalyzer.SourceAdapter) && !string.IsNullOrWhiteSpace(eventAnalyzer.AdapterId) &&
+            !string.Equals(tradeAnalyzer.SourceAdapter, eventAnalyzer.AdapterId, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new VerifyFatalException($"src_adapter mismatch between events ({eventAnalyzer.AdapterId}) and trades ({tradeAnalyzer.SourceAdapter})");
+        }
+        if (!string.IsNullOrWhiteSpace(tradeAnalyzer.ConfigHash) && !string.IsNullOrWhiteSpace(eventAnalyzer.ConfigHash) &&
+            !string.Equals(tradeAnalyzer.ConfigHash, eventAnalyzer.ConfigHash, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new VerifyFatalException("config_hash mismatch between events and trades");
+        }
+        if (!string.IsNullOrWhiteSpace(tradeAnalyzer.SchemaVersion) && !string.IsNullOrWhiteSpace(eventAnalyzer.SchemaVersion) &&
+            !string.Equals(tradeAnalyzer.SchemaVersion, eventAnalyzer.SchemaVersion, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new VerifyFatalException("schema_version mismatch between events and trades");
+        }
+
+        var resolvedAdapter = eventAnalyzer.AdapterId ?? eventAnalyzer.RowAdapter ?? tradeAnalyzer.SourceAdapter ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(resolvedAdapter))
+            resolvedAdapter = resolvedAdapter.Trim().ToLowerInvariant();
+        else
+            resolvedAdapter = "unknown";
+
         return new DeepVerifyStats(
             eventAnalyzer.SchemaVersion,
             eventAnalyzer.ConfigHash,
             eventAnalyzer.DataVersion,
+            resolvedAdapter,
+            eventAnalyzer.BrokerId,
+            eventAnalyzer.AccountId,
             eventAnalyzer.EventCount,
             tradeAnalyzer.TradeCount,
             eventAnalyzer.EventTypeCounts,
@@ -204,12 +236,16 @@ public static class DeepVerifyEngine
         string SchemaVersion,
         string? ConfigHash,
         string? DataVersion,
+        string? AdapterId,
+        string? BrokerId,
+        string? AccountId,
+        string? RowAdapter,
         int EventCount,
         Dictionary<string, int> EventTypeCounts,
         string Hash
     );
 
-    private sealed record TradeAnalysis(int TradeCount, decimal TotalPnlCcy, string Hash);
+    private sealed record TradeAnalysis(int TradeCount, decimal TotalPnlCcy, string Hash, string? SchemaVersion, string? ConfigHash, string? SourceAdapter);
 
     private static EventAnalysis AnalyzeEvents(string path, HashAlgorithm hashAlg)
     {
@@ -228,9 +264,15 @@ public static class DeepVerifyEngine
         string schema = ExtractMeta(meta, "schema_version") ?? string.Empty;
         string? configHash = ExtractMeta(meta, "config_hash");
         string? dataVersion = ExtractMeta(meta, "data_version");
+        string? adapterId = ExtractMeta(meta, "adapter_id");
+        string? brokerId = ExtractMeta(meta, "broker");
+        string? accountId = ExtractMeta(meta, "account_id");
+        int adapterIdx = Array.IndexOf(headerCols, "src_adapter");
+        if (adapterIdx < 0) throw new VerifyFatalException("src_adapter column missing in events journal");
 
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
         int eventCount = 0;
+        string? rowAdapter = null;
         for (int i = 2; i < lines.Length; i++)
         {
             var line = lines[i];
@@ -238,13 +280,16 @@ public static class DeepVerifyEngine
             eventCount++;
             var cols = SplitCsv(line);
             if (typeIdx >= cols.Length) throw new VerifyFatalException($"event_type missing at line {i + 1}");
+            if (adapterIdx >= cols.Length) throw new VerifyFatalException($"src_adapter missing at line {i + 1}");
+            var adapterCell = cols[adapterIdx];
+            if (!string.IsNullOrWhiteSpace(adapterCell) && rowAdapter is null) rowAdapter = adapterCell;
             string evt = cols[typeIdx];
             counts.TryGetValue(evt, out var total);
             counts[evt] = total + 1;
         }
 
         string hash = ComputeHashSkippingMeta(path, hashAlg, skipLines: 2);
-        return new EventAnalysis(schema, configHash, dataVersion, eventCount, counts, hash);
+        return new EventAnalysis(schema, configHash, dataVersion, adapterId, brokerId, accountId, rowAdapter, eventCount, counts, hash);
     }
 
     private static TradeAnalysis AnalyzeTrades(string path, HashAlgorithm hashAlg)
@@ -252,18 +297,52 @@ public static class DeepVerifyEngine
         var lines = File.ReadAllLines(path);
         if (lines.Length == 0) throw new VerifyFatalException("Trades journal empty");
 
+        var header = SplitCsv(lines[0]);
+        int schemaIdx = Array.IndexOf(header, "schema_version");
+        if (schemaIdx < 0) throw new VerifyFatalException("schema_version column missing in trades journal");
+        int configIdx = Array.IndexOf(header, "config_hash");
+        if (configIdx < 0) throw new VerifyFatalException("config_hash column missing in trades journal");
+        int adapterIdx = Array.IndexOf(header, "src_adapter");
+        if (adapterIdx < 0) throw new VerifyFatalException("src_adapter column missing in trades journal");
+
         int tradeCount = Math.Max(0, lines.Length - 1);
         decimal totalPnl = 0m;
+        string? schemaValue = null;
+        string? configValue = null;
+        string? adapterValue = null;
         for (int i = 1; i < lines.Length; i++)
         {
             var parts = SplitCsv(lines[i]);
             if (parts.Length < 8) throw new VerifyFatalException($"Trades row {i + 1} malformed");
             if (decimal.TryParse(parts[7], NumberStyles.Float, CultureInfo.InvariantCulture, out var pnl))
                 totalPnl += pnl;
+            if (schemaIdx >= parts.Length || configIdx >= parts.Length || adapterIdx >= parts.Length)
+                throw new VerifyFatalException($"Trades row {i + 1} missing required columns");
+            var schemaCell = parts[schemaIdx];
+            var configCell = parts[configIdx];
+            var adapterCell = parts[adapterIdx];
+            if (!string.IsNullOrWhiteSpace(schemaCell))
+            {
+                if (schemaValue is null) schemaValue = schemaCell;
+                else if (!string.Equals(schemaValue, schemaCell, StringComparison.OrdinalIgnoreCase))
+                    throw new VerifyFatalException("schema_version varies across trades rows");
+            }
+            if (!string.IsNullOrWhiteSpace(configCell))
+            {
+                if (configValue is null) configValue = configCell;
+                else if (!string.Equals(configValue, configCell, StringComparison.OrdinalIgnoreCase))
+                    throw new VerifyFatalException("config_hash varies across trades rows");
+            }
+            if (!string.IsNullOrWhiteSpace(adapterCell))
+            {
+                if (adapterValue is null) adapterValue = adapterCell;
+                else if (!string.Equals(adapterValue, adapterCell, StringComparison.OrdinalIgnoreCase))
+                    throw new VerifyFatalException("src_adapter varies across trades rows");
+            }
         }
 
         string hash = ComputeHashSkippingMeta(path, hashAlg, skipLines: 1);
-        return new TradeAnalysis(tradeCount, decimal.Round(totalPnl, 6, MidpointRounding.AwayFromZero), hash);
+        return new TradeAnalysis(tradeCount, decimal.Round(totalPnl, 6, MidpointRounding.AwayFromZero), hash, schemaValue, configValue, adapterValue);
     }
 
     private static string? ExtractMeta(string metaLine, string key)

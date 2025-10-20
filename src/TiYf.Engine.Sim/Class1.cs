@@ -12,6 +12,9 @@ public sealed record EngineConfig(
     string JournalRoot,
     string BarOutputEventType = "BAR_V1",
     string ClockMode = "sequence",
+    string AdapterId = "stub",
+    string BrokerId = "stub-sim",
+    string AccountId = "account-stub",
     string[]? Instruments = null,
     string[]? Intervals = null
 );
@@ -84,6 +87,7 @@ public sealed class EngineLoop
     private readonly PositionTracker? _positions;
     private readonly TradesJournalWriter? _tradesWriter;
     private readonly string? _dataVersion;
+    private readonly string _sourceAdapter;
     private readonly Dictionary<string, long> _openUnits = new(); // decisionId -> units
     private readonly SentimentGuardConfig? _sentimentConfig;
     private readonly Dictionary<string, int> _decisionCounters = new(StringComparer.Ordinal);
@@ -94,9 +98,15 @@ public sealed class EngineLoop
 
     private string? ExtractDataVersion() => _dataVersion;
 
-    public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action? onBarEmitted = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true, SentimentGuardConfig? sentimentConfig = null, string? penaltyConfig = null, bool forcePenalty = false, bool ciPenaltyScaffold = false, string riskMode = "off")
+    private static void LogOrderSendOk(string decisionId, string symbol, string? brokerOrderId)
     {
-        _clock = clock; _builders = builders; _barKeyTracker = tracker; _journal = journal; _ticks = ticks; _barEventType = barEventType; _seq = (journal is FileJournalWriter fj ? fj.NextSequence : 1UL) - 1UL; _onBarEmitted = onBarEmitted; _riskFormulas = riskFormulas; _basketAggregator = basketAggregator; _configHash = configHash; _schemaVersion = schemaVersion; _riskEnforcer = riskEnforcer; _riskConfig = riskConfig; _equityOverride = equityOverride; _deterministicStrategy = deterministicStrategy; _execution = execution; _positions = positions; _tradesWriter = tradesWriter; _dataVersion = dataVersion; _riskProbeEnabled = riskProbeEnabled; _sentimentConfig = sentimentConfig; _penaltyMode = penaltyConfig ?? "off"; _forcePenalty = forcePenalty; _ciPenaltyScaffold = ciPenaltyScaffold; _riskMode = string.IsNullOrWhiteSpace(riskMode) ? "off" : riskMode.ToLowerInvariant();
+        var id = string.IsNullOrWhiteSpace(brokerOrderId) ? "unknown" : brokerOrderId;
+        Console.WriteLine($"OrderSend ok decision={decisionId} brokerOrderId={id} symbol={symbol}");
+    }
+
+    public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action? onBarEmitted = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, string sourceAdapter = "stub", long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true, SentimentGuardConfig? sentimentConfig = null, string? penaltyConfig = null, bool forcePenalty = false, bool ciPenaltyScaffold = false, string riskMode = "off")
+    {
+        _clock = clock; _builders = builders; _barKeyTracker = tracker; _journal = journal; _ticks = ticks; _barEventType = barEventType; _seq = (journal is FileJournalWriter fj ? fj.NextSequence : 1UL) - 1UL; _onBarEmitted = onBarEmitted; _riskFormulas = riskFormulas; _basketAggregator = basketAggregator; _configHash = configHash; _schemaVersion = schemaVersion; _riskEnforcer = riskEnforcer; _riskConfig = riskConfig; _equityOverride = equityOverride; _deterministicStrategy = deterministicStrategy; _execution = execution; _positions = positions; _tradesWriter = tradesWriter; _dataVersion = dataVersion; _sourceAdapter = string.IsNullOrWhiteSpace(sourceAdapter) ? "stub" : sourceAdapter; _riskProbeEnabled = riskProbeEnabled; _sentimentConfig = sentimentConfig; _penaltyMode = penaltyConfig ?? "off"; _forcePenalty = forcePenalty; _ciPenaltyScaffold = ciPenaltyScaffold; _riskMode = string.IsNullOrWhiteSpace(riskMode) ? "off" : riskMode.ToLowerInvariant();
         _sizeUnitsFx = sizeUnitsFx; _sizeUnitsXau = sizeUnitsXau;
 #if DEBUG
         if (_riskMode == "off" && riskConfig is not null && (riskConfig.EmitEvaluations || (riskConfig.MaxNetExposureBySymbol != null || riskConfig.MaxRunDrawdownCCY != null)))
@@ -165,7 +175,7 @@ public sealed class EngineLoop
                         bar.Volume
                     };
                     var json = JsonSerializer.SerializeToElement(enriched);
-                    await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, _barEventType, json), ct);
+                    await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, _barEventType, _sourceAdapter, json), ct);
 
                     // CI penalty scaffold emission: Only when ci scaffold enabled AND penalty feature flags set AND forcePenalty true.
                     // Additionally: if sentiment is enabled (shadow/active) we defer penalty until after sentiment chain to preserve ordering expectations.
@@ -176,7 +186,7 @@ public sealed class EngineLoop
                         var penSymbol = bar.InstrumentId.Value;
                         decimal orig = 200m; decimal adj = Math.Max(1, Math.Floor(orig * 0.5m));
                         var penaltyPayload = JsonSerializer.SerializeToElement(new { symbol = penSymbol, ts = bar.EndUtc, reason = "drawdown_guard", original_units = orig, adjusted_units = adj, penalty_scalar = (orig == 0 ? 0m : (adj / orig)) });
-                        await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "PENALTY_APPLIED_V1", penaltyPayload), ct);
+                        await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "PENALTY_APPLIED_V1", _sourceAdapter, penaltyPayload), ct);
                     }
 
                     // Sentiment volatility guard (shadow or active) after bar emission, before strategy trade execution
@@ -187,11 +197,11 @@ public sealed class EngineLoop
                         if (!_sentimentWindows.TryGetValue(symbol, out var q)) { q = new Queue<decimal>(sg.Window); _sentimentWindows[symbol] = q; }
                         var sample = SentimentVolatilityGuard.Compute(sg, symbol, bar.EndUtc, bar.Close, q, out _);
                         var zPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { symbol = sample.Symbol, s_raw = sample.SRaw, z = sample.Z, sigma = sample.Sigma, ts = sample.Ts });
-                        await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "INFO_SENTIMENT_Z_V1", zPayload), ct);
+                        await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "INFO_SENTIMENT_Z_V1", _sourceAdapter, zPayload), ct);
                         if (sample.Clamped)
                         {
                             var clampPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { symbol = sample.Symbol, reason = "volatility_guard", ts = sample.Ts });
-                            await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "INFO_SENTIMENT_CLAMP_V1", clampPayload), ct);
+                            await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "INFO_SENTIMENT_CLAMP_V1", _sourceAdapter, clampPayload), ct);
                             barClamp = true; lastAppliedSymbol = sample.Symbol; lastAppliedTs = sample.Ts;
                         }
                     }
@@ -245,7 +255,7 @@ public sealed class EngineLoop
                         if (_riskConfig?.EmitEvaluations != false)
                         {
                             var evalPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { symbol = bar.InstrumentId.Value, ts = bar.EndUtc, net_exposure = netExposure, run_drawdown = runDrawdown });
-                            await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "INFO_RISK_EVAL_V1", evalPayload), ct);
+                            await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "INFO_RISK_EVAL_V1", _sourceAdapter, evalPayload), ct);
                             _riskEvalCount++;
                             var sym = bar.InstrumentId.Value; _riskEvalCountBySymbol[sym] = _riskEvalCountBySymbol.TryGetValue(sym, out var ec) ? ec + 1 : 1;
                         }
@@ -266,13 +276,13 @@ public sealed class EngineLoop
                         if (exposureBreach)
                         {
                             var alertPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { symbol = bar.InstrumentId.Value, ts = bar.EndUtc, limit = lim, value = netExposure, reason = "net_exposure_cap" });
-                            await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "ALERT_BLOCK_NET_EXPOSURE", alertPayload), ct);
+                            await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "ALERT_BLOCK_NET_EXPOSURE", _sourceAdapter, alertPayload), ct);
                             if (_riskMode == "active" && (_riskConfig?.BlockOnBreach ?? false)) _riskBlockCurrentBar = true;
                         }
                         if (drawdownBreach)
                         {
                             var alertPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { ts = bar.EndUtc, limit_ccy = _riskConfig!.MaxRunDrawdownCCY, value_ccy = runDrawdown, reason = "drawdown_guard" });
-                            await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "ALERT_BLOCK_DRAWDOWN", alertPayload), ct);
+                            await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "ALERT_BLOCK_DRAWDOWN", _sourceAdapter, alertPayload), ct);
                             if (_riskMode == "active" && (_riskConfig?.BlockOnBreach ?? false)) _riskBlockCurrentBar = true;
                         }
                         // Shadow mode never blocks
@@ -298,16 +308,20 @@ public sealed class EngineLoop
                                     var units = _openUnits.TryGetValue(act.DecisionId, out var ou) ? ou : 0L;
                                     var req = new OrderRequest(act.DecisionId, act.Symbol, closeSide, units, tickMinute);
                                     var result = await _execution.ExecuteMarketAsync(req, ct);
-                                    if (result.Accepted && result.Fill is { } fill)
+                                    if (result.Accepted)
                                     {
-                                        _positions.OnFill(fill, _schemaVersion, _configHash ?? string.Empty, ExtractDataVersion());
-                                        if (_tradesWriter is not null)
+                                        if (result.Fill is { } fill)
                                         {
-                                            foreach (var completed in _positions.Completed.Where(c => c.DecisionId == act.DecisionId))
-                                                _tradesWriter.Append(completed);
+                                            _positions.OnFill(fill, _schemaVersion, _configHash ?? string.Empty, _sourceAdapter, ExtractDataVersion());
+                                            if (_tradesWriter is not null)
+                                            {
+                                                foreach (var completed in _positions.Completed.Where(c => c.DecisionId == act.DecisionId))
+                                                    _tradesWriter.Append(completed);
+                                            }
+                                            // Clear open-units tracking on successful close so risk exposure reflects current book
+                                            _openUnits.Remove(act.DecisionId);
                                         }
-                                        // Clear open-units tracking on successful close so risk exposure reflects current book
-                                        _openUnits.Remove(act.DecisionId);
+                                        LogOrderSendOk(req.DecisionId, req.Symbol, result.BrokerOrderId);
                                     }
                                 }
                                 else
@@ -326,8 +340,14 @@ public sealed class EngineLoop
                                     _openUnits[act.DecisionId] = finalUnits;
                                     var req = new OrderRequest(act.DecisionId, act.Symbol, side, finalUnits, tickMinute);
                                     var result = await _execution.ExecuteMarketAsync(req, ct);
-                                    if (result.Accepted && result.Fill is { } fill)
-                                        _positions.OnFill(fill, _schemaVersion, _configHash ?? string.Empty, ExtractDataVersion());
+                                    if (result.Accepted)
+                                    {
+                                        if (result.Fill is { } fill)
+                                        {
+                                            _positions.OnFill(fill, _schemaVersion, _configHash ?? string.Empty, _sourceAdapter, ExtractDataVersion());
+                                        }
+                                        LogOrderSendOk(req.DecisionId, req.Symbol, result.BrokerOrderId);
+                                    }
                                 }
                             }
                         }
@@ -336,7 +356,7 @@ public sealed class EngineLoop
                         if (lastOriginalUnits.HasValue && lastAdjustedUnits.HasValue && lastAppliedSymbol is not null && lastAppliedTs.HasValue && _sentimentConfig is { Mode: var modeApplied } && modeApplied.Equals("active", StringComparison.OrdinalIgnoreCase))
                         {
                             var appliedPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { symbol = lastAppliedSymbol, ts = lastAppliedTs.Value, original_units = lastOriginalUnits.Value, adjusted_units = lastAdjustedUnits.Value, reason = "volatility_guard" });
-                            await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "INFO_SENTIMENT_APPLIED_V1", appliedPayload), ct);
+                            await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "INFO_SENTIMENT_APPLIED_V1", _sourceAdapter, appliedPayload), ct);
                         }
 
 
@@ -349,7 +369,7 @@ public sealed class EngineLoop
                         var penSymbol = bar.InstrumentId.Value;
                         decimal orig = 200m; decimal adj = Math.Max(1, Math.Floor(orig * 0.5m));
                         var penaltyPayload = JsonSerializer.SerializeToElement(new { symbol = penSymbol, ts = bar.EndUtc, reason = "drawdown_guard", original_units = orig, adjusted_units = adj, penalty_scalar = (orig == 0 ? 0m : (adj / orig)) });
-                        await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "PENALTY_APPLIED_V1", penaltyPayload), ct);
+                        await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "PENALTY_APPLIED_V1", _sourceAdapter, penaltyPayload), ct);
                     }
                     // Emit risk probe (synthetic) if services configured
                     if (_riskFormulas is not null && _basketAggregator is not null && _riskProbeEnabled)
@@ -388,7 +408,7 @@ public sealed class EngineLoop
                             ConfigHash = _configHash ?? string.Empty
                         };
                         var probeJson = JsonSerializer.SerializeToElement(riskProbe);
-                        await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "RISK_PROBE_V1", probeJson), ct);
+                        await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "RISK_PROBE_V1", _sourceAdapter, probeJson), ct);
 
                         // Enforcement (if enforcer configured)
                         if (_riskEnforcer is not null)
@@ -422,7 +442,7 @@ public sealed class EngineLoop
                                     alert.SchemaVersion,
                                     alert.ConfigHash
                                 });
-                                await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, alert.EventType, alertPayload), ct);
+                                await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, alert.EventType, _sourceAdapter, alertPayload), ct);
                             }
                         }
                     }

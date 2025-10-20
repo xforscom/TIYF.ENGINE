@@ -82,7 +82,8 @@ public sealed class DemoBrokerSimulator : IExecutionAdapter
 
         var fillTs = _latency == TimeSpan.Zero ? order.UtcTs : AlignToMinute(order.UtcTs + _latency);
         var fill = new ExecutionFill(order.DecisionId, order.Symbol, order.Side, price, order.Units, fillTs);
-        return Task.FromResult(new ExecutionResult(true, string.Empty, fill));
+        var brokerOrderId = $"STUB-{order.DecisionId}";
+        return Task.FromResult(new ExecutionResult(true, string.Empty, fill, brokerOrderId));
     }
 
     private static DateTime AlignToMinute(DateTime ts)
@@ -174,7 +175,8 @@ public static class DemoTradingHarness
         var runId = ResolveRunId(options.RunId, config.RunId, rawConfig, timestamps[0]);
         var journalRoot = ResolveJournalRoot(options.JournalRoot, config.JournalRoot, rawConfig, configDir);
         Directory.CreateDirectory(journalRoot);
-        var runDir = Path.Combine(journalRoot, runId);
+        var adapterId = string.IsNullOrWhiteSpace(config.AdapterId) ? "stub" : config.AdapterId;
+        var runDir = Path.Combine(journalRoot, adapterId, runId);
         if (Directory.Exists(runDir)) Directory.Delete(runDir, true);
 
         var dataVersion = ComputeDataVersion(rawConfig, configDir);
@@ -193,8 +195,8 @@ public static class DemoTradingHarness
             priceDecimals);
         var positions = new PositionTracker();
 
-        await using var journalWriter = new FileJournalWriter(journalRoot, runId, config.SchemaVersion, configHash, dataVersion);
-        await using var tradesWriter = new TradesJournalWriter(journalRoot, runId, config.SchemaVersion, configHash, dataVersion);
+        await using var journalWriter = new FileJournalWriter(journalRoot, runId, config.SchemaVersion, configHash, adapterId, config.BrokerId, config.AccountId, dataVersion);
+        await using var tradesWriter = new TradesJournalWriter(journalRoot, runId, config.SchemaVersion, configHash, adapterId, dataVersion);
 
         var strategy = new DeterministicScriptStrategy(clock, catalog.All(), timestamps[0]);
         var loop = new EngineLoop(
@@ -213,6 +215,7 @@ public static class DemoTradingHarness
             positions: positions,
             tradesWriter: tradesWriter,
             dataVersion: dataVersion,
+            sourceAdapter: adapterId,
             riskMode: "shadow");
 
         await loop.RunAsync(ct);
