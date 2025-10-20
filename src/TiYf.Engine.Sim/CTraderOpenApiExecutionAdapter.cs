@@ -316,18 +316,14 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
             return absolute;
         }
 
-        var baseText = baseUri.AbsoluteUri.EndsWith("/", StringComparison.Ordinal)
-            ? baseUri.AbsoluteUri
-            : baseUri.AbsoluteUri + "/";
+        var baseAbsolute = baseUri.AbsoluteUri.EndsWith("/", StringComparison.Ordinal)
+            ? baseUri
+            : new Uri(baseUri.AbsoluteUri + "/", UriKind.Absolute);
+
         var segment = candidate.TrimStart('/');
-        var combinedText = segment.Length == 0 ? baseText : baseText + segment;
-
-        if (!Uri.TryCreate(combinedText, UriKind.Absolute, out var combined))
-        {
-            throw new InvalidOperationException($"Unable to resolve URI '{relativePath}' against base '{baseUri}'.");
-        }
-
-        return combined;
+        return segment.Length == 0
+            ? baseAbsolute
+            : new Uri(baseAbsolute, segment);
     }
 
     private async Task RefreshTokenAsync(CancellationToken ct)
