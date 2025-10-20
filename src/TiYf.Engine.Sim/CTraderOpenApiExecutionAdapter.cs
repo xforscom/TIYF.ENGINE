@@ -52,6 +52,7 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
 
             await ExecuteWithRetry(async token =>
             {
+                await _logAsync($"cTrader handshake endpoint_raw={_settings.HandshakeEndpoint}").ConfigureAwait(false);
                 var baseUri = ResolveBaseUri();
                 var handshakeUri = ResolveUri(_settings.HandshakeEndpoint, baseUri);
                 await _logAsync($"cTrader handshake target={handshakeUri} base={baseUri}").ConfigureAwait(false);
@@ -116,6 +117,7 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
         {
             await ExecuteWithRetry(async token =>
             {
+                await _logAsync($"cTrader order endpoint_raw={_settings.OrderEndpoint}").ConfigureAwait(false);
                 var baseUri = ResolveBaseUri();
                 var orderUri = ResolveUri(_settings.OrderEndpoint, baseUri);
                 await _logAsync($"cTrader order target={orderUri} base={baseUri}").ConfigureAwait(false);
