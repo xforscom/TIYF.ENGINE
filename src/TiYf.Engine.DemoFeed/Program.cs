@@ -58,7 +58,10 @@ internal static class DemoFeedRunner
 
         var journalRoot = Path.GetFullPath(options.JournalRoot);
         Directory.CreateDirectory(journalRoot);
-        var runDirectory = Path.GetFullPath(Path.Combine(journalRoot, options.RunId));
+        var adapterRaw = string.IsNullOrWhiteSpace(options.AdapterId) ? "stub" : options.AdapterId.Trim();
+        var sourceAdapter = adapterRaw.ToLowerInvariant();
+        var isCTraderAdapter = string.Equals(sourceAdapter, "ctrader-demo", StringComparison.Ordinal) || string.Equals(sourceAdapter, "ctrader-live", StringComparison.Ordinal);
+        var runDirectory = Path.GetFullPath(Path.Combine(journalRoot, sourceAdapter, options.RunId));
         if (Directory.Exists(runDirectory))
         {
             Directory.Delete(runDirectory, recursive: true);
@@ -67,14 +70,20 @@ internal static class DemoFeedRunner
         var eventsPath = Path.Combine(runDirectory, "events.csv");
         if (File.Exists(eventsPath)) File.Delete(eventsPath);
 
+        var brokerAccountId = string.IsNullOrWhiteSpace(options.BrokerAccountId)
+            ? (isCTraderAdapter ? "ctrader-demo" : "stub-sim")
+            : options.BrokerAccountId.Trim();
+        var journalBrokerId = isCTraderAdapter ? "spotware" : "demo-stub";
+        var journalAccountId = string.IsNullOrWhiteSpace(brokerAccountId) ? "unknown" : brokerAccountId;
+
         using var stream = new FileStream(eventsPath, FileMode.Create, FileAccess.Write, FileShare.None);
         using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false))
         {
             NewLine = "\n"
         };
 
-        writer.WriteLine($"schema_version={SchemaVersion},config_hash={ConfigHash}");
-        writer.WriteLine("sequence,utc_ts,event_type,payload_json");
+        writer.WriteLine($"schema_version={SchemaVersion},config_hash={ConfigHash},adapter_id={sourceAdapter},broker={journalBrokerId},account_id={journalAccountId}");
+        writer.WriteLine("sequence,utc_ts,event_type,src_adapter,payload_json");
 
         var sequence = 1;
         var startUtc = options.StartUtc;
@@ -82,6 +91,21 @@ internal static class DemoFeedRunner
         var firstTs = startUtc;
         var lastTs = startUtc;
         var barsBySymbol = new Dictionary<string, List<DemoBarSnapshot>>(StringComparer.Ordinal);
+        var stubStatus = isCTraderAdapter ? "OFF" : (options.Broker.Enabled ? "ON" : "OFF");
+        Console.WriteLine("BROKER_MODE={0} (stub={1}) accountId={2}", adapterRaw, stubStatus, journalAccountId);
+        Console.WriteLine("SOURCE_ADAPTER={0}", sourceAdapter);
+        Console.WriteLine("BROKER_ID={0}", journalBrokerId);
+        Console.WriteLine("ACCOUNT_ID={0}", journalAccountId);
+
+        if (isCTraderAdapter && !options.Broker.Enabled)
+        {
+            throw new DemoFeedException("ctrader-demo adapter requires broker-enabled=true");
+        }
+
+        if (isCTraderAdapter && options.Broker.Seed.HasValue)
+        {
+            throw new DemoFeedException("ctrader-demo adapter cannot run with broker-seed configured (stub disabled)");
+        }
 
         foreach (var symbol in options.Symbols)
         {
@@ -92,14 +116,15 @@ internal static class DemoFeedRunner
             for (var i = 0; i < options.Bars; i++)
             {
                 var endUtc = clock.Add(interval);
-                var bar = GenerateBar(options.Seed, symbol, clock, endUtc, i);
+                var bar = GenerateBar(options.Seed, symbol, clock, endUtc, i, sourceAdapter);
                 symbolBars.Add(new DemoBarSnapshot(endUtc, bar.Close));
 
                 var payload = JsonSerializer.Serialize(bar, SerializerOptions);
                 writer.WriteLine(string.Format(CultureInfo.InvariantCulture,
-                    "{0},{1},BAR_V1,\"{2}\"",
+                    "{0},{1},BAR_V1,{2},\"{3}\"",
                     sequence,
                     endUtc.ToString("O", CultureInfo.InvariantCulture),
+                    sourceAdapter,
                     EscapeForCsv(payload)));
 
                 sequence++;
@@ -114,7 +139,9 @@ internal static class DemoFeedRunner
         var tradesPath = Path.Combine(runDirectory, "trades.csv");
         if (File.Exists(tradesPath)) File.Delete(tradesPath);
 
-        var brokerResult = DemoBrokerStub.GenerateTrades(options, barsBySymbol);
+        DemoBrokerResult brokerResult = isCTraderAdapter
+            ? new DemoBrokerResult(Array.Empty<DemoTradeRecord>(), false)
+            : DemoBrokerStub.GenerateTrades(options, barsBySymbol);
 
         if (options.Broker.Enabled)
         {
@@ -128,13 +155,14 @@ internal static class DemoFeedRunner
             NewLine = "\n"
         })
         {
-            tradesWriter.WriteLine("utc_ts_open,utc_ts_close,symbol,direction,entry_price,exit_price,volume_units,pnl_ccy,pnl_r,decision_id,schema_version,config_hash,data_version");
+            tradesWriter.WriteLine("utc_ts_open,utc_ts_close,symbol,direction,entry_price,exit_price,volume_units,pnl_ccy,pnl_r,decision_id,schema_version,config_hash,src_adapter,data_version");
+            var dataVersionValue = $"src_adapter={sourceAdapter};broker={journalBrokerId};account_id={journalAccountId}";
 
             foreach (var trade in brokerResult.Trades)
             {
                 tradesWriter.WriteLine(string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12}",
+                    "{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12},{13}",
                     trade.UtcTsOpen.ToString("O", CultureInfo.InvariantCulture),
                     trade.UtcTsClose.ToString("O", CultureInfo.InvariantCulture),
                     trade.Symbol,
@@ -147,18 +175,20 @@ internal static class DemoFeedRunner
                     trade.DecisionId,
                     SchemaVersion,
                     ConfigHash,
-                    string.Empty));
+                    sourceAdapter,
+                    dataVersionValue));
 
                 if (options.Broker.Enabled)
                 {
                     Console.WriteLine(
-                        "OrderSend symbol={0} direction={1} volume={2} entry={3:F4} exit={4:F4} decision_id={5}",
+                        "OrderSend ok decision={0} brokerOrderId={1} symbol={2} side={3} units={4} entry={5:F4} exit={6:F4}",
+                        trade.DecisionId,
+                        trade.BrokerOrderId,
                         trade.Symbol,
                         trade.Direction,
                         trade.VolumeUnits,
                         trade.EntryPrice,
-                        trade.ExitPrice,
-                        trade.DecisionId);
+                        trade.ExitPrice);
                 }
             }
 
@@ -177,7 +207,7 @@ internal static class DemoFeedRunner
             brokerResult.HadDanglingPositions);
     }
 
-    private static GeneratedBar GenerateBar(int seed, string symbol, DateTime startUtc, DateTime endUtc, int index)
+    private static GeneratedBar GenerateBar(int seed, string symbol, DateTime startUtc, DateTime endUtc, int index, string sourceAdapter)
     {
         var tick = seed + index * 31;
         var basePriceUnits = 10_000 + (tick % 1_000); // deterministic variation in fourth decimal place
@@ -202,7 +232,8 @@ internal static class DemoFeedRunner
             High: high,
             Low: low,
             Close: close,
-            Volume: volume);
+            Volume: volume,
+            SourceAdapter: sourceAdapter);
     }
 
     private static decimal Round4(decimal value) => decimal.Round(value, 4, MidpointRounding.AwayFromZero);
@@ -221,7 +252,8 @@ internal sealed record GeneratedBar(
     [property: JsonConverter(typeof(FixedDecimalJsonConverter))] decimal High,
     [property: JsonConverter(typeof(FixedDecimalJsonConverter))] decimal Low,
     [property: JsonConverter(typeof(FixedDecimalJsonConverter))] decimal Close,
-    int Volume);
+    int Volume,
+    [property: JsonPropertyName("src_adapter")] string SourceAdapter);
 
 internal sealed class FixedDecimalJsonConverter : JsonConverter<decimal>
 {
@@ -253,7 +285,17 @@ internal static class SerializerFactory
 
 internal sealed class DemoFeedOptions
 {
-    private DemoFeedOptions(string runId, string journalRoot, IReadOnlyList<string> symbols, DateTime startUtc, int bars, int intervalSeconds, int seed, DemoBrokerOptions broker)
+    private DemoFeedOptions(
+        string runId,
+        string journalRoot,
+        IReadOnlyList<string> symbols,
+        DateTime startUtc,
+        int bars,
+        int intervalSeconds,
+        int seed,
+        DemoBrokerOptions broker,
+        string adapterId,
+        string? brokerAccountId)
     {
         RunId = runId;
         JournalRoot = journalRoot;
@@ -263,6 +305,8 @@ internal sealed class DemoFeedOptions
         IntervalSeconds = intervalSeconds;
         Seed = seed;
         Broker = broker;
+        AdapterId = adapterId;
+        BrokerAccountId = brokerAccountId;
     }
 
     public string RunId { get; }
@@ -273,10 +317,19 @@ internal sealed class DemoFeedOptions
     public int IntervalSeconds { get; }
     public int Seed { get; }
     public DemoBrokerOptions Broker { get; }
+    public string AdapterId { get; }
+    public string? BrokerAccountId { get; }
 
     public static DemoFeedOptions FromArgs(string[] args)
     {
         var map = ParseArgs(args);
+
+        string adapterRaw = GetOrDefault(map, "adapter-id", "stub");
+        string adapterId = string.IsNullOrWhiteSpace(adapterRaw) ? "stub" : adapterRaw.Trim().ToLowerInvariant();
+        if (adapterId != "stub" && adapterId != "ctrader-demo")
+        {
+            throw new DemoFeedException($"Unsupported adapter '{adapterRaw}'.");
+        }
 
         string runId = GetOrDefault(map, "run-id", "DEMO-J1");
         if (string.IsNullOrWhiteSpace(runId)) throw new DemoFeedException("run-id cannot be empty");
@@ -298,7 +351,16 @@ internal sealed class DemoFeedOptions
         if (symbols.Length > 1)
             throw new DemoFeedException("Demo feed stub only supports a single symbol");
 
-        string startValue = GetOrDefault(map, "start-utc", "2025-01-01T00:00:00Z");
+        bool startUtcProvided = map.ContainsKey("start-utc");
+        string defaultStartUtc = "2025-01-01T00:00:00Z";
+        if (adapterId == "ctrader-demo" && !startUtcProvided)
+        {
+            var now = DateTime.UtcNow;
+            var alignedNow = new DateTime(now.Year, now.Month, now.Day, now.Hour, now.Minute, 0, DateTimeKind.Utc);
+            defaultStartUtc = alignedNow.AddMinutes(-120).ToString("O", CultureInfo.InvariantCulture);
+        }
+
+        string startValue = GetOrDefault(map, "start-utc", defaultStartUtc);
         if (!DateTime.TryParse(startValue, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var startUtc))
             throw new DemoFeedException($"Invalid start-utc value: '{startValue}'");
         startUtc = DateTime.SpecifyKind(startUtc, DateTimeKind.Utc);
@@ -329,7 +391,13 @@ internal sealed class DemoFeedOptions
 
         var brokerOptions = new DemoBrokerOptions(brokerEnabled, brokerFillMode, brokerSeed);
 
-        return new DemoFeedOptions(runId, journalRoot, Array.AsReadOnly(symbols), startUtc, bars, intervalSeconds, seed, brokerOptions);
+        string? brokerAccountId = null;
+        if (map.TryGetValue("broker-account-id", out var brokerAccountIdValue) && !string.IsNullOrWhiteSpace(brokerAccountIdValue))
+        {
+            brokerAccountId = brokerAccountIdValue.Trim();
+        }
+
+        return new DemoFeedOptions(runId, journalRoot, Array.AsReadOnly(symbols), startUtc, bars, intervalSeconds, seed, brokerOptions, adapterId, brokerAccountId);
     }
 
     private static Dictionary<string, string> ParseArgs(string[] args)

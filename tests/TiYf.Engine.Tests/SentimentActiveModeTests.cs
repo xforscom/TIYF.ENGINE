@@ -45,14 +45,32 @@ public class SentimentActiveModeTests
         string cfg = Path.Combine(Path.GetTempPath(), $"sent_active_{runId}_{Guid.NewGuid():N}.json");
         File.WriteAllBytes(cfg, ms.ToArray());
         string journalRoot = Path.Combine(root, "journals", "M0");
-        string targetRunDir = Path.Combine(journalRoot, $"M0-RUN-{runId}");
-        if (Directory.Exists(targetRunDir)) { try { Directory.Delete(targetRunDir, true); } catch { } }
+        if (Directory.Exists(journalRoot))
+        {
+            try
+            {
+                foreach (var dir in Directory.GetDirectories(journalRoot, $"M0-RUN-{runId}", SearchOption.AllDirectories))
+                {
+                    try { Directory.Delete(dir, true); } catch { }
+                }
+            }
+            catch { /* ignore cleanup errors */ }
+        }
         var psi = new ProcessStartInfo("dotnet", $"exec \"{dll}\" --config \"{cfg}\" --quiet --run-id {runId}")
         { WorkingDirectory = root, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
         var proc = Process.Start(psi)!; proc.WaitForExit(120000);
         if (!proc.HasExited) { try { proc.Kill(entireProcessTree: true); } catch { } Assert.Fail("Sim timeout"); }
         Assert.Equal(0, proc.ExitCode);
         string runDir = Path.Combine(journalRoot, $"M0-RUN-{runId}");
+        if (!Directory.Exists(runDir) && Directory.Exists(journalRoot))
+        {
+            try
+            {
+                var matches = Directory.GetDirectories(journalRoot, $"M0-RUN-{runId}", SearchOption.AllDirectories);
+                if (matches.Length > 0) runDir = matches[0];
+            }
+            catch { }
+        }
         string events = Path.Combine(runDir, "events.csv");
         string trades = Path.Combine(runDir, "trades.csv");
         Assert.True(File.Exists(events)); Assert.True(File.Exists(trades));
@@ -63,8 +81,9 @@ public class SentimentActiveModeTests
     {
         foreach (var line in File.ReadLines(path).Where(l => !string.IsNullOrWhiteSpace(l)).Skip(2))
         {
-            var parts = line.Split(',', 4); if (parts.Length < 4) continue;
-            yield return (parts[2], parts[3], line);
+            var parts = line.Split(',', 5);
+            if (parts.Length < 5) continue;
+            yield return (parts[2], parts[4], line);
         }
     }
 

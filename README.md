@@ -1,21 +1,21 @@
-# TiYf Engine
+﻿# TiYf Engine
 
-> Private Repository – Internal Use Only
+> Private Repository â€“ Internal Use Only
 
-Modular monolith trading engine MVP (M0). Focus: deterministic replay, bar building, instrument catalog, atomic journaling. As of v0.5.0 (post‑M2 shadow instrumentation) this repository is PRIVATE; distribution outside the approved organization list is prohibited. See `docs/INTERNAL.md` for collaboration, branching, and promotion gate policies.
+Modular monolith trading engine MVP (M0). Focus: deterministic replay, bar building, instrument catalog, atomic journaling. As of v0.5.0 (postâ€‘M2 shadow instrumentation) this repository is PRIVATE; distribution outside the approved organization list is prohibited. See `docs/INTERNAL.md` for collaboration, branching, and promotion gate policies.
 
 ## Structure
 
-- `src/TiYf.Engine.Core` – Pure domain abstractions (clock, bars, instruments, risk interfaces)
-- `src/TiYf.Engine.Sim` – Engine loop & simulation harness
-- `src/TiYf.Engine.Sidecar` – File adapters (CSV ingestion, journaling, config hash)
-- `tests/TiYf.Engine.Tests` – Unit & early integration tests
-- `docs/adr` – Architecture decision records
+- `src/TiYf.Engine.Core` â€“ Pure domain abstractions (clock, bars, instruments, risk interfaces)
+- `src/TiYf.Engine.Sim` â€“ Engine loop & simulation harness
+- `src/TiYf.Engine.Sidecar` â€“ File adapters (CSV ingestion, journaling, config hash)
+- `tests/TiYf.Engine.Tests` â€“ Unit & early integration tests
+- `docs/adr` â€“ Architecture decision records
 
 ## Navigation
 
-- [Demo Run Guide](docs/DEMO-RUN.md) – Demo configuration, broker mode, expected outputs, and workflow links.
-- [Demo Ops SOP](docs/Demo-Ops-SOP.md) – Start/stop/collect instructions and halt-on-failure rules.
+- [Demo Run Guide](docs/DEMO-RUN.md) â€“ Demo configuration, broker mode, expected outputs, and workflow links.
+- [Demo Ops SOP](docs/Demo-Ops-SOP.md) â€“ Start/stop/collect instructions and halt-on-failure rules.
 
 ## Run (Prereq: .NET 8 SDK)
 
@@ -26,6 +26,29 @@ Modular monolith trading engine MVP (M0). Focus: deterministic replay, bar build
 
 # (After engine entrypoint added)
  dotnet run --project src/TiYf.Engine.Sim -- --config .\sample-config.json
+```
+
+## Engine Host Deployment
+
+- The ASP.NET host runs via `tiyf-engine-demo.service` (systemd) on the VPS. It binds `http://127.0.0.1:8080` and emits `host: adapter meta ...` on startup plus a heartbeat once per interval (`host: heartbeat t=<utc> adapter=<id> connected=<bool> last_h1_decision=<utc|none> pending_orders=<n> bar_lag_ms=<ms>`).
+- `/health` mirrors the `EngineHostState` payload and is polled by CI, the deploy workflow, and spot checks. Expect fields for adapter, connection flag, heartbeat timestamp, bar lag, pending orders, feature flags, and the last log line.
+- `deploy-demo-host` (`workflow_dispatch`) publishes the host; leave `dryRun=true` for rehearsal (`rsync --dry-run` + simulated remote script) and set `dryRun=false` to flip `/opt/tiyf/current`, reload systemd, restart the service, and verify `/health` remotely.
+- Systemd unit: `deploy/systemd/tiyf-engine-demo.service` (installs to `/etc/systemd/system/`). Environment overrides live in `/etc/tiyf/engine.env` (template: `deploy/systemd/engine.env.sample`); set `ENGINE_HOST_HEARTBEAT_SECONDS` to change the heartbeat cadence without code changes.
+- Useful shell commands:
+
+```bash
+sudo systemctl status tiyf-engine-demo.service
+sudo systemctl restart tiyf-engine-demo.service
+sudo journalctl -u tiyf-engine-demo.service -n 100
+```
+
+- Rollback: pick the previous release ID under `/opt/tiyf/releases/`, update the `current` symlink, reload systemd, and restart the unit.
+
+```bash
+sudo systemctl stop tiyf-engine-demo.service
+sudo ln -sfn /opt/tiyf/releases/<previous-id> /opt/tiyf/current
+sudo systemctl daemon-reload
+sudo systemctl start tiyf-engine-demo.service
 ```
 
 ## Demo Smoke (Run it locally)
@@ -64,7 +87,8 @@ Demo feed broker flags (PR-B demo stub):
 ## Journaling Format (initial)
 
 - Path: `journals/{run_id}/events.csv`
-- Header includes: `schema_version,config_hash,sequence,utc_ts,event_type,payload_json`
+- Meta line includes: `schema_version,config_hash,adapter_id,broker,account_id`
+- Header row: `sequence,utc_ts,event_type,src_adapter,payload_json`
 - Atomic write via temp file + move or fsync flush (platform dependent)
 
 ## Verify CLI
@@ -165,7 +189,7 @@ PASS Criteria (all must hold):
 
 - Tests pass.
 - Verify on A returns exit code 0.
-- Diff A vs B returns exit code 0 (bit‑exact deterministic replay for event stream).
+- Diff A vs B returns exit code 0 (bitâ€‘exact deterministic replay for event stream).
 
 Usage:
 
@@ -270,7 +294,7 @@ See `RELEASE_NOTES.md` v0.5.0 entry for release highlights.
 
 ## Sentiment Active Mode (M3)
 
-M3 elevates the previously shadow‑only sentiment volatility guard into an optionally impactful feature with deterministic scaling on clamped bars. Schema version: 1.2.0.
+M3 elevates the previously shadowâ€‘only sentiment volatility guard into an optionally impactful feature with deterministic scaling on clamped bars. Schema version: 1.2.0.
 
 M5 introduces penalty activation and deep verification groundwork. Current journal schema version: 1.3.0.
 
@@ -280,7 +304,7 @@ M5 introduces penalty activation and deep verification groundwork. Current journ
 - Deep Verifier (`verify deep`) checks cross-file invariants (monotonic sequences, UTC timestamps, trades formatting) and emits a JSON report; exit codes: 0 OK, 2 fail, 1 error.
 - CI additions:
   - `verify-deep.yml` runs on push/PR for Linux+Windows (Release with Debug fallback), uploads deep verify JSON report, and includes a clean-tree guard.
-  - Nightly canary (`nightly-canary.yml`) runs daily (05:00 UTC) and supports manual dispatch. It covers `off`, `shadow`, `active`, and `penalty-active`; it publishes per‑mode parity artifacts and a compact CSV summary (mode,trades_sha,penalty_count), and writes a short job summary to the Actions UI.
+  - Nightly canary (`nightly-canary.yml`) runs daily (05:00 UTC) and supports manual dispatch. It covers `off`, `shadow`, `active`, and `penalty-active`; it publishes perâ€‘mode parity artifacts and a compact CSV summary (mode,trades_sha,penalty_count), and writes a short job summary to the Actions UI.
 
 Contributing (tests): Prefer referencing the centralized schema constant `TiYf.Engine.Core.Infrastructure.Schema.Version` in any test-generated configs or headers, instead of hardcoding a string. This keeps the suite resilient to future schema bumps.
 
@@ -297,20 +321,20 @@ The engine normalizes `disabled` and `none` to `off`. Default when omitted: `sha
 ### Event Ordering (Per Bar)
 
 ```text
-BAR_V1 → INFO_SENTIMENT_Z_V1 → [INFO_SENTIMENT_CLAMP_V1] → [INFO_SENTIMENT_APPLIED_V1 (active only)]
+BAR_V1 â†’ INFO_SENTIMENT_Z_V1 â†’ [INFO_SENTIMENT_CLAMP_V1] â†’ [INFO_SENTIMENT_APPLIED_V1 (active only)]
 ```
 
 `INFO_SENTIMENT_APPLIED_V1` is emitted only in active mode and only when a clamp is in effect for that bar (i.e. the volatility guard threshold was exceeded and scaling is performed).
 
 ### Deterministic Scaling Rule
 
-When in `active` mode and a clamp triggers, open‑side unit sizing is deterministically scaled:
+When in `active` mode and a clamp triggers, openâ€‘side unit sizing is deterministically scaled:
 
 ```text
 adjusted_units = max(1, floor(original_units * 0.5))
 ```
 
-Applied only for that bar’s affected opens; existing positions are not retroactively altered. The scaling formula is purely arithmetic (no randomness), guaranteeing A/B determinism.
+Applied only for that barâ€™s affected opens; existing positions are not retroactively altered. The scaling formula is purely arithmetic (no randomness), guaranteeing A/B determinism.
 
 ### Promotion Gating (Sentiment Parity)
 
@@ -331,8 +355,8 @@ Acceptance matrix:
 | Scenario | Result | Notes |
 |----------|--------|-------|
 | active vs active (identical applied count & events) | accept | `parity=true` |
-| shadow → active (no clamps so no APPLIED events) | accept | Benign upgrade (no trade impact) |
-| active vs off or active vs shadow | reject (sentiment_mismatch) | Impactful vs non‑impactful divergence |
+| shadow â†’ active (no clamps so no APPLIED events) | accept | Benign upgrade (no trade impact) |
+| active vs off or active vs shadow | reject (sentiment_mismatch) | Impactful vs nonâ€‘impactful divergence |
 | active vs active (different `INFO_SENTIMENT_APPLIED_V1` count or differing sentiment event sequence) | reject (sentiment_mismatch) | `diff_hint` indicates first difference or applied count mismatch |
 
 `diff_hint` truncates long lines and includes either the divergent pair or an applied count summary.
@@ -346,7 +370,7 @@ Active Data QA continues to journal `DATA_QA_SUMMARY_V1` (with `passed` and tole
 - Candidate A/B runs must produce identical `events.csv` & `trades.csv` hashes (including sentiment events).
 - Culture invariant (`--culture de-DE` yields same hashes and parse success).
 - Atomic journaling preserved (temp file then move).
-- No run‑id, machine path, or locale leakage inside JSON payload fields (only deterministic domain data).
+- No runâ€‘id, machine path, or locale leakage inside JSON payload fields (only deterministic domain data).
 - Sentiment scaling formula ensures that repeated runs with identical inputs produce identical adjusted unit counts.
 
 ### Enabling Active Mode
@@ -366,7 +390,7 @@ For a benign upgrade test (no clamps): use a very large `volGuardSigma` (e.g. `9
 INFO_SENTIMENT_APPLIED_V1,{"symbol":"EURUSD","reason":"volatility_guard","scaled_from":200,"scaled_to":100,"ts":"2025-01-02T00:20:00Z"}
 ```
 
-(`scaled_from` / `scaled_to` illustrative – actual field names may evolve; deterministic numeric formatting applies.)
+(`scaled_from` / `scaled_to` illustrative â€“ actual field names may evolve; deterministic numeric formatting applies.)
 
 ### CI Matrix (m3-sentiment-matrix.yml)
 
@@ -381,7 +405,7 @@ Artifacts are uploaded on failure for triage.
 
 ## Parity Diagnostics (Artifacts) (M4)
 
-Deterministic post‑run parity hashes are emitted (artifact‑only, no journal events) to enable CI and promotion invariant checks without polluting the event stream.
+Deterministic postâ€‘run parity hashes are emitted (artifactâ€‘only, no journal events) to enable CI and promotion invariant checks without polluting the event stream.
 
 Path pattern:
 
@@ -391,10 +415,10 @@ artifacts/parity/<run-id>/hashes.txt
 
 Fields:
 
-- `events_sha` – SHA‑256 of normalized `events.csv`
-- `trades_sha` – SHA‑256 of normalized `trades.csv` with the `config_hash` column removed
-- `applied_count` – Count of `INFO_SENTIMENT_APPLIED_V1` lines (active mode scaling occurrences)
-- `penalty_count` – Count of `PENALTY_APPLIED_V1` lines (penalty scaffold occurrences)
+- `events_sha` â€“ SHAâ€‘256 of normalized `events.csv`
+- `trades_sha` â€“ SHAâ€‘256 of normalized `trades.csv` with the `config_hash` column removed
+- `applied_count` â€“ Count of `INFO_SENTIMENT_APPLIED_V1` lines (active mode scaling occurrences)
+- `penalty_count` â€“ Count of `PENALTY_APPLIED_V1` lines (penalty scaffold occurrences)
 
 Normalization rules (mirrors engine implementation exactly):
 
@@ -403,11 +427,11 @@ Normalization rules (mirrors engine implementation exactly):
 3. Preserve original column ordering (stable deterministic ordering already enforced by writers).
 4. Remove only the `config_hash` column from `trades.csv` (other columns untouched).
 
-No additional whitespace trimming or JSON canonicalization is applied beyond what the engine already produces. Hashes are hex uppercase SHA‑256.
+No additional whitespace trimming or JSON canonicalization is applied beyond what the engine already produces. Hashes are hex uppercase SHAâ€‘256.
 
 Invariants enforced in CI (matrix + invariants job):
 
-- `off ↔ shadow`: `trades_sha` must be identical (no economic impact from shadow instrumentation).
+- `off â†” shadow`: `trades_sha` must be identical (no economic impact from shadow instrumentation).
 - `active` mode: `trades_sha` may diverge from off/shadow only when `applied_count > 0` OR `penalty_count > 0` (i.e., a genuine impactful clamp or forced penalty occurred). If both counts are zero, active must match shadow.
 
 Usage in CI:
@@ -418,7 +442,7 @@ Usage in CI:
 Rationale:
 
 - Keeps journals pure (no `INFO_PARITY_*` events) maintaining backward compatibility for analytical tooling.
-- Enables fast promotion & regression gates without re‑reading large CSVs repeatedly (single canonical hash per file per run).
+- Enables fast promotion & regression gates without reâ€‘reading large CSVs repeatedly (single canonical hash per file per run).
 - Provides explicit guardrails for feature evolution (any new economic impact in shadow/off surfaces as an unexpected hash divergence).
 
 Example `hashes.txt`:
@@ -444,10 +468,10 @@ Introduces deterministic risk guardrails with three modes: `off`, `shadow`, `act
 
 Deterministic trade parity MUST hold between `off` and `shadow` modes (identical `trades_sha`). Divergence in `active` is allowed only when a guardrail would block (exposure or drawdown) producing an alert.
 
-### Event Ordering (Per Bar) — Recap
+### Event Ordering (Per Bar) â€” Recap
 
 ```text
-BAR_V1 → [Sentiment events (if enabled): INFO_SENTIMENT_Z_V1 → (INFO_SENTIMENT_CLAMP_V1) → (INFO_SENTIMENT_APPLIED_V1 in active sentiment)] → INFO_RISK_EVAL_V1 → [ALERT_BLOCK_NET_EXPOSURE] → [ALERT_BLOCK_DRAWDOWN] → (trade emitted OR suppressed)
+BAR_V1 â†’ [Sentiment events (if enabled): INFO_SENTIMENT_Z_V1 â†’ (INFO_SENTIMENT_CLAMP_V1) â†’ (INFO_SENTIMENT_APPLIED_V1 in active sentiment)] â†’ INFO_RISK_EVAL_V1 â†’ [ALERT_BLOCK_NET_EXPOSURE] â†’ [ALERT_BLOCK_DRAWDOWN] â†’ (trade emitted OR suppressed)
 ```
 
 Guarantee: Each alert for a given bar is always preceded by its evaluation line; multiple alerts (exposure + drawdown) maintain evaluation-first ordering.
@@ -469,9 +493,9 @@ Guarantee: Each alert for a given bar is always preceded by its evaluation line;
 
 Field Notes:
 
-- `maxNetExposureBySymbol`: Per-symbol absolute notional cap; breach condition is `projectedExposure >= cap` (>= chosen for deterministic zero‑cap promotion tests).
+- `maxNetExposureBySymbol`: Per-symbol absolute notional cap; breach condition is `projectedExposure >= cap` (>= chosen for deterministic zeroâ€‘cap promotion tests).
 - `maxRunDrawdownCCY`: Maximum peak-to-trough equity loss (currency units) since run start.
-- `forceDrawdownAfterEvals`: Deterministic test hook triggering a synthetic equity reduction *before* drawdown evaluation on the specified evaluation count (per symbol) – never use in production configs.
+- `forceDrawdownAfterEvals`: Deterministic test hook triggering a synthetic equity reduction *before* drawdown evaluation on the specified evaluation count (per symbol) â€“ never use in production configs.
 - `blockOnBreach`: Master switch (defaults true) enabling suppression of trade emission when in `active` mode and a breach is detected.
 - `emitEvaluations`: When false (active only) blocking still occurs but the informational evaluation lines are omitted.
 
@@ -510,7 +534,7 @@ Promotion decision JSON gains a `risk` block (conceptually analogous to `sentime
 | shadow | active | Alerts appear | reject | risk_mismatch |
 | off | shadow | Alerts appear (should be none) | reject | risk_mismatch |
 
-Zero-cap introduction heuristic: A candidate introducing a new per-symbol cap of `0` (not present in baseline) in a shadow→active upgrade is rejected (guarding against silent immediate blocking regression) even if runtime happened not to trigger an alert inside the limited test fixture window.
+Zero-cap introduction heuristic: A candidate introducing a new per-symbol cap of `0` (not present in baseline) in a shadowâ†’active upgrade is rejected (guarding against silent immediate blocking regression) even if runtime happened not to trigger an alert inside the limited test fixture window.
 
 ### Sample Promotion Decision Snippet
 
@@ -530,8 +554,8 @@ If a mismatch occurs `parity=false` and `diff_hint` provides the first divergent
 
 ### Determinism & Parity Guarantees
 
-- Off ↔ Shadow: identical `trades_sha` (no economic impact). Evaluations & alerts only differ in presence.
-- Shadow ↔ Active (benign): identical trades when no breaches (alert_count = 0), proven by promotion/test invariants.
+- Off â†” Shadow: identical `trades_sha` (no economic impact). Evaluations & alerts only differ in presence.
+- Shadow â†” Active (benign): identical trades when no breaches (alert_count = 0), proven by promotion/test invariants.
 - Active breach determinism: Forceable via `forceDrawdownAfterEvals` or by configuring a low exposure cap; resulting alerts precede suppressed trade deterministically.
 - All evaluation ordering & counts reproducible (per-symbol evaluation counter embedded in payload).
 
@@ -553,7 +577,11 @@ ALERT_BLOCK_DRAWDOWN,{"symbol":"EURUSD","run_drawdown_ccy":1500,"cap":1500,"ts":
 
 ## License
 
-Proprietary – All rights reserved. Internal evaluation and development only. No redistribution, sublicensing, or external publication without written authorization. See `LICENSE` for terms.
+Proprietary â€“ All rights reserved. Internal evaluation and development only. No redistribution, sublicensing, or external publication without written authorization. See `LICENSE` for terms.
 
 ---
 *Visibility switched to private on: 2025-10-07 (UTC). Public badges / publishing references have been removed or deprecated.*
+
+
+
+

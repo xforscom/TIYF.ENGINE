@@ -310,13 +310,14 @@ public interface IJournalWriter : IAsyncDisposable
     Task AppendAsync(JournalEvent evt, CancellationToken ct = default);
 }
 
-public sealed record JournalEvent(ulong Sequence, DateTime UtcTimestamp, string EventType, JsonElement Payload)
+public sealed record JournalEvent(ulong Sequence, DateTime UtcTimestamp, string EventType, string SourceAdapter, JsonElement Payload)
 {
     public string ToCsvLine() => string.Join(',', new[]
     {
         Sequence.ToString(),
         UtcTimestamp.ToString("O"),
         Escape(EventType),
+        Escape(SourceAdapter),
         Escape(JsonSerializer.Serialize(Payload))
     });
 

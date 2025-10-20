@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System;
+using System.Text;
 using System.Text.Json;
 using TiYf.Engine.Core;
 
@@ -10,21 +11,34 @@ public sealed class FileJournalWriter : IJournalWriter
     private bool _disposed;
     private ulong _nextSeq = 1UL;
     public string Path { get; }
+    public string RunDirectory { get; }
+    private readonly string _sourceAdapter;
 
-    public FileJournalWriter(string directory, string runId, string schemaVersion, string configHash, string? dataVersion = null)
+    public FileJournalWriter(
+        string directory,
+        string runId,
+        string schemaVersion,
+        string configHash,
+        string adapterId,
+        string brokerId,
+        string accountId,
+        string? dataVersion = null)
     {
+        if (string.IsNullOrWhiteSpace(adapterId)) throw new ArgumentException("Adapter id must be provided.", nameof(adapterId));
         Directory.CreateDirectory(directory);
-        Path = System.IO.Path.Combine(directory, runId, "events.csv");
+        RunDirectory = System.IO.Path.Combine(directory, adapterId, runId);
+        Path = System.IO.Path.Combine(RunDirectory, "events.csv");
         var dir = System.IO.Path.GetDirectoryName(Path)!;
         Directory.CreateDirectory(dir);
         var exists = File.Exists(Path);
         _writer = new StreamWriter(new FileStream(Path, FileMode.Append, FileAccess.Write, FileShare.Read), Encoding.UTF8);
+        _sourceAdapter = adapterId;
         if (!exists)
         {
-            var meta = $"schema_version={schemaVersion},config_hash={configHash}";
+            var meta = $"schema_version={schemaVersion},config_hash={configHash},adapter_id={adapterId},broker={brokerId},account_id={accountId}";
             if (!string.IsNullOrWhiteSpace(dataVersion)) meta += $",data_version={dataVersion}";
             _writer.WriteLine(meta);
-            _writer.WriteLine("sequence,utc_ts,event_type,payload_json");
+            _writer.WriteLine("sequence,utc_ts,event_type,src_adapter,payload_json");
             _writer.Flush();
         }
     }
@@ -36,7 +50,9 @@ public sealed class FileJournalWriter : IJournalWriter
         var seq = evt.Sequence == 0 ? _nextSeq : evt.Sequence;
         if (seq != _nextSeq) throw new InvalidOperationException("Non-monotonic sequence usage");
         _nextSeq++;
-        var line = new JournalEvent(seq, evt.UtcTimestamp, evt.EventType, evt.Payload).ToCsvLine();
+        if (!string.Equals(evt.SourceAdapter, _sourceAdapter, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Journal event src_adapter mismatch. Expected '{_sourceAdapter}', received '{evt.SourceAdapter}'.");
+        var line = new JournalEvent(seq, evt.UtcTimestamp, evt.EventType, _sourceAdapter, evt.Payload).ToCsvLine();
         await _writer.WriteLineAsync(line);
         await _writer.FlushAsync();
     }
@@ -50,7 +66,9 @@ public sealed class FileJournalWriter : IJournalWriter
             var seq = evt.Sequence == 0 ? _nextSeq : evt.Sequence;
             if (seq != _nextSeq) throw new InvalidOperationException("Non-monotonic sequence in batch");
             _nextSeq++;
-            sb.AppendLine(new JournalEvent(seq, evt.UtcTimestamp, evt.EventType, evt.Payload).ToCsvLine());
+            if (!string.Equals(evt.SourceAdapter, _sourceAdapter, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Journal event src_adapter mismatch. Expected '{_sourceAdapter}', received '{evt.SourceAdapter}'.");
+            sb.AppendLine(new JournalEvent(seq, evt.UtcTimestamp, evt.EventType, _sourceAdapter, evt.Payload).ToCsvLine());
         }
         await _writer.WriteAsync(sb.ToString());
         await _writer.FlushAsync();

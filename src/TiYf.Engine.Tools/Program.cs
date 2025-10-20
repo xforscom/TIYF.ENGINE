@@ -1033,8 +1033,14 @@ static int RunPromote(List<string> args)
         var proc = System.Diagnostics.Process.Start(psi)!;
         proc.WaitForExit(120000);
         if (!proc.HasExited) { try { proc.Kill(entireProcessTree: true); } catch { } return (2, string.Empty, string.Empty, string.Empty); }
-        // Journal dir pattern: journals/M0/M0-RUN-{runId} under provided repoRoot
-        string runDir = Path.Combine(repoRoot, "journals", "M0", $"M0-RUN-{runId}");
+        string m0Root = Path.Combine(repoRoot, "journals", "M0");
+        string runFolderName = $"M0-RUN-{runId}";
+        string[] matches = Array.Empty<string>();
+        if (Directory.Exists(m0Root))
+        {
+            try { matches = Directory.GetDirectories(m0Root, runFolderName, SearchOption.AllDirectories); } catch { }
+        }
+        string runDir = matches.Length > 0 ? matches[0] : Path.Combine(m0Root, runFolderName);
         string eventsPath = Path.Combine(runDir, "events.csv");
         string tradesPath = Path.Combine(runDir, "trades.csv");
         string configHash = ExtractConfigHash(eventsPath);
@@ -1050,14 +1056,15 @@ static int RunPromote(List<string> args)
     {
         try
         {
-            var first = File.ReadLines(eventsPath).Skip(1).FirstOrDefault();
-            if (first == null) return string.Empty;
-            var parts = first.Split(',', 4);
-            if (parts.Length < 4) return string.Empty;
-            var payload = parts[3];
-            payload = payload.Trim('"').Replace("\"\"", "\"");
-            using var doc = JsonDocument.Parse(payload);
-            if (doc.RootElement.TryGetProperty("config_hash", out var ch) && ch.ValueKind == JsonValueKind.String) return ch.GetString()!;
+            var meta = File.ReadLines(eventsPath).FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(meta)) return string.Empty;
+            var kvPairs = meta.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            foreach (var pair in kvPairs)
+            {
+                var kv = pair.Split('=', 2);
+                if (kv.Length == 2 && string.Equals(kv[0], "config_hash", StringComparison.OrdinalIgnoreCase))
+                    return kv[1];
+            }
         }
         catch { }
         return string.Empty;

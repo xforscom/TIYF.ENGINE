@@ -21,14 +21,15 @@ public class JournalRoundtripTests
     {
         var journal = new InMemoryJournal();
         var payload = JsonDocument.Parse("{\"text\":\"value,with,commas\",\"quote\":\"He said \\\"Hi\\\"\"}").RootElement;
-        await journal.AppendAsync(new JournalEvent(1, DateTime.UtcNow, "TEST,EVENT", payload));
+        await journal.AppendAsync(new JournalEvent(1, DateTime.UtcNow, "TEST,EVENT", "stub", payload));
         var line = journal.Lines.Single();
         // Simple parse: split respecting quotes
         var parsed = ParseCsv(line);
         Assert.Equal("1", parsed[0]);
         Assert.Contains("TEST,EVENT", parsed[2]);
-        // Extract JSON part (4th column) and parse
-        var payloadJson = parsed[3].Trim('"');
+        Assert.Equal("stub", parsed[3]);
+        // Extract JSON part (5th column) and parse
+        var payloadJson = parsed[4].Trim('"');
         using var parsedDoc = JsonDocument.Parse(payloadJson);
         Assert.Equal("value,with,commas", parsedDoc.RootElement.GetProperty("text").GetString());
         Assert.Equal("He said \"Hi\"", parsedDoc.RootElement.GetProperty("quote").GetString());

@@ -28,7 +28,7 @@ public class BarV1EmissionTests
         sb.AppendLine($"{aligned.AddMinutes(1):O},101.2,1");
         File.WriteAllText(tickFile, sb.ToString());
         var journalRoot = Path.Combine(root, "out");
-        var cfg = new EngineConfig("1.1.0", "RUN", "inst.csv", "ticks.csv", journalRoot, "BAR_V1", "sequence", new[] { "I1" }, new[] { "1m" });
+        var cfg = new EngineConfig("1.1.0", "RUN", "inst.csv", "ticks.csv", journalRoot, "BAR_V1", "sequence", Instruments: new[] { "I1" }, Intervals: new[] { "1m" });
 
         // Build runtime pieces manually (avoid needing external config file)
         var (config, configHash, _) = (cfg, ConfigHash.Compute(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(cfg)), (System.Text.Json.JsonDocument?)null);
@@ -36,7 +36,7 @@ public class BarV1EmissionTests
         var catalog = new InMemoryInstrumentCatalog(instruments);
         var ticks = new CsvTickSource(tickFile, new InstrumentId("I1"));
         var clock = new DeterministicSequenceClock(ticks.Select(t => t.UtcTimestamp));
-        var journalWriter = new FileJournalWriter(journalRoot, cfg.RunId, cfg.SchemaVersion, configHash);
+        var journalWriter = new FileJournalWriter(journalRoot, cfg.RunId, cfg.SchemaVersion, configHash, "stub", "demo-stub", "account-stub");
         var tracker = new InMemoryBarKeyTracker();
         var interval = new BarInterval(TimeSpan.FromMinutes(1));
         var builders = new Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> { { (new InstrumentId("I1"), interval), new IntervalBarBuilder(interval) } };
@@ -45,21 +45,25 @@ public class BarV1EmissionTests
         await journalWriter.DisposeAsync();
 
         // Assert: read journal
-        var journalFile = Path.Combine(journalRoot, cfg.RunId, "events.csv");
+        var journalFile = Path.Combine(journalRoot, "stub", cfg.RunId, "events.csv");
         Assert.True(File.Exists(journalFile), "Journal file not created");
         var lines = File.ReadAllLines(journalFile);
         Assert.True(lines.Length >= 3, "Expected header + at least one BAR_V1 row");
         // Header line (metadata) then header row sequence,utc_ts,event_type,payload_json
         Assert.StartsWith("schema_version=", lines[0]);
-        Assert.Equal("sequence,utc_ts,event_type,payload_json", lines[1]);
+        Assert.Contains("adapter_id=stub", lines[0]);
+        Assert.Contains("broker=demo-stub", lines[0]);
+        Assert.Contains("account_id=account-stub", lines[0]);
+        Assert.Equal("sequence,utc_ts,event_type,src_adapter,payload_json", lines[1]);
         var barRows = lines.Skip(2).Where(l => l.Contains(",BAR_V1,")).ToList();
         Assert.True(barRows.Count > 0, "No BAR_V1 rows present");
         // Ensure no legacy BAR row missing IntervalSeconds inside payload
         foreach (var r in barRows)
         {
             var parts = SplitCsv(r);
-            Assert.Equal(4, parts.Length); // sequence, utc_ts, event_type, payload_json
-            var payloadField = parts[3];
+            Assert.Equal(5, parts.Length); // sequence, utc_ts, event_type, src_adapter, payload_json
+            Assert.Equal("stub", parts[3]);
+            var payloadField = parts[4];
             if (payloadField.StartsWith('"') && payloadField.EndsWith('"'))
             {
                 payloadField = payloadField.Substring(1, payloadField.Length - 2).Replace("\"\"", "\"");

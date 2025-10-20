@@ -13,12 +13,12 @@ public class VerifyAlertWhitelistTests
     {
         var tmp = Path.Combine(Path.GetTempPath(), "alert-whitelist-" + Guid.NewGuid().ToString("N") + ".csv");
         var sb = new StringBuilder();
-        sb.AppendLine("schema_version=1.1.0,config_hash=ABC123");
-        sb.AppendLine("sequence,utc_ts,event_type,payload_json");
+        sb.AppendLine("schema_version=1.1.0,config_hash=ABC123,adapter_id=stub,broker=demo-stub,account_id=account-stub");
+        sb.AppendLine("sequence,utc_ts,event_type,src_adapter,payload_json");
         var now = DateTime.UtcNow.ToString("O");
         var payload = "{\"InstrumentId\":\"EURUSD\",\"DecisionId\":\"D1\",\"Observed\":7.0,\"Cap\":5.0}";
         var payloadEscaped = payload.Replace("\"", "\"\""); // CSV escape quotes
-        sb.AppendLine($"1,{now},ALERT_BLOCK_LEVERAGE,\"{payloadEscaped}\"");
+        sb.AppendLine($"1,{now},ALERT_BLOCK_LEVERAGE,stub,\"{payloadEscaped}\"");
         File.WriteAllText(tmp, sb.ToString());
         var toolsProj = Path.Combine(FindSolutionRoot(), "src", "TiYf.Engine.Tools", "TiYf.Engine.Tools.csproj");
         Assert.True(File.Exists(toolsProj));

@@ -4,7 +4,25 @@
     "runId": "RUN-DEMO-CTRADER"
   },
   "adapter": {
-    "type": "ctrader-demo"
+    "type": "ctrader-demo",
+    "settings": {
+      "baseUrl": "https://api.spotware.com/openapi/ct-demo",
+      "tokenUrl": "https://api.spotware.com/openapi/token",
+      "applicationId": "env:CT_APP_ID",
+      "clientSecret": "env:CT_APP_SECRET",
+      "accessToken": "env:CT_DEMO_OAUTH_TOKEN",
+      "refreshToken": "env:CT_DEMO_REFRESH_TOKEN",
+      "accountId": "env:CT_DEMO_ACCOUNT_ID",
+      "broker": "env:CT_DEMO_BROKER",
+      "maxOrderUnits": 100000,
+      "requestTimeoutSeconds": 10,
+      "retryInitialDelaySeconds": 1,
+      "retryMaxDelaySeconds": 10,
+      "retryMaxAttempts": 5,
+      "handshakeEndpoint": "/connectivity",
+      "orderEndpoint": "/orders",
+      "useMock": false
+    }
   },
   "universe": [
     "EURUSD",

@@ -1,4 +1,4 @@
-# Demo Run Operations
+﻿# Demo Run Operations
 
 ## Purpose
 - Allow operators to switch between the stub broker and the cTrader demo adapter without modifying workflow logic.
@@ -16,7 +16,7 @@ All jobs target the self-hosted runner labelled `[self-hosted, Linux, X64, tiyf-
 
 ## Adapter Modes
 - `stub` (default) disables broker integration and uses `sample-config.demo.json`.
-- `ctrader-demo` enables broker calls, swaps to `sample-config.demo-ctrader.json`, and requires repository secrets `CT_APP_ID`, `CT_APP_SECRET`, `CT_DEMO_OAUTH_TOKEN`, `CT_DEMO_REFRESH_TOKEN`, `CT_DEMO_ACCOUNT_ID`, `CT_DEMO_BROKER`.
+- ctrader-demo enables broker calls, swaps to sample-config.demo-ctrader.json, and requires repository secrets CT_APP_ID, CT_APP_SECRET, CT_DEMO_OAUTH_TOKEN, CT_DEMO_REFRESH_TOKEN, CT_DEMO_ACCOUNT_ID, CT_DEMO_BROKER. Adapter settings support env:NAME placeholders so config files can reference secrets without inlining values (see sample-config.demo-ctrader.json).
 - Rollback path is always "re-dispatch with `adapter=stub`"; the workflows echo this in their summaries for quick reference.
 
 ## Automatic Safeguards
@@ -33,11 +33,58 @@ All jobs target the self-hosted runner labelled `[self-hosted, Linux, X64, tiyf-
 5. Publish result summaries, step reports, `checks.csv`, and the `artifacts/` payload prior to uploading with 30-day retention.
 
 ## Observability and Artifacts
-- Log files begin with banner lines such as `Adapter = …`, `Universe = …`, and `Config = …`. For cTrader runs the workflow searches `demo-ctrader.log` for `Adapter = CTrader OpenAPI (demo)|Connected to cTrader endpoint|OrderSend`; missing evidence fails the job.
+
+- Log files begin with banner lines such as `Adapter = â€¦`, `adapter_id=â€¦`, `broker=â€¦`, `account_id=â€¦`, `Universe = â€¦`, and `Config = â€¦`. DemoFeed also emits `BROKER_MODE=<adapter> (stub=ON|OFF) accountId=â€¦` before any execution output. For cTrader runs the workflow searches `demo-ctrader.log` for `Connected to cTrader endpoint` and rejects any `OrderSend` lines whose `brokerOrderId` retains the `STUB-` prefix.
 - Artifacts upload under `vps-demo-artifacts-adapter-<adapter>` and contain `events.csv`, `trades.csv`, strict/parity JSON, the DemoFeed log (`demo-ctrader.log` or `demo-stub.log`), and `preflight.sanity.txt` when generated. Placeholder files are written when a source artifact is absent so consumers see a consistent layout.
+- Event payloads now include a `src_adapter` JSON field, and the trades journal encodes `src_adapter=<adapter>` in the `data_version` column so provenance survives downstream ingestion.
 - `checks.csv` at the workspace root records UTC timestamp, strict/parity exit codes, `broker_dangling`, SHA hashes, and runner identity. The same data is summarised in the `RESULT_LINE` stored in the step summary.
 
+## Host Service & Health
+
+- The TiYf Engine Host runs under `tiyf-engine-demo.service` on the VPS and listens on `http://127.0.0.1:8080`.
+- The service logs a startup banner (`host: adapter meta adapter=<id> broker=<broker> account=<account> mode=<mode>`) as soon as the DI container resolves the adapter, followed by one heartbeat per interval: `host: heartbeat t=<utc> adapter=<id> connected=<bool> last_h1_decision=<utc|none> pending_orders=<n> bar_lag_ms=<ms>`.
+- Set `ENGINE_HOST_HEARTBEAT_SECONDS` in `/etc/tiyf/engine.env` to override the default 30s heartbeat cadence (the systemd unit also sources `/opt/tiyf/current/.env` when present).
+- `/health` responds with a connectivity snapshot and is used by both CI and the deployment workflow. A typical response is:
+
+```json
+{
+  "adapter": "ctrader-demo",
+  "connected": true,
+  "last_h1_decision_utc": "2025-01-20T13:20:00Z",
+  "bar_lag_ms": 12.5,
+  "pending_orders": 0,
+  "feature_flags": ["dataQa=active", "riskProbe=enabled"],
+  "last_heartbeat_utc": "2025-01-20T13:24:30Z",
+  "last_log": "Connected to cTrader endpoint"
+}
+```
+
+## Deployment Playbook
+
+- `deploy-demo-host` (`workflow_dispatch`) publishes the host with inputs `environment`, optional `releaseTag`, and `dryRun` (defaults to `true`). Dry runs run `rsync --dry-run` and execute the remote script in simulation mode; real runs flip `/opt/tiyf/current` and restart the unit.
+- Release artefacts land in `/opt/tiyf/releases/<release-id>/` with `systemd/tiyf-engine-demo.service`, `scripts/remote-deploy.sh`, and binaries produced by `dotnet publish -c Release`.
+- The systemd unit copies the service file into `/etc/systemd/system/`, performs `systemctl daemon-reload`, flips the symlink, restarts the service, and polls `/health` (5×, 5s back-off) on successful deployments.
+- Service management quick reference:
+
+```bash
+sudo systemctl status tiyf-engine-demo.service
+sudo systemctl stop tiyf-engine-demo.service
+sudo systemctl start tiyf-engine-demo.service
+```
+
+- Rollback (choose the prior good release ID):
+
+```bash
+sudo systemctl stop tiyf-engine-demo.service
+sudo ln -sfn /opt/tiyf/releases/<previous-id> /opt/tiyf/current
+sudo systemctl daemon-reload
+sudo systemctl start tiyf-engine-demo.service
+```
+
+- Environment overrides live in `/etc/tiyf/engine.env` (sample template: `deploy/systemd/engine.env.sample`). `ENGINE_HOST_HEARTBEAT_SECONDS` is respected without restart after the next reload/restart.
+
 ## Alert Routing
+
 - `ALERT_ENV` input (or repository variable fallback) accepts `prod` or `staging`; the resolver defaults to `prod` when not supplied.
 - Webhooks live in repository secrets `DEMO_ALERT_WEBHOOK_PROD` and `DEMO_ALERT_WEBHOOK_STAGING`. The selected secret name is logged (masked) before the ping is attempted.
 - Success pings (`204 No Content`) are emitted only when `ALERT_ENV` resolves to `prod` **and** the `enableAlertPing` input is set to `true`; the HTTP status code is recorded in the run summary for downstream evidence. Non-2xx responses bubble up and fail the workflow to prevent silent alert outage when a ping is attempted.
@@ -45,13 +92,18 @@ All jobs target the self-hosted runner labelled `[self-hosted, Linux, X64, tiyf-
 - cTrader credentials (`CT_*`) remain bound to the `ctrader-demo` environment so the adapter preflight keeps guarding runs without leaking secret data.
 
 ## Failure Handling
+
 - Smoke and daily workflows set GitHub commit statuses (`ci:red` or `ci:green`), comment on the "Demo Session" issue with the first failing step, and optionally post to the ops webhook.
 - The manual session workflow appends a transcript comment to its Demo Session issue, embedding the summary line and artifact link for later audit.
 - All workflows retain artifacts and summaries on failure, enabling operators to diff hashes across runs without rerunning immediately.
 
 ## Operator Checklist
+
 - Choose the adapter: prefer `stub` after risky changes; escalate to `ctrader-demo` only after confirming secrets and desired trading window.
 - Verify the `tiyf-vps` runner is online and has the required disk space before dispatching.
 - For cTrader runs, review repository secrets ahead of time; the preflight gate will halt the run, but proactive checks reduce noise.
 - Capture artifact URLs and the posted `RESULT_LINE` when filing incident notes; include `preflight.sanity.txt` for compliance evidence.
 - If a cTrader run misbehaves, immediately re-run with `adapter=stub` to restore nightly coverage while the incident is investigated.
+
+
+

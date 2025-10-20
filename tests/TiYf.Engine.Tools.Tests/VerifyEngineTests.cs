@@ -13,14 +13,14 @@ public class VerifyEngineTests
     {
         var path = Path.Combine(Path.GetTempPath(), "verify-" + System.Guid.NewGuid().ToString("N") + ".csv");
         var sb = new StringBuilder();
-        sb.AppendLine("schema_version=1.1.0,config_hash=HASH");
-        sb.AppendLine("sequence,utc_ts,event_type,payload_json");
+        sb.AppendLine("schema_version=1.1.0,config_hash=HASH,adapter_id=stub,broker=demo-stub,account_id=account-stub");
+        sb.AppendLine("sequence,utc_ts,event_type,src_adapter,payload_json");
         long seq = 1;
         foreach (var payload in barPayloads)
         {
             var json = Serialize(payload).Replace("\"", "\"\"");
             var ts = ((dynamic)payload).StartUtc as string ?? $"2025-10-05T10:00:0{seq}Z"; // fallback
-            sb.AppendLine($"{seq},{ts},BAR_V1,\"{json}\"");
+            sb.AppendLine($"{seq},{ts},BAR_V1,stub,\"{json}\"");
             seq++;
         }
         File.WriteAllText(path, sb.ToString());
@@ -51,7 +51,7 @@ public class VerifyEngineTests
     public void Verify_MissingSchemaOrHash_ReturnsOne()
     {
         var path = Path.Combine(Path.GetTempPath(), "verify-" + System.Guid.NewGuid().ToString("N") + "-bad.csv");
-        File.WriteAllText(path, "schema_version=1.1.0\nsequence,utc_ts,event_type,payload_json\n1,2025-10-05T10:00:00Z,BAR_V1,{}\n");
+        File.WriteAllText(path, "schema_version=1.1.0,adapter_id=stub,broker=demo-stub,account_id=account-stub\nsequence,utc_ts,event_type,src_adapter,payload_json\n1,2025-10-05T10:00:00Z,BAR_V1,stub,{}\n");
         var result = VerifyEngine.Run(path, new VerifyOptions(50, false, false));
         Assert.Equal(1, result.ExitCode);
     }
@@ -60,7 +60,7 @@ public class VerifyEngineTests
     public void Verify_NonUtcTimestamp_ReturnsOne()
     {
         var path = Path.Combine(Path.GetTempPath(), "verify-" + System.Guid.NewGuid().ToString("N") + "-badts.csv");
-        File.WriteAllText(path, "schema_version=1.1.0,config_hash=HASH\nsequence,utc_ts,event_type,payload_json\n1,2025-10-05T10:00:00+02:00,BAR_V1,{}\n");
+        File.WriteAllText(path, "schema_version=1.1.0,config_hash=HASH,adapter_id=stub,broker=demo-stub,account_id=account-stub\nsequence,utc_ts,event_type,src_adapter,payload_json\n1,2025-10-05T10:00:00+02:00,BAR_V1,stub,{}\n");
         var result = VerifyEngine.Run(path, new VerifyOptions(50, false, false));
         Assert.Equal(1, result.ExitCode);
     }
@@ -82,10 +82,10 @@ public class VerifyEngineTests
             Volume = 1000m
         }).Replace("\"", "\"\"");
         var sb = new StringBuilder();
-        sb.AppendLine("schema_version=1.1.0,config_hash=H");
-        sb.AppendLine("sequence,utc_ts,event_type,payload_json");
-        sb.AppendLine($"1,2025-10-05T10:00:00Z,BAR_V1,\"{barPayload}\"");
-        sb.AppendLine($"2,2025-10-05T10:00:00Z,BAR_V1,\"{barPayload}\"");
+        sb.AppendLine("schema_version=1.1.0,config_hash=H,adapter_id=stub,broker=demo-stub,account_id=account-stub");
+        sb.AppendLine("sequence,utc_ts,event_type,src_adapter,payload_json");
+        sb.AppendLine($"1,2025-10-05T10:00:00Z,BAR_V1,stub,\"{barPayload}\"");
+        sb.AppendLine($"2,2025-10-05T10:00:00Z,BAR_V1,stub,\"{barPayload}\"");
         File.WriteAllText(path, sb.ToString());
         var result = VerifyEngine.Run(path, new VerifyOptions(50, false, true));
         Assert.Equal(1, result.ExitCode);
@@ -104,9 +104,9 @@ public class VerifyEngineTests
             BasketRiskPct = 3.4
         }).Replace("\"", "\"\"");
         var sb = new StringBuilder();
-        sb.AppendLine("schema_version=1.1.0,config_hash=H");
-        sb.AppendLine("sequence,utc_ts,event_type,payload_json");
-        sb.AppendLine($"1,2025-10-05T10:00:00Z,RISK_PROBE_V1,\"{riskPayload}\"");
+        sb.AppendLine("schema_version=1.1.0,config_hash=H,adapter_id=stub,broker=demo-stub,account_id=account-stub");
+        sb.AppendLine("sequence,utc_ts,event_type,src_adapter,payload_json");
+        sb.AppendLine($"1,2025-10-05T10:00:00Z,RISK_PROBE_V1,stub,\"{riskPayload}\"");
         File.WriteAllText(path, sb.ToString());
         var result = VerifyEngine.Run(path, new VerifyOptions(50, false, false));
         Assert.Equal(0, result.ExitCode);

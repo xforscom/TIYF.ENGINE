@@ -46,9 +46,9 @@ public class VerifyDeepTests
         var (events, trades) = BuildHealthyJournal();
         var ts = "2025-01-01T00:00:00Z";
         var risk = QuoteJson(new { symbol = "EURUSD", ts, net_exposure = 200m, run_drawdown = 0m });
-        File.AppendAllText(events, $"3,{ts},INFO_RISK_EVAL_V1,{risk}{Environment.NewLine}");
+        File.AppendAllText(events, $"3,{ts},INFO_RISK_EVAL_V1,stub,{risk}{Environment.NewLine}");
         var alert = QuoteJson(new { symbol = "EURUSD", limit = 100m, value = 200m, reason = "cap" });
-        File.AppendAllText(events, $"4,{ts},ALERT_BLOCK_NET_EXPOSURE,{alert}{Environment.NewLine}");
+        File.AppendAllText(events, $"4,{ts},ALERT_BLOCK_NET_EXPOSURE,stub,{alert}{Environment.NewLine}");
 
         var result = TiYf.Engine.Tools.DeepVerifyEngine.Run(new TiYf.Engine.Tools.DeepVerifyOptions(
             events,

@@ -9,8 +9,8 @@ internal static class JournalTestHelper
     {
         filePath ??= Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + "-A.csv");
         var sb = new StringBuilder();
-        sb.AppendLine("schema_version=1.1.0,config_hash=TESTHASH");
-        sb.AppendLine("sequence,utc_ts,event_type,payload_json");
+        sb.AppendLine("schema_version=1.1.0,config_hash=TESTHASH,adapter_id=stub,broker=demo-stub,account_id=account-stub");
+        sb.AppendLine("sequence,utc_ts,event_type,src_adapter,payload_json");
         long seq = 1;
         foreach (var b in bars)
         {
@@ -29,7 +29,7 @@ internal static class JournalTestHelper
             };
             var json = System.Text.Json.JsonSerializer.Serialize(payload);
             json = json.Replace("\"", "\"\""); // CSV escape quotes
-            sb.AppendLine($"{seq},{b.startUtc},BAR_V1,\"{json}\"");
+            sb.AppendLine($"{seq},{b.startUtc},BAR_V1,stub,\"{json}\"");
             seq++;
         }
         File.WriteAllText(filePath, sb.ToString());
@@ -66,10 +66,10 @@ internal static class JournalTestHelper
         };
         string Esc(object o) { var j = System.Text.Json.JsonSerializer.Serialize(o); return j.Replace("\"", "\"\""); }
         var sb = new StringBuilder();
-        sb.AppendLine("schema_version=1.1.0,config_hash=TESTHASH");
-        sb.AppendLine("sequence,utc_ts,event_type,payload_json");
-        sb.AppendLine($"1,{startUtc},BAR_V1,\"{Esc(basePayload)}\"");
-        sb.AppendLine($"2,{startUtc},BAR_V1,\"{Esc(altPayload)}\""); // duplicate composite key
+        sb.AppendLine("schema_version=1.1.0,config_hash=TESTHASH,adapter_id=stub,broker=demo-stub,account_id=account-stub");
+        sb.AppendLine("sequence,utc_ts,event_type,src_adapter,payload_json");
+        sb.AppendLine($"1,{startUtc},BAR_V1,stub,\"{Esc(basePayload)}\"");
+        sb.AppendLine($"2,{startUtc},BAR_V1,stub,\"{Esc(altPayload)}\""); // duplicate composite key
         File.WriteAllText(path, sb.ToString());
         return path;
     }

@@ -92,6 +92,7 @@ internal static class DemoBrokerStub
             var exitPrice = closeBar.Close;
             var pnl = decimal.Round((exitPrice - entryPrice) * VolumeUnits, 6, MidpointRounding.AwayFromZero);
 
+            var brokerOrderId = $"STUB-{decisionId}";
             result.Add(new DemoTradeRecord(
                 UtcTsOpen: openTs,
                 UtcTsClose: closeTs,
@@ -102,7 +103,8 @@ internal static class DemoBrokerStub
                 VolumeUnits: VolumeUnits,
                 PnlCcy: pnl,
                 PnlR: 0m,
-                DecisionId: decisionId));
+                DecisionId: decisionId,
+                BrokerOrderId: brokerOrderId));
 
             ordinal++;
         }
