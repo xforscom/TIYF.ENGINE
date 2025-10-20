@@ -55,7 +55,7 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
                 await _logAsync($"cTrader handshake endpoint_raw={_settings.HandshakeEndpoint}").ConfigureAwait(false);
                 var baseUri = ResolveBaseUri();
                 var handshakeUri = ResolveUri(_settings.HandshakeEndpoint, baseUri);
-                await _logAsync($"cTrader handshake target={handshakeUri} base={baseUri}").ConfigureAwait(false);
+                await _logAsync($"cTrader handshake target={handshakeUri} base={baseUri} scheme={handshakeUri.Scheme} client_base={_httpClient.BaseAddress}").ConfigureAwait(false);
                 using var request = new HttpRequestMessage(HttpMethod.Get, handshakeUri);
                 AddAuthorization(request);
                 using var response = await _httpClient.SendAsync(request, token).ConfigureAwait(false);
