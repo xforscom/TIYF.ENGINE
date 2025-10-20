@@ -54,7 +54,7 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
             {
                 await _logAsync($"cTrader handshake endpoint_raw={_settings.HandshakeEndpoint}").ConfigureAwait(false);
                 var baseUri = ResolveBaseUri();
-                var handshakeUri = ResolveUri(_settings.HandshakeEndpoint, baseUri);
+                var handshakeUri = CombineUri(baseUri, _settings.HandshakeEndpoint);
                 await _logAsync($"cTrader handshake target={handshakeUri} base={baseUri} scheme={handshakeUri.Scheme} client_base={_httpClient.BaseAddress}").ConfigureAwait(false);
                 using var request = new HttpRequestMessage(HttpMethod.Get, handshakeUri);
                 AddAuthorization(request);
@@ -119,7 +119,7 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
             {
                 await _logAsync($"cTrader order endpoint_raw={_settings.OrderEndpoint}").ConfigureAwait(false);
                 var baseUri = ResolveBaseUri();
-                var orderUri = ResolveUri(_settings.OrderEndpoint, baseUri);
+                var orderUri = CombineUri(baseUri, _settings.OrderEndpoint);
                 await _logAsync($"cTrader order target={orderUri} base={baseUri}").ConfigureAwait(false);
                 using var request = new HttpRequestMessage(HttpMethod.Post, orderUri);
                 AddAuthorization(request);
@@ -278,24 +278,7 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
 
     private Uri ResolveUri(string pathOrUri, Uri baseUri)
     {
-        if (string.IsNullOrWhiteSpace(pathOrUri))
-            throw new ArgumentException("Path or URI cannot be empty.", nameof(pathOrUri));
-
-        var trimmed = pathOrUri.Trim();
-        if (Uri.TryCreate(trimmed, UriKind.Absolute, out var absolute))
-        {
-            return absolute;
-        }
-
-        var relative = trimmed.TrimStart('/');
-        var baseText = baseUri.AbsoluteUri.TrimEnd('/');
-        var combinedText = relative.Length == 0 ? baseText : $"{baseText}/{relative}";
-        if (!Uri.TryCreate(combinedText, UriKind.Absolute, out var combined))
-        {
-            throw new InvalidOperationException($"Unable to resolve URI '{trimmed}' against base '{baseUri}'.");
-        }
-
-        return combined;
+        return CombineUri(baseUri, pathOrUri);
     }
 
     private Uri ResolveBaseUri()
@@ -321,6 +304,30 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
         }
 
         return candidate;
+    }
+
+    private Uri CombineUri(Uri baseUri, string relativePath)
+    {
+        if (baseUri is null) throw new ArgumentNullException(nameof(baseUri));
+
+        var candidate = string.IsNullOrWhiteSpace(relativePath) ? string.Empty : relativePath.Trim();
+        if (Uri.TryCreate(candidate, UriKind.Absolute, out var absolute))
+        {
+            return absolute;
+        }
+
+        var baseText = baseUri.AbsoluteUri.EndsWith("/", StringComparison.Ordinal)
+            ? baseUri.AbsoluteUri
+            : baseUri.AbsoluteUri + "/";
+        var segment = candidate.TrimStart('/');
+        var combinedText = segment.Length == 0 ? baseText : baseText + segment;
+
+        if (!Uri.TryCreate(combinedText, UriKind.Absolute, out var combined))
+        {
+            throw new InvalidOperationException($"Unable to resolve URI '{relativePath}' against base '{baseUri}'.");
+        }
+
+        return combined;
     }
 
     private async Task RefreshTokenAsync(CancellationToken ct)
