@@ -312,7 +312,9 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
 
         var candidate = string.IsNullOrWhiteSpace(relativePath) ? string.Empty : relativePath.Trim();
         _ = _logAsync($"CombineUri base={baseUri} candidate_raw={relativePath} trimmed={candidate}");
-        if (Uri.TryCreate(candidate, UriKind.Absolute, out var absolute))
+        if (Uri.TryCreate(candidate, UriKind.Absolute, out var absolute) &&
+            (absolute.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+             absolute.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
         {
             return absolute;
         }
