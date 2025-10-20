@@ -52,8 +52,9 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
 
             await ExecuteWithRetry(async token =>
             {
-                var handshakeUri = ResolveUri(_settings.HandshakeEndpoint);
-                await _logAsync($"cTrader handshake target={handshakeUri}").ConfigureAwait(false);
+                var baseUri = ResolveBaseUri();
+                var handshakeUri = ResolveUri(_settings.HandshakeEndpoint, baseUri);
+                await _logAsync($"cTrader handshake target={handshakeUri} base={baseUri}").ConfigureAwait(false);
                 using var request = new HttpRequestMessage(HttpMethod.Get, handshakeUri);
                 AddAuthorization(request);
                 using var response = await _httpClient.SendAsync(request, token).ConfigureAwait(false);
@@ -115,8 +116,9 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
         {
             await ExecuteWithRetry(async token =>
             {
-                var orderUri = ResolveUri(_settings.OrderEndpoint);
-                await _logAsync($"cTrader order target={orderUri}").ConfigureAwait(false);
+                var baseUri = ResolveBaseUri();
+                var orderUri = ResolveUri(_settings.OrderEndpoint, baseUri);
+                await _logAsync($"cTrader order target={orderUri} base={baseUri}").ConfigureAwait(false);
                 using var request = new HttpRequestMessage(HttpMethod.Post, orderUri);
                 AddAuthorization(request);
                 request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
@@ -262,33 +264,31 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
 
     private Uri ResolveUri(string pathOrUri)
     {
-        if (string.IsNullOrWhiteSpace(pathOrUri))
-            throw new ArgumentException("Path or URI cannot be empty.", nameof(pathOrUri));
-
-        pathOrUri = pathOrUri.Trim();
-
-        if (Uri.TryCreate(pathOrUri, UriKind.Absolute, out var absolute))
-        {
-            return absolute;
-        }
-
-        var baseUri = ResolveBaseUri();
-        if (!Uri.TryCreate(baseUri, pathOrUri, out var combined))
-        {
-            throw new InvalidOperationException($"Unable to resolve URI '{pathOrUri}' against base '{baseUri}'.");
-        }
-
-        return combined;
+        return ResolveUri(pathOrUri, ResolveBaseUri());
     }
 
     private Uri ResolveUri(Uri uri)
     {
         if (uri.IsAbsoluteUri) return uri;
 
-        var baseUri = ResolveBaseUri();
-        if (!Uri.TryCreate(baseUri, uri, out var combined))
+        return ResolveUri(uri.ToString(), ResolveBaseUri());
+    }
+
+    private Uri ResolveUri(string pathOrUri, Uri baseUri)
+    {
+        if (string.IsNullOrWhiteSpace(pathOrUri))
+            throw new ArgumentException("Path or URI cannot be empty.", nameof(pathOrUri));
+
+        var trimmed = pathOrUri.Trim();
+        if (Uri.TryCreate(trimmed, UriKind.Absolute, out var absolute))
         {
-            throw new InvalidOperationException($"Unable to resolve URI '{uri}' against base '{baseUri}'.");
+            return absolute;
+        }
+
+        var relative = trimmed.TrimStart('/');
+        if (!Uri.TryCreate(baseUri, relative, out var combined))
+        {
+            throw new InvalidOperationException($"Unable to resolve URI '{trimmed}' against base '{baseUri}'.");
         }
 
         return combined;
