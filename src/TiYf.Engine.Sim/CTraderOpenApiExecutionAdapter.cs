@@ -268,9 +268,22 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
             return new Uri(_httpClient.BaseAddress, pathOrUri);
         }
 
-        if (_settings.BaseUri.IsAbsoluteUri)
+        var baseUri = _settings.BaseUri;
+        if (!baseUri.IsAbsoluteUri)
         {
-            return new Uri(_settings.BaseUri, pathOrUri);
+            if (!Uri.TryCreate(baseUri.ToString(), UriKind.Absolute, out var parsed))
+            {
+                parsed = null;
+            }
+            if (parsed != null)
+            {
+                baseUri = parsed;
+            }
+        }
+
+        if (baseUri.IsAbsoluteUri)
+        {
+            return new Uri(baseUri, pathOrUri);
         }
 
         return new Uri(pathOrUri, UriKind.RelativeOrAbsolute);
