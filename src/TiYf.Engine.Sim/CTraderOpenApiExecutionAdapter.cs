@@ -323,9 +323,11 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
 
         var segment = candidate.TrimStart('/');
         _ = _logAsync($"CombineUri segment={segment}");
-        return segment.Length == 0
+        var result = segment.Length == 0
             ? baseAbsolute
             : new Uri(baseAbsolute, segment);
+        _ = _logAsync($"CombineUri result={result} scheme={result.Scheme}");
+        return result;
     }
 
     private async Task RefreshTokenAsync(CancellationToken ct)
