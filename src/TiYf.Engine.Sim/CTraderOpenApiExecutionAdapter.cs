@@ -311,6 +311,7 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
         if (baseUri is null) throw new ArgumentNullException(nameof(baseUri));
 
         var candidate = string.IsNullOrWhiteSpace(relativePath) ? string.Empty : relativePath.Trim();
+        _ = _logAsync($"CombineUri base={baseUri} candidate_raw={relativePath} trimmed={candidate}");
         if (Uri.TryCreate(candidate, UriKind.Absolute, out var absolute))
         {
             return absolute;
@@ -321,6 +322,7 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
             : new Uri(baseUri.AbsoluteUri + "/", UriKind.Absolute);
 
         var segment = candidate.TrimStart('/');
+        _ = _logAsync($"CombineUri segment={segment}");
         return segment.Length == 0
             ? baseAbsolute
             : new Uri(baseAbsolute, segment);
