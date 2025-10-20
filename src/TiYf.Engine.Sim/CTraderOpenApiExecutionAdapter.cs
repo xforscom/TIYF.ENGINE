@@ -288,7 +288,9 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
         }
 
         var relative = trimmed.TrimStart('/');
-        if (!Uri.TryCreate(baseUri, relative, out var combined))
+        var baseText = baseUri.AbsoluteUri.TrimEnd('/');
+        var combinedText = relative.Length == 0 ? baseText : $"{baseText}/{relative}";
+        if (!Uri.TryCreate(combinedText, UriKind.Absolute, out var combined))
         {
             throw new InvalidOperationException($"Unable to resolve URI '{trimmed}' against base '{baseUri}'.");
         }
