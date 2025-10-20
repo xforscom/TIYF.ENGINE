@@ -52,7 +52,7 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
 
             await ExecuteWithRetry(async token =>
             {
-                using var request = new HttpRequestMessage(HttpMethod.Get, EnsureAbsoluteUri(_settings.HandshakeEndpoint));
+                using var request = new HttpRequestMessage(HttpMethod.Get, ResolveUri(_settings.HandshakeEndpoint));
                 AddAuthorization(request);
                 using var response = await _httpClient.SendAsync(request, token).ConfigureAwait(false);
                 if (response.IsSuccessStatusCode)
@@ -113,7 +113,7 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
         {
             await ExecuteWithRetry(async token =>
             {
-                using var request = new HttpRequestMessage(HttpMethod.Post, EnsureAbsoluteUri(_settings.OrderEndpoint));
+                using var request = new HttpRequestMessage(HttpMethod.Post, ResolveUri(_settings.OrderEndpoint));
                 AddAuthorization(request);
                 request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
@@ -256,47 +256,63 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
     }
 
-    private Uri EnsureAbsoluteUri(string pathOrUri)
+    private Uri ResolveUri(string pathOrUri)
     {
+        if (string.IsNullOrWhiteSpace(pathOrUri))
+            throw new ArgumentException("Path or URI cannot be empty.", nameof(pathOrUri));
+
+        pathOrUri = pathOrUri.Trim();
+
         if (Uri.TryCreate(pathOrUri, UriKind.Absolute, out var absolute))
         {
             return absolute;
         }
 
-        if (_httpClient.BaseAddress != null && _httpClient.BaseAddress.IsAbsoluteUri)
+        var baseUri = ResolveBaseUri();
+        if (!Uri.TryCreate(baseUri, pathOrUri, out var combined))
         {
-            return new Uri(_httpClient.BaseAddress, pathOrUri);
+            throw new InvalidOperationException($"Unable to resolve URI '{pathOrUri}' against base '{baseUri}'.");
         }
 
-        var baseUri = _settings.BaseUri;
-        if (!baseUri.IsAbsoluteUri)
-        {
-            if (!Uri.TryCreate(baseUri.ToString(), UriKind.Absolute, out var parsed))
-            {
-                parsed = null;
-            }
-            if (parsed != null)
-            {
-                baseUri = parsed;
-            }
-        }
-
-        if (baseUri.IsAbsoluteUri)
-        {
-            return new Uri(baseUri, pathOrUri);
-        }
-
-        return new Uri(pathOrUri, UriKind.RelativeOrAbsolute);
+        return combined;
     }
 
-    private Uri EnsureAbsoluteUri(Uri uri)
+    private Uri ResolveUri(Uri uri)
     {
         if (uri.IsAbsoluteUri) return uri;
-        if (_httpClient.BaseAddress != null)
+
+        var baseUri = ResolveBaseUri();
+        if (!Uri.TryCreate(baseUri, uri, out var combined))
         {
-            return new Uri(_httpClient.BaseAddress, uri.ToString());
+            throw new InvalidOperationException($"Unable to resolve URI '{uri}' against base '{baseUri}'.");
         }
-        return uri;
+
+        return combined;
+    }
+
+    private Uri ResolveBaseUri()
+    {
+        if (_httpClient.BaseAddress is { IsAbsoluteUri: true } absoluteBase)
+        {
+            return absoluteBase;
+        }
+
+        var candidate = _settings.BaseUri;
+        if (!candidate.IsAbsoluteUri)
+        {
+            var text = candidate.ToString().Trim();
+            if (!Uri.TryCreate(text, UriKind.Absolute, out candidate))
+            {
+                throw new InvalidOperationException($"BaseUri '{text}' is not absolute for cTrader adapter.");
+            }
+        }
+
+        if (_httpClient.BaseAddress == null)
+        {
+            _httpClient.BaseAddress = candidate;
+        }
+
+        return candidate;
     }
 
     private async Task RefreshTokenAsync(CancellationToken ct)
@@ -314,7 +330,7 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
             ["client_secret"] = _settings.ClientSecret
         };
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, EnsureAbsoluteUri(_settings.TokenUri))
+        using var request = new HttpRequestMessage(HttpMethod.Post, ResolveUri(_settings.TokenUri))
         {
             Content = new FormUrlEncodedContent(payload!)
         };
