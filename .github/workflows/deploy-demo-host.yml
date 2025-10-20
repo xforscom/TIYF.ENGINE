@@ -65,6 +65,7 @@ jobs:
           cp deploy/systemd/tiyf-engine-demo.service publish/systemd/
           mkdir -p publish/scripts
           cp deploy/scripts/remote-deploy.sh publish/scripts/
+          cp sample-config.demo-ctrader.json publish/
 
       - name: Verify systemd unit
         run: |
