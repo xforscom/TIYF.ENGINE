@@ -52,7 +52,9 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
 
             await ExecuteWithRetry(async token =>
             {
-                using var request = new HttpRequestMessage(HttpMethod.Get, ResolveUri(_settings.HandshakeEndpoint));
+                var handshakeUri = ResolveUri(_settings.HandshakeEndpoint);
+                await _logAsync($"cTrader handshake target={handshakeUri}").ConfigureAwait(false);
+                using var request = new HttpRequestMessage(HttpMethod.Get, handshakeUri);
                 AddAuthorization(request);
                 using var response = await _httpClient.SendAsync(request, token).ConfigureAwait(false);
                 if (response.IsSuccessStatusCode)
@@ -113,7 +115,9 @@ public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDi
         {
             await ExecuteWithRetry(async token =>
             {
-                using var request = new HttpRequestMessage(HttpMethod.Post, ResolveUri(_settings.OrderEndpoint));
+                var orderUri = ResolveUri(_settings.OrderEndpoint);
+                await _logAsync($"cTrader order target={orderUri}").ConfigureAwait(false);
+                using var request = new HttpRequestMessage(HttpMethod.Post, orderUri);
                 AddAuthorization(request);
                 request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
