@@ -207,16 +207,18 @@ jobs:
 
           heartbeat="${ENGINE_HOST_HEARTBEAT_SECONDS:-30}"
           {
-            printf 'ENGINE_HOST_HEARTBEAT_SECONDS=%s\n' "$heartbeat"
-            printf 'ADAPTER_MODE=%s\n' "$mode"
-            printf 'ENGINE_CONFIG_PATH=%s\n' "$ENGINE_CONFIG_PATH"
+            printf "ENGINE_HOST_HEARTBEAT_SECONDS=%s\n" "$heartbeat"
+            printf "ADAPTER_MODE=%s\n" "$mode"
+            printf "ENGINE_CONFIG_PATH=%s\n" "$ENGINE_CONFIG_PATH"
             for var in CT_APP_ID CT_APP_SECRET CT_DEMO_OAUTH_TOKEN CT_DEMO_REFRESH_TOKEN CT_DEMO_ACCOUNT_ID CT_DEMO_BROKER OANDA_ENV OANDA_PRACTICE_ACCOUNT_ID OANDA_PRACTICE_TOKEN; do
               value="${!var}"
               if [ -n "$value" ]; then
-                printf '%s=%s\n' "$var" "$value"
+                printf "%s=%s\n" "$var" "$value"
               fi
             done
           } > engine.env
+          scp -o StrictHostKeyChecking=no engine.env "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/engine.env"
+          ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "sudo install -m 640 -o root -g root /tmp/engine.env /etc/tiyf/engine.env && sudo rm -f /tmp/engine.env"
           rm -f engine.env
 
       - name: Verify systemd unit on host
@@ -234,31 +236,6 @@ jobs:
           fi
           ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
             "systemd-analyze verify '${REMOTE_PATH}/systemd/${SERVICE_NAME}'"
-
-          scp -o StrictHostKeyChecking=no engine.env "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/engine.env"
-          ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "sudo install -m 640 -o root -g root /tmp/engine.env /etc/tiyf/engine.env && sudo rm -f /tmp/engine.env"
-          rm -f engine.env
-
-      - name: Apply release (symlink, systemd, health)
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-        run: |
-          set -euo pipefail
-          LOG_DIR="deploy-artifacts"
-          mkdir -p "$LOG_DIR"
-          APPLY_LOG="$LOG_DIR/apply-release.log"
-          set -o pipefail
-
-          if [ -z "${DEPLOY_HOST}" ] || [ -z "${DEPLOY_USER}" ]; then
-            echo "Deployment host credentials are not configured."
-            exit 1
-          fi
-
-          if [ -z "${RELEASE_ID:-}" ]; then
-            echo "RELEASE_ID is not populated from previous step."
-            exit 1
-          fi
 
           DRY_RUN="${DRY_RUN:-true}"
           ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
@@ -284,3 +261,4 @@ jobs:
           name: deploy-host-artifacts
           path: deploy-artifacts/**
           if-no-files-found: ignore
+
