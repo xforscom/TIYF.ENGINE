@@ -26,8 +26,7 @@ public class RiskExposureClearsOnCloseTests
             .Select(l =>
             {
                 var cols = SplitCsvQuoted(l);
-                // Payload is column index 3 in events.csv (ts,event,meta,payload)
-                var payload = cols.Count > 3 ? cols[3] : cols.Last();
+                var payload = cols.Last();
                 return JsonDocument.Parse(payload).RootElement;
             })
             .ToList();
@@ -105,12 +104,36 @@ public class RiskExposureClearsOnCloseTests
         if (!p.HasExited) { try { p.Kill(); } catch { } throw new Exception("Sim timeout"); }
         Assert.Equal(0, p.ExitCode);
         var stdout = p.StandardOutput.ReadToEnd();
-        var runIdLine = stdout.Split('\n').FirstOrDefault(l => l.StartsWith("RUN_ID=", StringComparison.OrdinalIgnoreCase));
-        Assert.False(string.IsNullOrWhiteSpace(runIdLine));
-        var runId = runIdLine!.Substring("RUN_ID=".Length).Trim();
-        var jDir = Path.Combine(solutionRoot, "journals", "M0", runId);
-        Assert.True(Directory.Exists(jDir), $"Run dir not found: {jDir}\nSTDOUT:{stdout}\nSTDERR:{p.StandardError.ReadToEnd()}");
-        return (jDir, Path.Combine(jDir, "events.csv"), Path.Combine(jDir, "trades.csv"));
+        var lines = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        string? Extract(string key)
+        {
+            var match = lines.FirstOrDefault(l => l.StartsWith(key, StringComparison.OrdinalIgnoreCase));
+            if (string.IsNullOrWhiteSpace(match)) return null;
+            return match.Substring(key.Length).Trim();
+        }
+
+        var runIdLine = Extract("RUN_ID=");
+        var runId = string.IsNullOrWhiteSpace(runIdLine) ? "M0-RUN" : runIdLine;
+
+        string ResolvePath(string? value, string fallbackRelative)
+        {
+            var rel = string.IsNullOrWhiteSpace(value) ? fallbackRelative : value;
+            var normalized = rel.Replace('/', Path.DirectorySeparatorChar);
+            try
+            {
+                return Path.GetFullPath(normalized, solutionRoot);
+            }
+            catch (Exception)
+            {
+                return Path.Combine(solutionRoot, normalized);
+            }
+        }
+
+        var eventsPath = ResolvePath(Extract("JOURNAL_DIR_EVENTS="), Path.Combine("journals", "M0", runId, "events.csv"));
+        var tradesPath = ResolvePath(Extract("JOURNAL_DIR_TRADES="), Path.Combine("journals", "M0", runId, "trades.csv"));
+        Assert.True(File.Exists(eventsPath), $"Events journal not found: {eventsPath}\nSTDOUT:{stdout}\nSTDERR:{p.StandardError.ReadToEnd()}");
+        Assert.True(File.Exists(tradesPath), $"Trades journal not found: {tradesPath}\nSTDOUT:{stdout}\nSTDERR:{p.StandardError.ReadToEnd()}");
+        return (Path.GetDirectoryName(eventsPath) ?? solutionRoot, eventsPath, tradesPath);
     }
 
     private static string TempConfigWithRisk(string baseConfig, string riskMode)

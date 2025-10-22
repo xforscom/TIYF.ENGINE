@@ -25,10 +25,8 @@ public class M0DeterminismTests
         if (Directory.Exists(tmpRoot)) Directory.Delete(tmpRoot, true);
         Directory.CreateDirectory(tmpRoot);
 
-        string Run(string tag)
+        SimRunResult Run(string tag)
         {
-            var runDir = Path.Combine(tmpRoot, tag);
-            Directory.CreateDirectory(runDir);
             var simDll = Path.Combine(solutionRoot, "src", "TiYf.Engine.Sim", "bin", "Release", "net8.0", "TiYf.Engine.Sim.dll");
             if (!File.Exists(simDll)) throw new FileNotFoundException($"Sim DLL not built at {simDll}. Build Release first.");
             var psi = new ProcessStartInfo("dotnet", $"exec \"{simDll}\" --config \"{config}\" --verbosity diag")
@@ -54,32 +52,56 @@ public class M0DeterminismTests
             {
                 throw new Xunit.Sdk.XunitException($"Sim run {tag} failed ExitCode={proc.ExitCode}\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}");
             }
-            return runDir;
+
+            var lines = stdout.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            string? Extract(string key)
+            {
+                var match = lines.FirstOrDefault(l => l.StartsWith(key, StringComparison.OrdinalIgnoreCase));
+                if (string.IsNullOrWhiteSpace(match)) return null;
+                return match.Substring(key.Length).Trim();
+            }
+
+            string? runId = Extract("RUN_ID=");
+            string eventsRel = Extract("JOURNAL_DIR_EVENTS=") ?? Path.Combine("journals", "M0", runId ?? "M0-RUN", "events.csv");
+            string tradesRel = Extract("JOURNAL_DIR_TRADES=") ?? Path.Combine("journals", "M0", runId ?? "M0-RUN", "trades.csv");
+
+            string Resolve(string relPath)
+            {
+                var normalized = relPath.Replace('/', Path.DirectorySeparatorChar);
+                try
+                {
+                    return Path.GetFullPath(normalized, solutionRoot);
+                }
+                catch (Exception)
+                {
+                    return Path.Combine(solutionRoot, normalized);
+                }
+            }
+
+            var eventsPath = Resolve(eventsRel);
+            var tradesPath = Resolve(tradesRel);
+            Assert.True(File.Exists(eventsPath), $"Events journal not found: {eventsPath}\nSTDOUT:{stdout}\nSTDERR:{stderr}");
+            Assert.True(File.Exists(tradesPath), $"Trades journal not found: {tradesPath}\nSTDOUT:{stdout}\nSTDERR:{stderr}");
+
+            return new SimRunResult(eventsPath, tradesPath, runId);
         }
 
         // Run twice (A,B) then a third time for B verification copy
         Run("A");
-        Run("B");
-
-        var journalBase = Path.Combine(solutionRoot, "journals", "M0", "M0-RUN"); // engine writes here deterministically each run (cleaned before run)
-        Assert.True(Directory.Exists(journalBase));
-        var eventsPath = Path.Combine(journalBase, "events.csv");
-        var tradesPath = Path.Combine(journalBase, "trades.csv");
-        Assert.True(File.Exists(eventsPath));
-        Assert.True(File.Exists(tradesPath));
+        var runB = Run("B");
 
         // Capture copy after run A
         var copyEventsA = Path.Combine(tmpRoot, "eventsA.csv");
         var copyTradesA = Path.Combine(tmpRoot, "tradesA.csv");
-        File.Copy(eventsPath, copyEventsA, true);
-        File.Copy(tradesPath, copyTradesA, true);
+        File.Copy(runB.EventsPath, copyEventsA, true);
+        File.Copy(runB.TradesPath, copyTradesA, true);
 
         // Re-run to produce B' fresh (C tag) for comparison with original A copies
-        Run("C");
+        var runC = Run("C");
         var copyEventsB = Path.Combine(tmpRoot, "eventsB.csv");
         var copyTradesB = Path.Combine(tmpRoot, "tradesB.csv");
-        File.Copy(eventsPath, copyEventsB, true);
-        File.Copy(tradesPath, copyTradesB, true);
+        File.Copy(runC.EventsPath, copyEventsB, true);
+        File.Copy(runC.TradesPath, copyTradesB, true);
 
         string Hash(string p)
         {
@@ -117,6 +139,8 @@ public class M0DeterminismTests
         Assert.Matches(@"^\d+\.\d{5}$", parts[5]);
         Assert.Matches(@"^-?\d+\.\d{2}$", parts[7]);
     }
+    private sealed record SimRunResult(string EventsPath, string TradesPath, string? RunId);
+
     private static string FindSolutionRoot()
     {
         var dir = Directory.GetCurrentDirectory();
