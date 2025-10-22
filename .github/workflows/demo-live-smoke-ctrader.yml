@@ -1,10 +1,10 @@
-name: demo-live-smoke-ctrader
+﻿name: demo-live-smoke-ctrader
 
 on:
   workflow_dispatch:
     inputs:
       adapter:
-        description: 'Adapter mode (stub | ctrader-demo)'
+        description: 'Adapter mode (stub | ctrader-demo | oanda-demo)'
         required: false
         default: 'stub'
       useHostedFallback:
@@ -55,10 +55,13 @@ jobs:
       DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || inputs.dryRun }}
       CT_APP_ID: ${{ secrets.CT_APP_ID }}
       CT_APP_SECRET: ${{ secrets.CT_APP_SECRET }}
+      OANDA_ENV: ${{ secrets.OANDA_ENV }}
       CT_DEMO_OAUTH_TOKEN: ${{ secrets.CT_DEMO_OAUTH_TOKEN }}
       CT_DEMO_REFRESH_TOKEN: ${{ secrets.CT_DEMO_REFRESH_TOKEN }}
       CT_DEMO_ACCOUNT_ID: ${{ secrets.CT_DEMO_ACCOUNT_ID }}
       CT_DEMO_BROKER: ${{ secrets.CT_DEMO_BROKER }}
+      OANDA_PRACTICE_ACCOUNT_ID: ${{ secrets.OANDA_PRACTICE_ACCOUNT_ID }}
+      OANDA_PRACTICE_TOKEN: ${{ secrets.OANDA_PRACTICE_TOKEN }}
       ENABLE_ALERT_PING: ${{ inputs.enableAlertPing || 'false' }}
     steps:
       - name: Install PowerShell 7
@@ -131,8 +134,8 @@ jobs:
           if ($null -eq $adapterRaw) { $adapterRaw = '' }
           $adapter = $adapterRaw.Trim().ToLowerInvariant()
           if ([string]::IsNullOrWhiteSpace($adapter)) { $adapter = 'stub' }
-          if ($adapter -notin @('stub','ctrader-demo')) {
-            throw "Invalid adapter selection '$adapter'. Expected stub or ctrader-demo."
+          if ($adapter -notin @('stub','ctrader-demo','oanda-demo')) {
+            throw "Invalid adapter selection '$adapter'. Expected stub, ctrader-demo, or oanda-demo."
           }
 
           $workspace = $env:GITHUB_WORKSPACE
@@ -140,7 +143,11 @@ jobs:
             throw 'GITHUB_WORKSPACE not set'
           }
 
-          $configFile = if ($adapter -eq 'ctrader-demo') { 'sample-config.demo-ctrader.json' } else { 'sample-config.demo.json' }
+          $configFile = switch ($adapter) {
+            'ctrader-demo' { 'sample-config.demo-ctrader.json' }
+            'oanda-demo' { 'sample-config.demo-oanda.json' }
+            default { 'sample-config.demo.json' }
+          }
           $configPath = Join-Path $workspace $configFile
           if (-not (Test-Path -Path $configPath)) {
             throw "Required config file not found: $configPath"
@@ -148,84 +155,105 @@ jobs:
 
           $configHash = (Get-FileHash -Algorithm SHA256 -Path $configPath).Hash.ToUpperInvariant()
           $runId = if ([string]::IsNullOrWhiteSpace($env:RUN_ID)) {
-            if ($adapter -eq 'ctrader-demo') { 'DEMO-CTRADER-LIVE-SMOKE' } else { 'DEMO-CTRADER-LIVE-SMOKE-STUB' }
+            switch ($adapter) {
+              'ctrader-demo' { 'DEMO-CTRADER-LIVE-SMOKE' }
+              'oanda-demo' { 'DEMO-OANDA-LIVE-SMOKE' }
+              default { 'DEMO-LIVE-SMOKE-STUB' }
+            }
           } else {
             $env:RUN_ID
           }
-          $logPath = if ($adapter -eq 'ctrader-demo') { 'demo-ctrader.log' } else { 'demo-stub.log' }
+          $logPath = switch ($adapter) {
+            'ctrader-demo' { 'demo-ctrader.log' }
+            'oanda-demo' { 'demo-oanda.log' }
+            default { 'demo-stub.log' }
+          }
           $artifactName = "vps-demo-artifacts-adapter-$adapter"
-          $brokerEnabled = if ($adapter -eq 'ctrader-demo') { 'true' } else { 'false' }
-          $connectivityPattern = 'Adapter = CTrader OpenAPI \(demo\)|Connected to cTrader endpoint|OrderSend'
-          $connectivityRequired = if ($adapter -eq 'ctrader-demo') { 'true' } else { 'false' }
-          $adapterBanner = if ($adapter -eq 'ctrader-demo') { 'Adapter = CTrader OpenAPI (demo)' } else { "Adapter = $adapter" }
+          $brokerEnabled = if ($adapter -eq 'stub') { 'false' } else { 'true' }
+          $connectivityPattern = switch ($adapter) {
+            'ctrader-demo' { 'Adapter = CTrader OpenAPI \(demo\)|Connected to cTrader endpoint|OrderSend' }
+            'oanda-demo' { 'Connected to OANDA' }
+            default { '' }
+          }
+          $connectivityRequired = if ($adapter -eq 'stub') { 'false' } else { 'true' }
+          $adapterBanner = switch ($adapter) {
+            'ctrader-demo' { 'Adapter = CTrader OpenAPI (demo)' }
+            'oanda-demo' { 'Adapter = OANDA (practice)' }
+            default { "Adapter = $adapter" }
+          }
           $rollbackHint = 'Rollback: re-dispatch with adapter=stub'
 
-          if ($env:CT_APP_ID) {
-            Add-Row 'App ID' '✅' 'present'
-          } else {
-            Add-Row 'App ID' '❌' 'missing'
-            throw 'Preflight failed: CT_APP_ID missing'
-          }
+          switch ($adapter) {
+            'ctrader-demo' {
+              if ($env:CT_APP_ID) { Add-Row 'App ID' '✅' 'present' } else { Add-Row 'App ID' '❌' 'missing'; throw 'Preflight failed: CT_APP_ID missing' }
 
-          if ($env:CT_APP_SECRET) {
-            Add-Row 'Client secret' '✅' 'present'
-          } else {
-            Add-Row 'Client secret' '❌' 'missing'
-            throw 'Preflight failed: CT_APP_SECRET missing'
-          }
+              if ($env:CT_APP_SECRET) { Add-Row 'Client secret' '✅' 'present' } else { Add-Row 'Client secret' '❌' 'missing'; throw 'Preflight failed: CT_APP_SECRET missing' }
 
-          if ($env:CT_DEMO_OAUTH_TOKEN) {
-            Add-Row 'Access token' '✅' 'present'
-            if ($env:CT_DEMO_OAUTH_TOKEN -match '\\.') {
-              $parts = $env:CT_DEMO_OAUTH_TOKEN.Split('.')
-              if ($parts.Length -ge 2) {
-                try {
-                  $payloadSegment = $parts[1].Replace('-', '+').Replace('_', '/').PadRight($parts[1].Length + (4 - ($parts[1].Length % 4)) % 4, '=')
-                  $payloadJson = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($payloadSegment))
-                  $payload = $payloadJson | ConvertFrom-Json
-                  if ($payload.exp) {
-                    $expiry = [DateTimeOffset]::FromUnixTimeSeconds([int64]$payload.exp).UtcDateTime
-                    $remaining = ($expiry - [DateTime]::UtcNow).TotalDays
-                    if ($remaining -le 0) {
-                      throw 'Preflight failed: CT_DEMO_OAUTH_TOKEN appears expired'
+              if ($env:CT_DEMO_OAUTH_TOKEN) {
+                Add-Row 'Access token' '✅' 'present'
+                if ($env:CT_DEMO_OAUTH_TOKEN -match '\.') {
+                  $parts = $env:CT_DEMO_OAUTH_TOKEN.Split('.')
+                  if ($parts.Length -ge 2) {
+                    try {
+                      $payloadSegment = $parts[1].Replace('-', '+').Replace('_', '/').PadRight($parts[1].Length + (4 - ($parts[1].Length % 4)) % 4, '=')
+                      $payloadJson = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($payloadSegment))
+                      $payload = $payloadJson | ConvertFrom-Json
+                      if ($payload.exp) {
+                        $expiry = [DateTimeOffset]::FromUnixTimeSeconds([int64]$payload.exp).UtcDateTime
+                        $remaining = ($expiry - [DateTime]::UtcNow).TotalDays
+                        if ($remaining -le 0) {
+                          throw 'Preflight failed: CT_DEMO_OAUTH_TOKEN appears expired'
+                        }
+                        Add-Row 'Access token expiry (days)' '✅' ([Math]::Floor($remaining).ToString())
+                      }
+                    } catch {
+                      Write-Warning "Unable to parse token expiry: $($_.Exception.Message)"
+                      Add-Row 'Access token expiry (days)' '⚠️' 'Unable to parse expiry'
                     }
-                    Add-Row 'Access token expiry (days)' '✅' ([Math]::Floor($remaining).ToString())
                   }
-                } catch {
-                  Write-Warning "Unable to parse token expiry: $($_.Exception.Message)"
-                  Add-Row 'Access token expiry (days)' '⚠️' 'Unable to parse expiry'
                 }
+              } else {
+                Add-Row 'Access token' '❌' 'missing'
+                throw 'Preflight failed: CT_DEMO_OAUTH_TOKEN missing'
+              }
+
+              if ($env:CT_DEMO_REFRESH_TOKEN) { Add-Row 'Refresh token' '✅' 'present' } else { Add-Row 'Refresh token' '❌' 'missing'; throw 'Preflight failed: CT_DEMO_REFRESH_TOKEN missing' }
+
+              if ($env:CT_DEMO_ACCOUNT_ID) {
+                $numeric = $env:CT_DEMO_ACCOUNT_ID -match '^\d+$'
+                if (-not $numeric) {
+                  Add-Row 'Account ID' '❌' 'must be numeric'
+                  throw 'Preflight failed: CT_DEMO_ACCOUNT_ID not numeric'
+                }
+                Add-Row 'Account ID' '✅' 'numeric'
+              } else {
+                Add-Row 'Account ID' '❌' 'missing'
+                throw 'Preflight failed: CT_DEMO_ACCOUNT_ID missing'
+              }
+
+              if ($env:CT_DEMO_BROKER) { Add-Row 'Broker' '✅' 'present' } else { Add-Row 'Broker' '❌' 'missing'; throw 'Preflight failed: CT_DEMO_BROKER missing' }
+            }
+            'oanda-demo' {
+              $missing = @()
+              if ([string]::IsNullOrWhiteSpace($env:OANDA_PRACTICE_ACCOUNT_ID)) { $missing += 'OANDA_PRACTICE_ACCOUNT_ID' }
+              if ([string]::IsNullOrWhiteSpace($env:OANDA_PRACTICE_TOKEN)) { $missing += 'OANDA_PRACTICE_TOKEN' }
+
+              if ($missing.Count -gt 0) {
+                foreach ($item in $missing) { Add-Row $item '❌' 'missing' }
+                throw "Preflight failed: missing OANDA secrets ($($missing -join ', '))"
+              }
+
+              Add-Row 'Practice account' '✅' $env:OANDA_PRACTICE_ACCOUNT_ID
+              $tokenPreview = if ($env:OANDA_PRACTICE_TOKEN.Length -gt 6) { $env:OANDA_PRACTICE_TOKEN.Substring(0,6) + '…' } else { 'present' }
+              Add-Row 'Access token' '✅' $tokenPreview
+              if (-not [string]::IsNullOrWhiteSpace($env:OANDA_ENV)) {
+                Add-Row 'Environment' '✅' $env:OANDA_ENV
               }
             }
-          } else {
-            Add-Row 'Access token' '❌' 'missing'
-            throw 'Preflight failed: CT_DEMO_OAUTH_TOKEN missing'
-          }
-
-          if ($env:CT_DEMO_REFRESH_TOKEN) {
-            Add-Row 'Refresh token' '✅' 'present'
-          } else {
-            Add-Row 'Refresh token' '❌' 'missing'
-            throw 'Preflight failed: CT_DEMO_REFRESH_TOKEN missing'
-          }
-
-          if ($env:CT_DEMO_ACCOUNT_ID) {
-            $numeric = $env:CT_DEMO_ACCOUNT_ID -match '^\d+$'
-            if (-not $numeric) {
-              Add-Row 'Account ID' '❌' 'must be numeric'
-              throw 'Preflight failed: CT_DEMO_ACCOUNT_ID not numeric'
+            default {
+              Add-Row 'Broker mode' 'ℹ️' 'stub configuration'
             }
-            Add-Row 'Account ID' '✅' 'numeric'
-          } else {
-            Add-Row 'Account ID' '❌' 'missing'
-            throw 'Preflight failed: CT_DEMO_ACCOUNT_ID missing'
           }
-
-          if ($env:CT_DEMO_BROKER) {
-            Add-Row 'Broker' '✅' 'present'
-          } else {
-            Add-Row 'Broker' '❌' 'missing'
-            throw 'Preflight failed: CT_DEMO_BROKER missing'
           }
 
           "ADAPTER_MODE=$adapter" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -721,41 +749,60 @@ jobs:
           $marketWindow = if ([string]::IsNullOrWhiteSpace($env:MARKET_WINDOW)) { 'unknown' } else { $env:MARKET_WINDOW }
           $orderEvidenceResult = if ($orderMatch) { 'satisfied' } elseif ($stubOrderDetected) { 'rejected-stub' } else { 'not-found' }
 
-          switch ($expectation) {
-            'forced' {
-              if (-not $orderMatch) {
-                if ($marketWindow -like 'weekday*') {
+          if ($adapterMode -eq 'ctrader-demo') {
+            switch ($expectation) {
+              'forced' {
+                if (-not $orderMatch) {
+                  if ($marketWindow -like 'weekday*') {
+                    $note = 'no trade criteria met (weekday)'
+                  } elseif ($marketWindow -eq 'unknown') {
+                    $note = 'order evidence requested but market window unknown'
+                  } else {
+                    $note = 'no trade criteria met (weekend/closed)'
+                  }
+                  Write-Host 'OrderSend evidence requested but not observed; recording note.'
+                }
+              }
+              'weekday' {
+                if (-not $orderMatch) {
                   $note = 'no trade criteria met (weekday)'
-                } elseif ($marketWindow -eq 'unknown') {
-                  $note = 'order evidence requested but market window unknown'
-                } else {
+                }
+              }
+              default {
+                if (-not $orderMatch) {
                   $note = 'no trade criteria met (weekend/closed)'
                 }
-                Write-Host 'OrderSend evidence requested but not observed; recording note.'
               }
             }
-            'weekday' {
-              if (-not $orderMatch) {
-                $note = 'no trade criteria met (weekday)'
-              }
+
+            Write-Host 'Handshake detected in run log.'
+            if ($orderMatch) {
+              Write-Host 'OrderSend evidence detected in run log.'
+            } else {
+              Write-Host 'OrderSend evidence not detected in run log.'
             }
-            default {
-              if (-not $orderMatch) {
-                $note = 'no trade criteria met (weekend/closed)'
-              }
+          } elseif ($adapterMode -eq 'oanda-demo') {
+            $orderStatus = 'N/A'
+            $orderEvidenceResult = 'not-applicable'
+            if ([string]::IsNullOrWhiteSpace($note)) {
+              $note = 'OANDA handshake confirmed'
             }
+            Write-Host 'Handshake detected in run log (OANDA).'
+            Write-Host 'Order evidence not required for OANDA practice smoke.'
+          } else {
+            $note = 'stub adapter (no external handshake)'
+            Write-Host 'Stub mode: handshake/order evidence not required.'
           }
 
-          Write-Host 'Handshake detected in run log.'
-          if ($orderMatch) {
-            Write-Host 'OrderSend evidence detected in run log.'
-          } else {
-            Write-Host 'OrderSend evidence not detected in run log.'
-          }
           if (-not [string]::IsNullOrWhiteSpace($note)) {
             Write-Host "Connectivity note: $note"
           }
 
+          "CONNECTIVITY_HANDSHAKE=$handshakeStatus" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CONNECTIVITY_ORDER=$orderStatus" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CONNECTIVITY_NOTE=$note" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ORDER_EXPECTATION=$expectation" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ORDER_EVIDENCE_RESULT=$orderEvidenceResult" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "CONNECTIVITY_HANDSHAKE=$handshakeStatus" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "CONNECTIVITY_ORDER=$orderStatus" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "CONNECTIVITY_NOTE=$note" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -1113,4 +1160,8 @@ jobs:
 concurrency:
   group: demo-live-smoke-ctrader
   cancel-in-progress: true
+
+
+
+
 

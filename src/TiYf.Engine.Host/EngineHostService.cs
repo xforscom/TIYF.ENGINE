@@ -13,7 +13,7 @@ public sealed class EngineHostService : BackgroundService
     private readonly IServiceProvider _services;
     private readonly ILogger<EngineHostService> _logger;
     private readonly TimeSpan _heartbeatInterval;
-    private CTraderOpenApiExecutionAdapter? _executionAdapter;
+    private IConnectableExecutionAdapter? _executionAdapter;
 
     public EngineHostService(
         EngineHostState state,
@@ -34,8 +34,9 @@ public sealed class EngineHostService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _executionAdapter = _services.GetService<CTraderOpenApiExecutionAdapter>();
+        _executionAdapter = _services.GetService<IConnectableExecutionAdapter>();
         var cTraderSettings = _services.GetService<CTraderAdapterSettings>();
+        var oandaSettings = _services.GetService<OandaAdapterSettings>();
 
         if (cTraderSettings is not null)
         {
@@ -45,6 +46,14 @@ public sealed class EngineHostService : BackgroundService
                 cTraderSettings.Broker,
                 string.IsNullOrWhiteSpace(cTraderSettings.AccountId) ? "unknown" : cTraderSettings.AccountId,
                 cTraderSettings.Mode);
+        }
+        else if (oandaSettings is not null)
+        {
+            _logger.LogInformation(
+                "host: adapter meta adapter={Adapter} broker=OANDA account={Account} mode={Mode}",
+                _state.Adapter,
+                string.IsNullOrWhiteSpace(oandaSettings.AccountId) ? "unknown" : oandaSettings.AccountId,
+                oandaSettings.Mode);
         }
         else
         {
@@ -61,12 +70,14 @@ public sealed class EngineHostService : BackgroundService
             {
                 await _executionAdapter.ConnectAsync(stoppingToken);
                 _state.MarkConnected(true);
-                _logger.LogInformation("host: connected adapter={Adapter} broker_mode=ctrader", _state.Adapter);
+                var brokerMode = cTraderSettings is not null ? "ctrader" : oandaSettings is not null ? "oanda" : "stub";
+                _logger.LogInformation("host: connected adapter={Adapter} broker_mode={Mode}", _state.Adapter, brokerMode);
             }
             catch (Exception ex)
             {
                 _state.MarkConnected(false);
-                _logger.LogError(ex, "cTrader handshake failed");
+                var adapterLabel = cTraderSettings is not null ? "cTrader" : oandaSettings is not null ? "OANDA" : "adapter";
+                _logger.LogError(ex, "{AdapterLabel} handshake failed", adapterLabel);
             }
         }
         else

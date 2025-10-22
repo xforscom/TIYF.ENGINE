@@ -36,6 +36,8 @@ public class EngineHostServiceTests
 
         var adapter = new CTraderOpenApiExecutionAdapter(new HttpClient(), settings);
         using var provider = new ServiceCollection()
+            .AddSingleton(settings)
+            .AddSingleton<IConnectableExecutionAdapter>(adapter)
             .AddSingleton(adapter)
             .BuildServiceProvider();
 
@@ -69,6 +71,46 @@ public class EngineHostServiceTests
             await Task.Delay(100);
             Assert.True(state.Connected);
             Assert.True(state.LastHeartbeatUtc > initialHeartbeat);
+        }
+        finally
+        {
+            await service.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithOandaAdapter_SetsConnected()
+    {
+        var state = new EngineHostState("oanda-demo", Array.Empty<string>());
+        var settings = new OandaAdapterSettings(
+            Mode: "oanda-demo",
+            BaseUri: new Uri("https://example.com/v3/"),
+            AccountId: "practice-account",
+            AccessToken: "token",
+            UseMock: true,
+            MaxOrderUnits: 100_000,
+            RequestTimeout: TimeSpan.FromSeconds(5),
+            RetryInitialDelay: TimeSpan.FromMilliseconds(5),
+            RetryMaxDelay: TimeSpan.FromMilliseconds(10),
+            RetryMaxAttempts: 3,
+            HandshakeEndpoint: "/accounts/{accountId}/summary",
+            OrderEndpoint: "/accounts/{accountId}/orders");
+
+        var adapter = new OandaRestExecutionAdapter(new HttpClient(), settings);
+        using var provider = new ServiceCollection()
+            .AddSingleton(settings)
+            .AddSingleton<IConnectableExecutionAdapter>(adapter)
+            .AddSingleton(adapter)
+            .BuildServiceProvider();
+
+        var options = Options.Create(new EngineHostOptions { HeartbeatInterval = TimeSpan.FromMilliseconds(10) });
+        var service = new EngineHostService(state, provider, NullLogger<EngineHostService>.Instance, options);
+
+        await service.StartAsync(CancellationToken.None);
+        try
+        {
+            await Task.Delay(100);
+            Assert.True(state.Connected);
         }
         finally
         {

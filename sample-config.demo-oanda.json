@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "1.3.0",
+  "run": {
+    "runId": "RUN-DEMO-OANDA"
+  },
+  "adapter": {
+    "type": "oanda-demo",
+    "settings": {
+      "baseUrl": "https://api-fxpractice.oanda.com/v3/",
+      "accessToken": "env:OANDA_PRACTICE_TOKEN",
+      "accountId": "env:OANDA_PRACTICE_ACCOUNT_ID",
+      "maxOrderUnits": 100000,
+      "requestTimeoutSeconds": 10,
+      "retryInitialDelaySeconds": 0.2,
+      "retryMaxDelaySeconds": 2,
+      "retryMaxAttempts": 5,
+      "handshakeEndpoint": "/accounts/{accountId}/summary",
+      "orderEndpoint": "/accounts/{accountId}/orders",
+      "useMock": false
+    }
+  },
+  "InstrumentFile": "sample-instruments.csv",
+  "InputTicksFile": "sample-ticks.csv",
+  "BrokerId": "oanda-practice",
+  "AccountId": "env:OANDA_PRACTICE_ACCOUNT_ID",
+  "universe": [
+    "EURUSD",
+    "GBPUSD",
+    "USDJPY",
+    "USDCHF",
+    "USDCAD",
+    "AUDUSD",
+    "NZDUSD",
+    "XAUUSD"
+  ],
+  "risk": {
+    "perTradeRiskPct": 0.05,
+    "realLeverageCap": 2.0
+  },
+  "featureFlags": {
+    "risk": "active"
+  }
+}

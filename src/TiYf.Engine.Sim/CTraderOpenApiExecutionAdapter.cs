@@ -5,7 +5,7 @@ using System.Text.Json;
 
 namespace TiYf.Engine.Sim;
 
-public sealed class CTraderOpenApiExecutionAdapter : IExecutionAdapter, IAsyncDisposable
+public sealed class CTraderOpenApiExecutionAdapter : IConnectableExecutionAdapter, IAsyncDisposable
 {
     private readonly HttpClient _httpClient;
     private readonly CTraderAdapterSettings _settings;

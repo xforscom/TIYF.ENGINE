@@ -280,6 +280,7 @@ else
 }
 var journalRoot = isM0 && !string.IsNullOrWhiteSpace(m0JournalDir) ? m0JournalDir : (cfg.JournalRoot ?? (isM0 ? "journals/M0" : "journals"));
 CTraderAdapterSettings? ctraderSettings = null;
+OandaAdapterSettings? oandaSettings = null;
 var sourceAdapter = string.IsNullOrWhiteSpace(cfg.AdapterId) ? "stub" : cfg.AdapterId.Trim().ToLowerInvariant();
 if (raw.RootElement.TryGetProperty("adapter", out var adapterNode) && adapterNode.ValueKind == JsonValueKind.Object)
 {
@@ -293,19 +294,43 @@ if (raw.RootElement.TryGetProperty("adapter", out var adapterNode) && adapterNod
         {
             ctraderSettings = CTraderAdapterSettings.FromJson(adapterNode, sourceAdapter);
         }
+        else if (sourceAdapter.StartsWith("oanda", StringComparison.Ordinal))
+        {
+            oandaSettings = OandaAdapterSettings.FromJson(adapterNode, sourceAdapter);
+        }
     }
 }
-var brokerId = ctraderSettings?.Broker ?? (string.IsNullOrWhiteSpace(cfg.BrokerId) ? "stub-sim" : cfg.BrokerId.Trim());
-var accountId = ctraderSettings?.AccountId ?? (string.IsNullOrWhiteSpace(cfg.AccountId) ? "account-stub" : cfg.AccountId.Trim());
+string brokerId;
+string accountId;
 if (sourceAdapter.StartsWith("ctrader", StringComparison.Ordinal))
 {
     if (ctraderSettings is null)
         throw new InvalidOperationException("cTrader adapter selected but no settings block provided.");
+    brokerId = string.IsNullOrWhiteSpace(cfg.BrokerId) ? ctraderSettings.Broker : cfg.BrokerId.Trim();
+    accountId = string.IsNullOrWhiteSpace(cfg.AccountId) ? ctraderSettings.AccountId : cfg.AccountId.Trim();
     if (brokerId.Contains("stub", StringComparison.OrdinalIgnoreCase))
         throw new InvalidOperationException("cTrader adapter cannot run with stub broker configuration.");
     if (string.IsNullOrWhiteSpace(accountId) || accountId.Equals("account-stub", StringComparison.OrdinalIgnoreCase))
         throw new InvalidOperationException("cTrader adapter requires a valid accountId.");
     Console.WriteLine($"BROKER_MODE={sourceAdapter} (stub=OFF) accountId={accountId}");
+}
+else if (sourceAdapter.StartsWith("oanda", StringComparison.Ordinal))
+{
+    if (oandaSettings is null)
+        throw new InvalidOperationException("OANDA adapter selected but no settings block provided.");
+    brokerId = string.IsNullOrWhiteSpace(cfg.BrokerId)
+        ? (string.Equals(oandaSettings.Mode, "oanda-live", StringComparison.OrdinalIgnoreCase) ? "oanda-live" : "oanda-practice")
+        : cfg.BrokerId.Trim();
+    var accountOverride = string.IsNullOrWhiteSpace(cfg.AccountId) ? null : cfg.AccountId.Trim();
+    accountId = !string.IsNullOrWhiteSpace(accountOverride) ? accountOverride! : oandaSettings.AccountId;
+    if (string.IsNullOrWhiteSpace(accountId))
+        throw new InvalidOperationException("OANDA adapter requires a valid accountId.");
+    Console.WriteLine($"BROKER_MODE={sourceAdapter} (stub=OFF) accountId={accountId}");
+}
+else
+{
+    brokerId = string.IsNullOrWhiteSpace(cfg.BrokerId) ? "stub-sim" : cfg.BrokerId.Trim();
+    accountId = string.IsNullOrWhiteSpace(cfg.AccountId) ? "account-stub" : cfg.AccountId.Trim();
 }
 // For M0 determinism & parallel test safety, serialize access to the single run folder via a named mutex
 System.Threading.Mutex? m0Mutex = null; bool m0Locked = false;
@@ -548,7 +573,7 @@ TickBook? bookRef = null;
 if (raw.RootElement.TryGetProperty("name", out var nmEl) && nmEl.ValueKind == JsonValueKind.String && (nmEl.GetString() == "backtest-m0" || (nmEl.GetString()?.StartsWith("backtest-m0", StringComparison.Ordinal) ?? false)))
 {
     // Build multi-instrument tick book from fixture files if present
-    if (!sourceAdapter.StartsWith("ctrader", StringComparison.Ordinal))
+if (!sourceAdapter.StartsWith("ctrader", StringComparison.Ordinal) && !sourceAdapter.StartsWith("oanda", StringComparison.Ordinal))
     {
         try
         {
@@ -608,6 +633,30 @@ if (sourceAdapter.StartsWith("ctrader", StringComparison.Ordinal))
         throw;
     }
     execution = ctraderAdapter;
+}
+else if (sourceAdapter.StartsWith("oanda", StringComparison.Ordinal))
+{
+    if (oandaSettings is null) throw new InvalidOperationException("OANDA settings were not initialized.");
+    var httpClient = new HttpClient();
+    if (oandaSettings.BaseUri.IsAbsoluteUri)
+    {
+        httpClient.BaseAddress = oandaSettings.BaseUri;
+    }
+    var oandaAdapter = new OandaRestExecutionAdapter(httpClient, oandaSettings, line =>
+    {
+        Console.WriteLine(line);
+        return Task.CompletedTask;
+    });
+    try
+    {
+        await oandaAdapter.ConnectAsync(CancellationToken.None);
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"OANDA handshake failed: {ex.Message}");
+        throw;
+    }
+    execution = oandaAdapter;
 }
 
 // Extract risk config + equity from raw JSON (tolerant: defaults if missing)

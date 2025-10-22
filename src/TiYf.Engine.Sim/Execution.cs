@@ -30,6 +30,11 @@ public interface IExecutionAdapter
     Task<ExecutionResult> ExecuteMarketAsync(OrderRequest order, CancellationToken ct = default);
 }
 
+public interface IConnectableExecutionAdapter : IExecutionAdapter
+{
+    Task ConnectAsync(CancellationToken ct = default);
+}
+
 // Tick book for exact minute lookup (symbol + minute-aligned timestamp -> bid/ask)
 public sealed class TickBook
 {

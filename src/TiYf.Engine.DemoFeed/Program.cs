@@ -61,6 +61,8 @@ internal static class DemoFeedRunner
         var adapterRaw = string.IsNullOrWhiteSpace(options.AdapterId) ? "stub" : options.AdapterId.Trim();
         var sourceAdapter = adapterRaw.ToLowerInvariant();
         var isCTraderAdapter = string.Equals(sourceAdapter, "ctrader-demo", StringComparison.Ordinal) || string.Equals(sourceAdapter, "ctrader-live", StringComparison.Ordinal);
+        var isOandaAdapter = sourceAdapter.StartsWith("oanda", StringComparison.Ordinal);
+        var isExternalBrokerAdapter = isCTraderAdapter || isOandaAdapter;
         var runDirectory = Path.GetFullPath(Path.Combine(journalRoot, sourceAdapter, options.RunId));
         if (Directory.Exists(runDirectory))
         {
@@ -71,9 +73,9 @@ internal static class DemoFeedRunner
         if (File.Exists(eventsPath)) File.Delete(eventsPath);
 
         var brokerAccountId = string.IsNullOrWhiteSpace(options.BrokerAccountId)
-            ? (isCTraderAdapter ? "ctrader-demo" : "stub-sim")
+            ? (isExternalBrokerAdapter ? sourceAdapter : "stub-sim")
             : options.BrokerAccountId.Trim();
-        var journalBrokerId = isCTraderAdapter ? "spotware" : "demo-stub";
+        var journalBrokerId = isCTraderAdapter ? "spotware" : (isOandaAdapter ? "oanda" : "demo-stub");
         var journalAccountId = string.IsNullOrWhiteSpace(brokerAccountId) ? "unknown" : brokerAccountId;
 
         using var stream = new FileStream(eventsPath, FileMode.Create, FileAccess.Write, FileShare.None);
@@ -91,20 +93,20 @@ internal static class DemoFeedRunner
         var firstTs = startUtc;
         var lastTs = startUtc;
         var barsBySymbol = new Dictionary<string, List<DemoBarSnapshot>>(StringComparer.Ordinal);
-        var stubStatus = isCTraderAdapter ? "OFF" : (options.Broker.Enabled ? "ON" : "OFF");
+        var stubStatus = isExternalBrokerAdapter ? "OFF" : (options.Broker.Enabled ? "ON" : "OFF");
         Console.WriteLine("BROKER_MODE={0} (stub={1}) accountId={2}", adapterRaw, stubStatus, journalAccountId);
         Console.WriteLine("SOURCE_ADAPTER={0}", sourceAdapter);
         Console.WriteLine("BROKER_ID={0}", journalBrokerId);
         Console.WriteLine("ACCOUNT_ID={0}", journalAccountId);
 
-        if (isCTraderAdapter && !options.Broker.Enabled)
+        if (isExternalBrokerAdapter && !options.Broker.Enabled)
         {
-            throw new DemoFeedException("ctrader-demo adapter requires broker-enabled=true");
+            throw new DemoFeedException($"{sourceAdapter} adapter requires broker-enabled=true");
         }
 
-        if (isCTraderAdapter && options.Broker.Seed.HasValue)
+        if (isExternalBrokerAdapter && options.Broker.Seed.HasValue)
         {
-            throw new DemoFeedException("ctrader-demo adapter cannot run with broker-seed configured (stub disabled)");
+            throw new DemoFeedException($"{sourceAdapter} adapter cannot run with broker-seed configured (stub disabled)");
         }
 
         foreach (var symbol in options.Symbols)
@@ -139,7 +141,7 @@ internal static class DemoFeedRunner
         var tradesPath = Path.Combine(runDirectory, "trades.csv");
         if (File.Exists(tradesPath)) File.Delete(tradesPath);
 
-        DemoBrokerResult brokerResult = isCTraderAdapter
+        DemoBrokerResult brokerResult = isExternalBrokerAdapter
             ? new DemoBrokerResult(Array.Empty<DemoTradeRecord>(), false)
             : DemoBrokerStub.GenerateTrades(options, barsBySymbol);
 
@@ -326,7 +328,7 @@ internal sealed class DemoFeedOptions
 
         string adapterRaw = GetOrDefault(map, "adapter-id", "stub");
         string adapterId = string.IsNullOrWhiteSpace(adapterRaw) ? "stub" : adapterRaw.Trim().ToLowerInvariant();
-        if (adapterId != "stub" && adapterId != "ctrader-demo")
+        if (adapterId != "stub" && adapterId != "ctrader-demo" && adapterId != "oanda-demo")
         {
             throw new DemoFeedException($"Unsupported adapter '{adapterRaw}'.");
         }
@@ -353,7 +355,7 @@ internal sealed class DemoFeedOptions
 
         bool startUtcProvided = map.ContainsKey("start-utc");
         string defaultStartUtc = "2025-01-01T00:00:00Z";
-        if (adapterId == "ctrader-demo" && !startUtcProvided)
+        if ((adapterId == "ctrader-demo" || adapterId == "oanda-demo") && !startUtcProvided)
         {
             var now = DateTime.UtcNow;
             var alignedNow = new DateTime(now.Year, now.Month, now.Day, now.Hour, now.Minute, 0, DateTimeKind.Utc);
