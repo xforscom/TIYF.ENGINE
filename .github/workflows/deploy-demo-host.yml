@@ -26,7 +26,8 @@ permissions:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    if: ${{ github.ref == 'refs/heads/main' || inputs.dryRun == true }}
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
     timeout-minutes: 30
     defaults:
       run:
@@ -45,13 +46,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
 
+      - name: Validate required secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          missing=()
+          if [ -z "${DEPLOY_HOST}" ]; then missing+=("DEPLOY_HOST"); fi
+          if [ -z "${DEPLOY_USER}" ]; then missing+=("DEPLOY_USER"); fi
+          if [ -z "${DEPLOY_SSH_KEY}" ]; then missing+=("DEPLOY_SSH_KEY"); fi
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "Missing required secrets: ${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Ensure deployment tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y >/dev/null
+          sudo apt-get install -y rsync jq shellcheck >/dev/null
+
       - name: Shellcheck deploy scripts
         run: |
           set -euo pipefail
-          if ! command -v shellcheck >/dev/null 2>&1; then
-            sudo apt-get update -y >/dev/null
-            sudo apt-get install -y shellcheck >/dev/null
-          fi
           shellcheck deploy/scripts/remote-deploy.sh
 
       - name: Setup .NET
@@ -74,19 +93,39 @@ jobs:
           cp sample-config.demo-ctrader.json publish/
           cp sample-config.demo-oanda.json publish/
 
-      - name: Verify systemd unit
-        run: |
-          set -euo pipefail
-          if ! command -v systemd-analyze >/dev/null 2>&1; then
-            sudo apt-get update -y >/dev/null
-            sudo apt-get install -y systemd >/dev/null
-          fi
-          systemd-analyze verify publish/systemd/tiyf-engine-demo.service
-
       - name: Configure SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Verify remote directory access
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          RELEASE_ROOT: ${{ env.RELEASE_ROOT }}
+          CURRENT_LINK: ${{ env.CURRENT_LINK }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_HOST}" ] || [ -z "${DEPLOY_USER}" ]; then
+            echo "Deployment host credentials are not configured."
+            exit 1
+          fi
+          ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "
+            set -euo pipefail
+            if [ ! -d '${RELEASE_ROOT}' ]; then
+              echo 'Missing release root ${RELEASE_ROOT}' >&2
+              exit 1
+            fi
+            if [ ! -w '${RELEASE_ROOT}' ]; then
+              echo 'Release root ${RELEASE_ROOT} is not writable by ${USER}' >&2
+              exit 1
+            fi
+            if [ ! -d '${CURRENT_LINK%/*}' ]; then
+              echo 'Parent of current link ${CURRENT_LINK%/*} missing' >&2
+              exit 1
+            fi
+            exit 0
+          "
 
       - name: Push release to server
         env:
@@ -94,6 +133,10 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           set -euo pipefail
+          LOG_DIR="deploy-artifacts"
+          mkdir -p "$LOG_DIR"
+          STEP_LOG="$LOG_DIR/push-release.log"
+          exec > >(tee -a "$STEP_LOG") 2>&1
 
           if [ -z "${DEPLOY_HOST}" ] || [ -z "${DEPLOY_USER}" ]; then
             echo "Deployment host credentials are not configured."
@@ -117,6 +160,7 @@ jobs:
 
           rsync -az --delete ${RSYNC_FLAGS:-} publish/ "${DEPLOY_USER}@${DEPLOY_HOST}:${REMOTE_PATH}/"
           echo "RELEASE_ID=${RELEASE_ID}" >> "${GITHUB_ENV}"
+          echo "REMOTE_PATH=${REMOTE_PATH}" >> "${GITHUB_ENV}"
 
       - name: Update remote engine environment
         env:
@@ -189,12 +233,32 @@ PY
           ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "sudo install -m 640 -o root -g root /tmp/engine.env /etc/tiyf/engine.env && sudo rm -f /tmp/engine.env"
           rm -f engine.env
 
+      - name: Verify systemd unit on host
+        if: ${{ inputs.dryRun != true }}
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          REMOTE_PATH: ${{ env.REMOTE_PATH }}
+          SERVICE_NAME: ${{ env.SERVICE_NAME }}
+        run: |
+          set -euo pipefail
+          if [ -z "${REMOTE_PATH}" ]; then
+            echo "REMOTE_PATH unavailable; ensure push step ran successfully." >&2
+            exit 1
+          fi
+          ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "systemd-analyze verify '${REMOTE_PATH}/systemd/${SERVICE_NAME}'"
+
       - name: Apply release (symlink, systemd, health)
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           set -euo pipefail
+          LOG_DIR="deploy-artifacts"
+          mkdir -p "$LOG_DIR"
+          APPLY_LOG="$LOG_DIR/apply-release.log"
+          set -o pipefail
 
           if [ -z "${DEPLOY_HOST}" ] || [ -z "${DEPLOY_USER}" ]; then
             echo "Deployment host credentials are not configured."
@@ -209,5 +273,25 @@ PY
           DRY_RUN="${DRY_RUN:-true}"
           ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
             "DRY_RUN='${DRY_RUN}' RELEASE_ID='${RELEASE_ID}' RELEASE_ROOT='${RELEASE_ROOT}' CURRENT_LINK='${CURRENT_LINK}' SERVICE_NAME='${SERVICE_NAME}' HEALTH_ENDPOINT='${HEALTH_ENDPOINT}' bash -s" \
-            < deploy/scripts/remote-deploy.sh
+            < deploy/scripts/remote-deploy.sh | tee "${APPLY_LOG}"
+
+          HEALTH_FILE="${LOG_DIR}/health.json"
+          if [ "${DRY_RUN}" = "true" ]; then
+            echo "{ \"dry_run\": true }" > "${HEALTH_FILE}"
+          else
+            health_line=$(grep -F 'Health check response:' "${APPLY_LOG}" | tail -n1 || true)
+            if [ -n "${health_line}" ]; then
+              echo "${health_line#Health check response: }" > "${HEALTH_FILE}"
+            else
+              echo "{ \"error\": \"Health check output not captured\" }" > "${HEALTH_FILE}"
+            fi
+          fi
+
+      - name: Upload deploy artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: deploy-host-artifacts
+          path: deploy-artifacts/**
+          if-no-files-found: ignore
 
