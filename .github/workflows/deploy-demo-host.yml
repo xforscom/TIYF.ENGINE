@@ -19,6 +19,11 @@ on:
         required: false
         default: true
         type: boolean
+      allowNonMainDeploy:
+        description: 'Allow full deploy from non-main branches (use with caution)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   id-token: write
@@ -26,7 +31,7 @@ permissions:
 
 jobs:
   deploy:
-    if: ${{ github.ref == 'refs/heads/main' || inputs.dryRun == true }}
+    if: ${{ github.ref == 'refs/heads/main' || inputs.dryRun == true || inputs.allowNonMainDeploy == true }}
     runs-on: [self-hosted, Linux, X64, tiyf-vps]
     timeout-minutes: 30
     defaults:
