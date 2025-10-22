@@ -5,7 +5,8 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/tiyf/current
-ExecStart=/usr/bin/dotnet /opt/tiyf/current/TiYf.Engine.Host.dll --config /opt/tiyf/current/sample-config.demo-ctrader.json
+Environment=ENGINE_CONFIG_PATH=/opt/tiyf/current/sample-config.demo-ctrader.json
+ExecStart=/usr/bin/env bash -lc 'CONFIG="${ENGINE_CONFIG_PATH:-/opt/tiyf/current/sample-config.demo-ctrader.json}"; exec dotnet /opt/tiyf/current/TiYf.Engine.Host.dll --config "${CONFIG}"'
 Restart=always
 RestartSec=3
 Environment=DOTNET_ENVIRONMENT=Production

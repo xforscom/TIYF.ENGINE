@@ -9,6 +9,7 @@
 | Workflow | Trigger | Primary Use | Notes |
 | --- | --- | --- | --- |
 | `demo-live-smoke-ctrader` | `workflow_dispatch` | Manual smoke before demo trading | Accepts `adapter`, `dryRun`, `useHostedFallback`, `alertEnv`, `enableAlertPing`. Updates Demo Session issue, flips commit status, and pings the repo secret resolved from `ALERT_ENV` when the toggle is enabled for prod evidence. |
+| `demo-live-smoke-oanda` | `workflow_dispatch` | Manual smoke against OANDA practice | Minimal harness that builds Release, runs the simulator with `sample-config.demo-oanda.json`, enforces `Connected to OANDA` handshake evidence, and uploads `vps-demo-artifacts-adapter-oanda-demo/`. |
 | `demo-daily-ctrader` | Cron (00:00 UTC) + `workflow_dispatch` | Scheduled end-to-end guardrail | Shares the same inputs; scheduled runs force `dryRun=false`, reuse the alert routing resolver, and require `enableAlertPing=true` only when operators want a prod success-path proof. |
 | `demo-session-manual` | `workflow_dispatch` | Operator-led session with issue transcript | Inputs: `adapter`, optional `run_id`, `broker_enabled` (auto-aligned with adapter). Generates a fresh Demo Session issue entry. |
 
@@ -17,12 +18,14 @@ All jobs target the self-hosted runner labelled `[self-hosted, Linux, X64, tiyf-
 ## Adapter Modes
 - `stub` (default) disables broker integration and uses `sample-config.demo.json`.
 - ctrader-demo enables broker calls, swaps to sample-config.demo-ctrader.json, and requires repository secrets CT_APP_ID, CT_APP_SECRET, CT_DEMO_OAUTH_TOKEN, CT_DEMO_REFRESH_TOKEN, CT_DEMO_ACCOUNT_ID, CT_DEMO_BROKER. Adapter settings support env:NAME placeholders so config files can reference secrets without inlining values (see sample-config.demo-ctrader.json).
+- oanda-demo enables broker calls, swaps to sample-config.demo-oanda.json, and requires repository secrets OANDA_PRACTICE_TOKEN and OANDA_PRACTICE_ACCOUNT_ID. The adapter also honours `env:NAME` placeholders so secrets can be injected at runtime without committing values.
 - Rollback path is always "re-dispatch with `adapter=stub`"; the workflows echo this in their summaries for quick reference.
 
 ## Automatic Safeguards
 - Disk headroom gate: run aborts if less than 20 GiB remain on the runner workspace volume.
 - Config safety rails: risk limits must satisfy `perTradeRiskPct <= 0.05` and `realLeverageCap <= 2.0`; the eight-symbol universe must match `EURUSD, GBPUSD, USDJPY, USDCHF, USDCAD, AUDUSD, NZDUSD, XAUUSD` in both content and order.
 - cTrader preflight: when `adapter=ctrader-demo`, secrets are validated and summarized to `preflight.sanity.txt`; missing, non-numeric, or expired values fail the run before DemoFeed starts.
+- OANDA preflight: when `adapter=oanda-demo`, the workflow asserts that `OANDA_PRACTICE_TOKEN` and `OANDA_PRACTICE_ACCOUNT_ID` are present before wiring the host.
 - Run identity guard: `RUN_ID` must contain `DEMO`; the manual workflow rewrites `broker_enabled` to the safe value for the selected adapter and logs a warning if it overrides the operator input.
 
 ## Execution Outline
@@ -34,8 +37,8 @@ All jobs target the self-hosted runner labelled `[self-hosted, Linux, X64, tiyf-
 
 ## Observability and Artifacts
 
-- Log files begin with banner lines such as `Adapter = â€¦`, `adapter_id=â€¦`, `broker=â€¦`, `account_id=â€¦`, `Universe = â€¦`, and `Config = â€¦`. DemoFeed also emits `BROKER_MODE=<adapter> (stub=ON|OFF) accountId=â€¦` before any execution output. For cTrader runs the workflow searches `demo-ctrader.log` for `Connected to cTrader endpoint` and rejects any `OrderSend` lines whose `brokerOrderId` retains the `STUB-` prefix.
-- Artifacts upload under `vps-demo-artifacts-adapter-<adapter>` and contain `events.csv`, `trades.csv`, strict/parity JSON, the DemoFeed log (`demo-ctrader.log` or `demo-stub.log`), and `preflight.sanity.txt` when generated. Placeholder files are written when a source artifact is absent so consumers see a consistent layout.
+- Log files begin with banner lines such as `Adapter = â€¦`, `adapter_id=â€¦`, `broker=â€¦`, `account_id=â€¦`, `Universe = â€¦`, and `Config = â€¦`. DemoFeed also emits `BROKER_MODE=<adapter> (stub=ON|OFF) accountId=â€¦` before any execution output. For cTrader runs the workflow searches `demo-ctrader.log` for `Connected to cTrader endpoint`, and for OANDA runs it searches `demo-oanda.log` for `Connected to OANDA endpoint`; any `OrderSend` lines whose `brokerOrderId` retains the `STUB-` prefix are rejected.
+- Artifacts upload under `vps-demo-artifacts-adapter-<adapter>` and contain `events.csv`, `trades.csv`, strict/parity JSON, the DemoFeed log (`demo-ctrader.log`, `demo-oanda.log`, or `demo-stub.log`), and `preflight.sanity.txt` when generated. Placeholder files are written when a source artifact is absent so consumers see a consistent layout.
 - Event payloads now include a `src_adapter` JSON field, and the trades journal encodes `src_adapter=<adapter>` in the `data_version` column so provenance survives downstream ingestion.
 - `checks.csv` at the workspace root records UTC timestamp, strict/parity exit codes, `broker_dangling`, SHA hashes, and runner identity. The same data is summarised in the `RESULT_LINE` stored in the step summary.
 
@@ -89,7 +92,7 @@ sudo systemctl start tiyf-engine-demo.service
 - Webhooks live in repository secrets `DEMO_ALERT_WEBHOOK_PROD` and `DEMO_ALERT_WEBHOOK_STAGING`. The selected secret name is logged (masked) before the ping is attempted.
 - Success pings (`204 No Content`) are emitted only when `ALERT_ENV` resolves to `prod` **and** the `enableAlertPing` input is set to `true`; the HTTP status code is recorded in the run summary for downstream evidence. Non-2xx responses bubble up and fail the workflow to prevent silent alert outage when a ping is attempted.
 - The environment-level `DEMO_ALERT_WEBHOOK` secret is no longer referenced. Clean it up (or repoint it) to avoid drift with the repository-scoped configuration.
-- cTrader credentials (`CT_*`) remain bound to the `ctrader-demo` environment so the adapter preflight keeps guarding runs without leaking secret data.
+- Broker credentials remain scoped to their environments: cTrader secrets (`CT_*`) stay bound to `ctrader-demo`, and OANDA practice secrets (`OANDA_PRACTICE_*`) stay bound to `oanda-demo` so preflight gates can validate without leaking values.
 
 ## Failure Handling
 
@@ -99,11 +102,8 @@ sudo systemctl start tiyf-engine-demo.service
 
 ## Operator Checklist
 
-- Choose the adapter: prefer `stub` after risky changes; escalate to `ctrader-demo` only after confirming secrets and desired trading window.
+- Choose the adapter: prefer `stub` after risky changes; escalate to `ctrader-demo` or `oanda-demo` only after confirming secrets and desired trading window.
 - Verify the `tiyf-vps` runner is online and has the required disk space before dispatching.
-- For cTrader runs, review repository secrets ahead of time; the preflight gate will halt the run, but proactive checks reduce noise.
+- For external broker runs, review repository secrets ahead of time; the preflight gate will halt the run, but proactive checks reduce noise.
 - Capture artifact URLs and the posted `RESULT_LINE` when filing incident notes; include `preflight.sanity.txt` for compliance evidence.
-- If a cTrader run misbehaves, immediately re-run with `adapter=stub` to restore nightly coverage while the incident is investigated.
-
-
-
+- If a broker-integrated run misbehaves, immediately re-run with `adapter=stub` to restore nightly coverage while the incident is investigated.

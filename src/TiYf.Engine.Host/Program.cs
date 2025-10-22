@@ -38,7 +38,7 @@ builder.Services.Configure<EngineHostOptions>(options =>
 if (adapterContext.CTraderSettings is not null)
 {
     builder.Services.AddSingleton(adapterContext.CTraderSettings);
-    builder.Services.AddSingleton(sp =>
+    builder.Services.AddSingleton<CTraderOpenApiExecutionAdapter>(sp =>
     {
         var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient();
         var settings = sp.GetRequiredService<CTraderAdapterSettings>();
@@ -56,6 +56,30 @@ if (adapterContext.CTraderSettings is not null)
             return Task.CompletedTask;
         });
     });
+    builder.Services.AddSingleton<IConnectableExecutionAdapter>(sp => sp.GetRequiredService<CTraderOpenApiExecutionAdapter>());
+}
+else if (adapterContext.OandaSettings is not null)
+{
+    builder.Services.AddSingleton(adapterContext.OandaSettings);
+    builder.Services.AddSingleton<OandaRestExecutionAdapter>(sp =>
+    {
+        var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient();
+        var settings = sp.GetRequiredService<OandaAdapterSettings>();
+        if (settings.BaseUri.IsAbsoluteUri)
+        {
+            httpClient.BaseAddress = settings.BaseUri;
+        }
+        httpClient.Timeout = settings.RequestTimeout;
+        var state = sp.GetRequiredService<EngineHostState>();
+        var logger = sp.GetRequiredService<ILogger<OandaRestExecutionAdapter>>();
+        return new OandaRestExecutionAdapter(httpClient, settings, line =>
+        {
+            logger.LogInformation("{Message}", line);
+            state.SetLastLog(line);
+            return Task.CompletedTask;
+        });
+    });
+    builder.Services.AddSingleton<IConnectableExecutionAdapter>(sp => sp.GetRequiredService<OandaRestExecutionAdapter>());
 }
 builder.Services.AddHostedService<EngineHostService>();
 
@@ -100,6 +124,7 @@ static AdapterContext ResolveAdapterContext(EngineConfig config, JsonDocument ra
 {
     string sourceAdapter = string.IsNullOrWhiteSpace(config.AdapterId) ? "stub" : config.AdapterId.Trim().ToLowerInvariant();
     CTraderAdapterSettings? ctraderSettings = null;
+    OandaAdapterSettings? oandaSettings = null;
     if (raw.RootElement.TryGetProperty("adapter", out var adapterNode) && adapterNode.ValueKind == JsonValueKind.Object)
     {
         var typeName = adapterNode.TryGetProperty("type", out var typeEl) && typeEl.ValueKind == JsonValueKind.String
@@ -111,6 +136,10 @@ static AdapterContext ResolveAdapterContext(EngineConfig config, JsonDocument ra
             if (sourceAdapter.StartsWith("ctrader", StringComparison.Ordinal))
             {
                 ctraderSettings = CTraderAdapterSettings.FromJson(adapterNode, sourceAdapter);
+            }
+            else if (sourceAdapter.StartsWith("oanda", StringComparison.Ordinal))
+            {
+                oandaSettings = OandaAdapterSettings.FromJson(adapterNode, sourceAdapter);
             }
         }
     }
@@ -124,10 +153,10 @@ static AdapterContext ResolveAdapterContext(EngineConfig config, JsonDocument ra
         }
     }
 
-    return new AdapterContext(sourceAdapter, ctraderSettings, featureFlags);
+    return new AdapterContext(sourceAdapter, ctraderSettings, oandaSettings, featureFlags);
 }
 
-internal sealed record AdapterContext(string SourceAdapter, CTraderAdapterSettings? CTraderSettings, IReadOnlyList<string> FeatureFlags)
+internal sealed record AdapterContext(string SourceAdapter, CTraderAdapterSettings? CTraderSettings, OandaAdapterSettings? OandaSettings, IReadOnlyList<string> FeatureFlags)
 {
     public EngineHostState State { get; } = new EngineHostState(SourceAdapter, FeatureFlags);
 }

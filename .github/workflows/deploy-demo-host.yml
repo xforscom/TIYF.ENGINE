@@ -10,6 +10,10 @@ on:
       releaseTag:
         description: 'Optional release tag/label'
         required: false
+      adapterMode:
+        description: 'Adapter mode for host (ctrader-demo | oanda-demo)'
+        required: false
+        default: 'ctrader-demo'
       dryRun:
         description: 'Perform deployment steps without changing the remote host'
         required: false
@@ -34,6 +38,8 @@ jobs:
       SERVICE_NAME: tiyf-engine-demo.service
       HEALTH_ENDPOINT: http://127.0.0.1:8080/health
       DRY_RUN: ${{ inputs.dryRun }}
+      ADAPTER_MODE: ${{ github.event.inputs.adapterMode || 'ctrader-demo' }}
+      ENGINE_HOST_HEARTBEAT_SECONDS: ${{ vars.ENGINE_HOST_HEARTBEAT_SECONDS || '30' }}
       RELEASE_TAG_INPUT: ${{ github.event.inputs.releaseTag }}
     steps:
       - name: Checkout
@@ -66,6 +72,7 @@ jobs:
           mkdir -p publish/scripts
           cp deploy/scripts/remote-deploy.sh publish/scripts/
           cp sample-config.demo-ctrader.json publish/
+          cp sample-config.demo-oanda.json publish/
 
       - name: Verify systemd unit
         run: |
@@ -110,6 +117,77 @@ jobs:
 
           rsync -az --delete ${RSYNC_FLAGS:-} publish/ "${DEPLOY_USER}@${DEPLOY_HOST}:${REMOTE_PATH}/"
           echo "RELEASE_ID=${RELEASE_ID}" >> "${GITHUB_ENV}"
+
+      - name: Update remote engine environment
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          CT_APP_ID: ${{ secrets.CT_APP_ID }}
+          CT_APP_SECRET: ${{ secrets.CT_APP_SECRET }}
+          CT_DEMO_OAUTH_TOKEN: ${{ secrets.CT_DEMO_OAUTH_TOKEN }}
+          CT_DEMO_REFRESH_TOKEN: ${{ secrets.CT_DEMO_REFRESH_TOKEN }}
+          CT_DEMO_ACCOUNT_ID: ${{ secrets.CT_DEMO_ACCOUNT_ID }}
+          CT_DEMO_BROKER: ${{ secrets.CT_DEMO_BROKER }}
+          OANDA_ENV: ${{ secrets.OANDA_ENV }}
+          OANDA_PRACTICE_ACCOUNT_ID: ${{ secrets.OANDA_PRACTICE_ACCOUNT_ID }}
+          OANDA_PRACTICE_TOKEN: ${{ secrets.OANDA_PRACTICE_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${DEPLOY_HOST}" ] || [ -z "${DEPLOY_USER}" ]; then
+            echo "Deployment host credentials are not configured."
+            exit 1
+          fi
+
+          if [ "${DRY_RUN:-true}" = "true" ]; then
+            echo "[dry-run] would update /etc/tiyf/engine.env"
+            exit 0
+          fi
+
+          python <<'PY'
+import os
+from pathlib import Path
+
+mode = (os.getenv("ADAPTER_MODE") or "ctrader-demo").strip().lower() or "ctrader-demo"
+config_map = {
+    "ctrader-demo": "/opt/tiyf/current/sample-config.demo-ctrader.json",
+    "ctrader-live": "/opt/tiyf/current/sample-config.demo-ctrader.json",
+    "oanda-demo": "/opt/tiyf/current/sample-config.demo-oanda.json",
+    "oanda-live": "/opt/tiyf/current/sample-config.demo-oanda.json",
+}
+config_path = config_map.get(mode, "/opt/tiyf/current/sample-config.demo-ctrader.json")
+heartbeat = (os.getenv("ENGINE_HOST_HEARTBEAT_SECONDS") or "").strip() or "30"
+
+lines = [
+    f"ENGINE_HOST_HEARTBEAT_SECONDS={heartbeat}",
+    f"ADAPTER_MODE={mode}",
+    f"ENGINE_CONFIG_PATH={config_path}",
+]
+
+def add(key: str) -> None:
+    value = os.getenv(key)
+    if value:
+        lines.append(f"{key}={value}")
+
+for key in (
+    "CT_APP_ID",
+    "CT_APP_SECRET",
+    "CT_DEMO_OAUTH_TOKEN",
+    "CT_DEMO_REFRESH_TOKEN",
+    "CT_DEMO_ACCOUNT_ID",
+    "CT_DEMO_BROKER",
+    "OANDA_ENV",
+    "OANDA_PRACTICE_ACCOUNT_ID",
+    "OANDA_PRACTICE_TOKEN",
+):
+    add(key)
+
+Path("engine.env").write_text("\n".join(lines) + "\n", encoding="utf-8")
+PY
+
+          scp -o StrictHostKeyChecking=no engine.env "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/engine.env"
+          ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "sudo install -m 640 -o root -g root /tmp/engine.env /etc/tiyf/engine.env && sudo rm -f /tmp/engine.env"
+          rm -f engine.env
 
       - name: Apply release (symlink, systemd, health)
         env:

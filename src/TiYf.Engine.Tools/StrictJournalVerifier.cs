@@ -27,7 +27,9 @@ public static class StrictJournalVerifier
     {
         "stub",
         "ctrader-demo",
-        "ctrader-live"
+        "ctrader-live",
+        "oanda-demo",
+        "oanda-live"
     };
 
     private sealed record ParsedEvent(ulong Seq, DateTime Ts, string Type, JsonElement Payload);
