@@ -260,6 +260,7 @@ jobs:
           esac
 
           heartbeat="${ENGINE_HOST_HEARTBEAT_SECONDS:-30}"
+          echo "Resolved ENGINE_CONFIG_PATH='${ENGINE_CONFIG_PATH:-<unset>}'"
           {
             printf "ENGINE_HOST_HEARTBEAT_SECONDS=%s\n" "$heartbeat"
             printf "ADAPTER_MODE=%s\n" "$mode"
