@@ -283,10 +283,8 @@ jobs:
           SERVICE_NAME: ${{ env.SERVICE_NAME }}
         run: |
           set -euo pipefail
-          if [ -z "${REMOTE_PATH}" ]; then
-            echo "REMOTE_PATH unavailable; ensure push step ran successfully." >&2
-            exit 1
-          fi
+          : "${REMOTE_PATH:?REMOTE_PATH unavailable; ensure push step ran successfully.}"
+          : "${SERVICE_NAME:?SERVICE_NAME unavailable; ensure SERVICE_NAME env is set.}"
           LOG_DIR="deploy-artifacts"
           mkdir -p "${LOG_DIR}"
           APPLY_LOG="${LOG_DIR}/apply-release.log"
