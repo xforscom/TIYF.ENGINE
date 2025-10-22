@@ -371,18 +371,18 @@ public sealed class OandaRestExecutionAdapter : IConnectableExecutionAdapter, IA
             {
                 return await operation(linkedCts.Token).ConfigureAwait(false);
             }
-            catch (PermanentOandaException) when (!swallowPermanentFailures || attempt >= _settings.RetryMaxAttempts)
+            catch (TransientOandaException)
             {
-                throw;
+                if (attempt >= _settings.RetryMaxAttempts)
+                {
+                    throw;
+                }
+                await DelayWithJitter(delay, ct).ConfigureAwait(false);
+                delay = NextDelay(delay);
             }
             catch (PermanentOandaException)
             {
-                if (attempt >= _settings.RetryMaxAttempts) throw;
-            }
-            catch (TransientOandaException) when (attempt < _settings.RetryMaxAttempts)
-            {
-                await DelayWithJitter(delay, ct).ConfigureAwait(false);
-                delay = NextDelay(delay);
+                throw;
             }
             catch (HttpRequestException) when (attempt < _settings.RetryMaxAttempts)
             {
