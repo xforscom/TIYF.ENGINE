@@ -282,6 +282,8 @@ jobs:
           fi
           scp -o StrictHostKeyChecking=no engine.env "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/engine.env"
           ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "sudo install -m 640 -o root -g root /tmp/engine.env /etc/tiyf/engine.env && sudo rm -f /tmp/engine.env"
+          echo "Remote engine env ENGINE_CONFIG_PATH:"
+          ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "sudo grep '^ENGINE_CONFIG_PATH' /etc/tiyf/engine.env || echo 'not set'"
           rm -f engine.env
 
       - name: Verify systemd unit on host
