@@ -573,7 +573,7 @@ TickBook? bookRef = null;
 if (raw.RootElement.TryGetProperty("name", out var nmEl) && nmEl.ValueKind == JsonValueKind.String && (nmEl.GetString() == "backtest-m0" || (nmEl.GetString()?.StartsWith("backtest-m0", StringComparison.Ordinal) ?? false)))
 {
     // Build multi-instrument tick book from fixture files if present
-if (!sourceAdapter.StartsWith("ctrader", StringComparison.Ordinal) && !sourceAdapter.StartsWith("oanda", StringComparison.Ordinal))
+    if (!sourceAdapter.StartsWith("ctrader", StringComparison.Ordinal) && !sourceAdapter.StartsWith("oanda", StringComparison.Ordinal))
     {
         try
         {
