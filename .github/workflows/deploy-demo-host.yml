@@ -69,9 +69,45 @@ jobs:
             sudo apt-get update -y >/dev/null
             sudo apt-get install -y rsync jq shellcheck >/dev/null
           else
+            TOOLS_DIR="$HOME/.local/bin"
+            mkdir -p "$TOOLS_DIR"
+            export PATH="$TOOLS_DIR:$PATH"
+            printf '%s\n' "$TOOLS_DIR" >> "$GITHUB_PATH"
+
+            ensure_tool() {
+              local name="$1"
+              if command -v "$name" >/dev/null 2>&1; then
+                return 0
+              fi
+
+              case "$name" in
+                jq)
+                  curl -fsSL "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64" -o "$TOOLS_DIR/jq"
+                  chmod +x "$TOOLS_DIR/jq"
+                  ;;
+                shellcheck)
+                  local tmp
+                  tmp="$(mktemp -d)"
+                  curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz" -o "$tmp/shellcheck.tar.xz"
+                  tar -xf "$tmp/shellcheck.tar.xz" -C "$tmp"
+                  mv "$tmp"/shellcheck-*/shellcheck "$TOOLS_DIR/shellcheck"
+                  chmod +x "$TOOLS_DIR/shellcheck"
+                  rm -rf "$tmp"
+                  ;;
+                rsync)
+                  return 1
+                  ;;
+                *)
+                  return 1
+                  ;;
+              esac
+
+              command -v "$name" >/dev/null 2>&1
+            }
+
             missing=()
             for tool in rsync jq shellcheck; do
-              if ! command -v "$tool" >/dev/null 2>&1; then
+              if ! ensure_tool "$tool"; then
                 missing+=("$tool")
               fi
             done
