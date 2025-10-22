@@ -260,7 +260,6 @@ jobs:
           esac
 
           heartbeat="${ENGINE_HOST_HEARTBEAT_SECONDS:-30}"
-          echo "Resolved ENGINE_CONFIG_PATH='${ENGINE_CONFIG_PATH:-<unset>}'"
           {
             printf "ENGINE_HOST_HEARTBEAT_SECONDS=%s\n" "$heartbeat"
             printf "ADAPTER_MODE=%s\n" "$mode"
@@ -272,18 +271,8 @@ jobs:
               fi
             done
           } > engine.env
-          echo "Engine env preview (sanitized):"
-          awk -F= '/^(ENGINE_HOST_HEARTBEAT_SECONDS|ADAPTER_MODE|ENGINE_CONFIG_PATH)=/{printf "%s=%s\n",$1,$2}' engine.env || true
-          if grep -q '^ENGINE_CONFIG_PATH=' engine.env; then
-            echo "ENGINE_CONFIG_PATH line:"
-            grep '^ENGINE_CONFIG_PATH=' engine.env
-          else
-            echo "ENGINE_CONFIG_PATH line missing" >&2
-          fi
           scp -o StrictHostKeyChecking=no engine.env "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/engine.env"
-          ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "sudo install -m 640 -o root -g root /tmp/engine.env /etc/tiyf/engine.env && sudo rm -f /tmp/engine.env"
-          echo "Remote engine env ENGINE_CONFIG_PATH:"
-          ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "sudo grep '^ENGINE_CONFIG_PATH' /etc/tiyf/engine.env | sed -n 'l' || echo 'not set'"
+          ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "sudo install -m 600 -o root -g root /tmp/engine.env /etc/tiyf/engine.env && sudo rm -f /tmp/engine.env"
           rm -f engine.env
 
       - name: Verify systemd unit on host
