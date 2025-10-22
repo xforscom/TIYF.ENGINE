@@ -1,4 +1,4 @@
-﻿name: demo-live-smoke-ctrader
+name: demo-live-smoke-ctrader
 
 on:
   workflow_dispatch:
@@ -798,11 +798,6 @@ jobs:
             Write-Host "Connectivity note: $note"
           }
 
-          "CONNECTIVITY_HANDSHAKE=$handshakeStatus" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "CONNECTIVITY_ORDER=$orderStatus" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "CONNECTIVITY_NOTE=$note" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "ORDER_EXPECTATION=$expectation" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "ORDER_EVIDENCE_RESULT=$orderEvidenceResult" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "CONNECTIVITY_HANDSHAKE=$handshakeStatus" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "CONNECTIVITY_ORDER=$orderStatus" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "CONNECTIVITY_NOTE=$note" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
