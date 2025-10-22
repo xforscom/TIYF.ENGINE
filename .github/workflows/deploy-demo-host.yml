@@ -234,25 +234,44 @@ jobs:
             echo "REMOTE_PATH unavailable; ensure push step ran successfully." >&2
             exit 1
           fi
+          LOG_DIR="deploy-artifacts"
+          mkdir -p "${LOG_DIR}"
+          APPLY_LOG="${LOG_DIR}/apply-release.log"
+          exec > >(tee -a "${APPLY_LOG}") 2>&1
+          DRY_RUN="${DRY_RUN:-true}"
           ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
             "systemd-analyze verify '${REMOTE_PATH}/systemd/${SERVICE_NAME}'"
 
-          DRY_RUN="${DRY_RUN:-true}"
           ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
             "DRY_RUN='${DRY_RUN}' RELEASE_ID='${RELEASE_ID}' RELEASE_ROOT='${RELEASE_ROOT}' CURRENT_LINK='${CURRENT_LINK}' SERVICE_NAME='${SERVICE_NAME}' HEALTH_ENDPOINT='${HEALTH_ENDPOINT}' bash -s" \
-            < deploy/scripts/remote-deploy.sh | tee "${APPLY_LOG}"
+            < deploy/scripts/remote-deploy.sh
 
           HEALTH_FILE="${LOG_DIR}/health.json"
           if [ "${DRY_RUN}" = "true" ]; then
-            echo "{ "dry_run": true }" > "${HEALTH_FILE}"
+            printf '{ "dry_run": true }\n' > "${HEALTH_FILE}"
           else
             health_line=$(grep -F 'Health check response:' "${APPLY_LOG}" | tail -n1 || true)
             if [ -n "${health_line}" ]; then
-              echo "${health_line#Health check response: }" > "${HEALTH_FILE}"
+              printf '%s\n' "${health_line#Health check response: }" > "${HEALTH_FILE}"
             else
-              echo "{ "error": "Health check output not captured" }" > "${HEALTH_FILE}"
+              printf '{ "error": "Health check output not captured" }\n' > "${HEALTH_FILE}"
             fi
           fi
+
+      - name: Validate health payload
+        if: ${{ inputs.dryRun != true }}
+        run: |
+          set -euo pipefail
+          HEALTH_FILE="deploy-artifacts/health.json"
+          test -s "${HEALTH_FILE}" || {
+            echo "health.json missing or empty" >&2
+            exit 1
+          }
+          jq -e '.connected == true' "${HEALTH_FILE}" >/dev/null || {
+            echo "Health check failed: connected=false" >&2
+            jq '.' "${HEALTH_FILE}" || true
+            exit 1
+          }
 
       - name: Upload deploy artifacts
         if: always()
