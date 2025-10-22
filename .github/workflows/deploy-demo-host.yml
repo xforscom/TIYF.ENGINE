@@ -31,7 +31,7 @@ permissions:
 
 jobs:
   deploy:
-    if: ${{ github.ref == 'refs/heads/main' || inputs.dryRun == true || inputs.allowNonMainDeploy == true }}
+    if: github.ref == 'refs/heads/main' || inputs.dryRun == true || inputs.allowNonMainDeploy == true
     runs-on: [self-hosted, Linux, X64, tiyf-vps]
     timeout-minutes: 30
     defaults:
@@ -276,11 +276,10 @@ jobs:
           rm -f engine.env
 
       - name: Verify systemd unit on host
-        if: ${{ inputs.dryRun != true }}
+        if: inputs.dryRun != true
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          REMOTE_PATH: ${{ env.REMOTE_PATH }}
           SERVICE_NAME: ${{ env.SERVICE_NAME }}
         run: |
           set -euo pipefail
@@ -313,7 +312,7 @@ jobs:
           fi
 
       - name: Validate health payload
-        if: ${{ inputs.dryRun != true }}
+        if: inputs.dryRun != true
         run: |
           set -euo pipefail
           HEALTH_FILE="deploy-artifacts/health.json"
