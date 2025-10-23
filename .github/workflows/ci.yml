@@ -4,7 +4,13 @@ on:
     branches: [ main, feat/m4-seed ]
   pull_request:
     branches: [ main, feat/m4-seed ]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      exerciseScheduled:
+        description: 'Run scheduled automation workflows via workflow_call'
+        required: false
+        default: 'false'
+        type: boolean
 
 jobs:
   build-test:
@@ -73,3 +79,20 @@ jobs:
             }
           }
           Write-Host 'All required workflows present with expected names.'
+
+  exercise-daily-monitor:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.exerciseScheduled == 'true'
+    needs: guard-required-workflows
+    uses: ./.github/workflows/daily-monitor.yml
+
+  exercise-friday-proof:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.exerciseScheduled == 'true'
+    needs: exercise-daily-monitor
+    uses: ./.github/workflows/friday-proof.yml
+    secrets: inherit
+
+  exercise-weekly-digest:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.exerciseScheduled == 'true'
+    needs: exercise-friday-proof
+    uses: ./.github/workflows/weekly-digest.yml
+    secrets: inherit
