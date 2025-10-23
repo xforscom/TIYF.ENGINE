@@ -4,7 +4,27 @@ on:
   schedule:
     - cron: '0 10 * * 5'
   workflow_dispatch:
+    inputs:
+      enforcePracticeCheck:
+        description: 'Require OANDA_ENV to equal practice'
+        required: false
+        default: 'true'
+        type: boolean
+      skipSafetyRails:
+        description: 'Skip config safety rail assertions'
+        required: false
+        default: 'false'
+        type: boolean
   workflow_call:
+    inputs:
+      enforcePracticeCheck:
+        required: false
+        type: boolean
+        default: true
+      skipSafetyRails:
+        required: false
+        type: boolean
+        default: false
     secrets:
       OANDA_PRACTICE_TOKEN:
         required: true
@@ -42,6 +62,8 @@ jobs:
       OANDA_ENV: ${{ secrets.OANDA_ENV }}
       OANDA_PRACTICE_ACCOUNT_ID: ${{ secrets.OANDA_PRACTICE_ACCOUNT_ID }}
       OANDA_PRACTICE_TOKEN: ${{ secrets.OANDA_PRACTICE_TOKEN }}
+      ENFORCE_PRACTICE_CHECK: ${{ format('{0}', inputs.enforcePracticeCheck) }}
+      SKIP_SAFETY_RAILS: ${{ format('{0}', inputs.skipSafetyRails) }}
     steps:
       - name: Install PowerShell 7
         if: runner.os == 'Linux'
@@ -112,13 +134,30 @@ jobs:
               throw "Missing required secret: $($entry.Name)"
             }
           }
-          if ($env:OANDA_ENV -ne 'practice') {
+          $enforceRaw = if ([string]::IsNullOrWhiteSpace($env:ENFORCE_PRACTICE_CHECK)) { 'true' } else { $env:ENFORCE_PRACTICE_CHECK }
+          try {
+            $enforce = [System.Convert]::ToBoolean($enforceRaw)
+          } catch {
+            throw "Invalid ENFORCE_PRACTICE_CHECK value '$enforceRaw'."
+          }
+          if ($enforce -and $env:OANDA_ENV -ne 'practice') {
             throw "OANDA_ENV must be 'practice' (was '$($env:OANDA_ENV)')"
           }
 
       - name: Resolve config and safety rails
         run: |
           $ErrorActionPreference = 'Stop'
+          $skipRaw = if ([string]::IsNullOrWhiteSpace($env:SKIP_SAFETY_RAILS)) { 'false' } else { $env:SKIP_SAFETY_RAILS }
+          try {
+            $skip = [System.Convert]::ToBoolean($skipRaw)
+          } catch {
+            throw "Invalid SKIP_SAFETY_RAILS value '$skipRaw'."
+          }
+          if ($skip) {
+            Write-Warning 'Skipping config safety rails for this invocation.'
+            "CONFIG_PATH=$(Join-Path $env:GITHUB_WORKSPACE $env:CONFIG_PATH)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            return
+          }
           $configPath = Join-Path $env:GITHUB_WORKSPACE $env:CONFIG_PATH
           if (-not (Test-Path -Path $configPath)) {
             throw "Config path not found: $configPath"

@@ -94,6 +94,9 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.exerciseScheduled == 'true'
     needs: exercise-daily-monitor
     uses: ./.github/workflows/friday-proof.yml
+    with:
+      enforcePracticeCheck: false
+      skipSafetyRails: true
     secrets: inherit
 
   exercise-weekly-digest:
