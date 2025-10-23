@@ -116,14 +116,23 @@ jobs:
           "SIM_DLL=$sim" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "TOOLS_DLL=$tools" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Self-test simulator CLI
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet exec $env:SIM_DLL -- --version
+
       - name: Run simulator (OANDA smoke)
         run: |
           $ErrorActionPreference = 'Stop'
           $logPath = 'scratch/oanda-sim.log'
-          $runArgs = @('--config', $env:CONFIG_PATH, '--run-id', $env:RUN_ID, '--broker-enabled')
-          dotnet exec $env:SIM_DLL @runArgs | Tee-Object -FilePath $logPath
-          $simExit = $LASTEXITCODE
-          if ($simExit -ne 0) { throw "Simulator exited with $simExit" }
+          $extraArgs = @('--broker-enabled')
+
+          ./scripts/pwsh/InvokeSim.ps1 `
+            -SimDll $env:SIM_DLL `
+            -ConfigPath $env:CONFIG_PATH `
+            -RunId $env:RUN_ID `
+            -LogPath $logPath `
+            -ExtraArgs $extraArgs
 
           $eventsLine = Select-String -Path $logPath -Pattern '^JOURNAL_DIR_EVENTS=' | Select-Object -First 1
           $tradesLine = Select-String -Path $logPath -Pattern '^JOURNAL_DIR_TRADES=' | Select-Object -First 1

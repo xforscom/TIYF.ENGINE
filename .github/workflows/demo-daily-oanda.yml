@@ -179,33 +179,31 @@ jobs:
           "SIM_DLL=$sim" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "TOOLS_DLL=$tools" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Self-test simulator CLI
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet exec $env:SIM_DLL -- --version
+
       - name: Run simulator (OANDA daily)
         run: |
           $ErrorActionPreference = 'Stop'
           $logPath = 'scratch/oanda-sim.log'
-          $errPath = 'scratch/oanda-sim.err'
-          $runArgs = @('--config', $env:CONFIG_PATH, '--run-id', $env:RUN_ID, '--quiet')
-          if ($env:DRY_RUN -eq 'true') {
-            $runArgs += '--dry-run'
+          $extraArgs = @('--quiet')
+          $dryRunValue = $false
+          try {
+            $dryRunValue = [System.Convert]::ToBoolean($env:DRY_RUN)
+          } catch {
+            throw "Invalid DRY_RUN value '$($env:DRY_RUN)'"
           }
 
-          $process = Start-Process -FilePath 'dotnet' -ArgumentList @('exec', $env:SIM_DLL) + $runArgs -RedirectStandardOutput $logPath -RedirectStandardError 'scratch/oanda-sim.err' -NoNewWindow -PassThru
-          if (-not $process.WaitForExit(90000)) {
-            $process.Kill()
-            throw "Simulator run timed out"
-          }
-          if ($process.ExitCode -ne 0) {
-            Write-Warning ("Simulator exited with code {0}. Dumping logs..." -f $process.ExitCode)
-            if (Test-Path $logPath) {
-              Write-Host '--- oanda-sim.log (tail) ---'
-              Get-Content $logPath | Select-Object -Last 200
-            }
-            if (Test-Path $errPath) {
-              Write-Host '--- oanda-sim.err (tail) ---'
-              Get-Content $errPath | Select-Object -Last 200
-            }
-            throw "Simulator exited with code $($process.ExitCode)"
-          }
+          ./scripts/pwsh/InvokeSim.ps1 `
+            -SimDll $env:SIM_DLL `
+            -ConfigPath $env:CONFIG_PATH `
+            -RunId $env:RUN_ID `
+            -LogPath $logPath `
+            -ExtraArgs $extraArgs `
+            -DryRun:$dryRunValue
+
           "LOG_PATH=$logPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
           $eventsPath = 'journals/oanda-demo/{0}/events.csv' -f $env:RUN_ID
@@ -293,11 +291,21 @@ jobs:
       - name: Verify journal provenance
         run: |
           $ErrorActionPreference = 'Stop'
-          if (-not (Select-String -Path $env:EVENTS_PATH -Pattern 'src_adapter=oanda-demo' -Quiet)) {
-            throw "events.csv missing src_adapter=oanda-demo"
+          $eventsData = Get-Content $env:EVENTS_PATH | Select-Object -Skip 1 | ConvertFrom-Csv
+          if (-not $eventsData) {
+            throw "events.csv did not contain any rows after metadata"
           }
-          if (-not (Select-String -Path $env:TRADES_PATH -Pattern 'src_adapter=oanda-demo' -Quiet)) {
-            throw "trades.csv missing src_adapter=oanda-demo"
+          $eventAdapters = $eventsData | Select-Object -ExpandProperty src_adapter -Unique
+          if ($eventAdapters -ne 'oanda-demo') {
+            throw "events.csv src_adapter mismatch. Found: $($eventAdapters -join ',')"
+          }
+
+          $tradesData = Get-Content $env:TRADES_PATH | Select-Object -Skip 1 | ConvertFrom-Csv
+          if ($tradesData) {
+            $tradeAdapters = $tradesData | Select-Object -ExpandProperty src_adapter -Unique
+            if ($tradeAdapters -ne 'oanda-demo') {
+              throw "trades.csv src_adapter mismatch. Found: $($tradeAdapters -join ',')"
+            }
           }
 
       - name: Collect artifacts

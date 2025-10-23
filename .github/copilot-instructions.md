@@ -1,4 +1,4 @@
-# Copilot instructions for TIYF.ENGINE
+ï»¿# Copilot instructions for TIYF.ENGINE
 
 ## Architecture and data flow
 - Modular monolith with hexagonal seams: Core (pure) + Sim (engine loop) + Sidecar (journals) + Host (daemon HTTP) + Tools (verifiers).
@@ -31,7 +31,7 @@ Select-String -Path $dotnetLog -Pattern 'OrderSend ok decision='
 ## Host vs Simulator
 - Host daemon (`src/TiYf.Engine.Host/*`) serves `/health` and `/metrics` on 127.0.0.1:8080; simulator binaries do not.
 - `.github/workflows/demo-health-oanda.yml` captures `/health` snapshots with retry/backoff and archives `health.json` as an artifact.
-- Systemd unit reads `/etc/tiyf/engine.env` (root owned, 0600); do not source it in ExecStart—use `EnvironmentFile`.
+- Systemd unit reads `/etc/tiyf/engine.env` (root owned, 0600); do not source it in ExecStartâ€”use `EnvironmentFile`.
 
 ## Build, run, test
 - Build: `dotnet build TiYf.Engine.sln -c Release`
@@ -45,6 +45,8 @@ Select-String -Path $dotnetLog -Pattern 'OrderSend ok decision='
 - Add `timeout-minutes`, `concurrency` (grouped by ref), and `permissions: { contents: read }`
 - Pin actions by major (checkout@v4, setup-dotnet@v4, upload-artifact@v4, etc.)
 - Write derived values to `$GITHUB_ENV`; do not redeclare them later via `env:` blocks.
+- All simulator launches go through `scripts/pwsh/InvokeSim.ps1` (shared by smoke & daily). Pass adapter-specific flags via `-ExtraArgs` (e.g. `--broker-enabled`, `--quiet`) and record `LOG_PATH` after the call.
+- Preflight every workflow with `dotnet exec $env:SIM_DLL -- --version` so CLI binding failures fail fast.
 - Adapter inputs: `adapter = stub|ctrader-demo|oanda-demo`; resolve config inside the workflow with PowerShell.
 
 ### Safety rails (PowerShell JSON checks)
@@ -68,11 +70,11 @@ if (@($cfg.universe | Sort-Object) -ne @($expected | Sort-Object)) { throw 'Univ
 - Weekend/manual runs should succeed with a note such as `no trade criteria met (weekend/closed)`; only require `OrderSend` evidence during market hours or when `requireOrderEvidence=true`.
 
 ## Workflows (examples)
-- `.github/workflows/demo-live-smoke-oanda.yml` – canonical adapter smoke flow
-- `.github/workflows/demo-daily-oanda.yml` – scheduled daily OANDA simulation with parity/alerts
-- `.github/workflows/demo-health-oanda.yml` – dedicated `/health` capture for the daemon
-- `.github/workflows/deploy-demo-host.yml` – deployment + systemd refresh
-- `.github/workflows/verify-deep.yml` / `.github/workflows/nightly-canary.yml` – determinism governance
+- `.github/workflows/demo-live-smoke-oanda.yml` â€“ canonical adapter smoke flow
+- `.github/workflows/demo-daily-oanda.yml` â€“ scheduled daily OANDA simulation with parity/alerts
+- `.github/workflows/demo-health-oanda.yml` â€“ dedicated `/health` capture for the daemon
+- `.github/workflows/deploy-demo-host.yml` â€“ deployment + systemd refresh
+- `.github/workflows/verify-deep.yml` / `.github/workflows/nightly-canary.yml` â€“ determinism governance
 
 ## Pitfalls
 - Do not query `/health` from simulator jobs; only the host serves it.
