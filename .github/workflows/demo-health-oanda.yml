@@ -50,15 +50,10 @@ jobs:
         run: |
           set -euo pipefail
           jq '.' scratch/health.json
-          printf '## /health snapshot
-' >> "$GITHUB_STEP_SUMMARY"
-          printf '
-```json
-' >> "$GITHUB_STEP_SUMMARY"
+          printf '## /health snapshot\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '\n```json\n' >> "$GITHUB_STEP_SUMMARY"
           cat scratch/health.json >> "$GITHUB_STEP_SUMMARY"
-          printf '
-```
-' >> "$GITHUB_STEP_SUMMARY"
+          printf '\n```\n' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifacts
         if: always()
