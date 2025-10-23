@@ -107,3 +107,11 @@ sudo systemctl start tiyf-engine-demo.service
 - For external broker runs, review repository secrets ahead of time; the preflight gate will halt the run, but proactive checks reduce noise.
 - Capture artifact URLs and the posted `RESULT_LINE` when filing incident notes; include `preflight.sanity.txt` for compliance evidence.
 - If a broker-integrated run misbehaves, immediately re-run with `adapter=stub` to restore nightly coverage while the incident is investigated.
+
+## Scheduled automation
+
+| Workflow | Cadence | Purpose | Evidence |
+| --- | --- | --- | --- |
+| `daily-monitor` | Weekdays 02:15 UTC (cron) + manual dispatch | Polls the deployed host `/health` endpoint with five-attempt retry/back-off and fails fast unless `connected` is `true`. | Uploads `daily-monitor-health/health.json` and writes `adapter/connected/last_heartbeat_utc` to the job summary. |
+| `friday-proof` | Fridays 10:00 UTC (cron) + manual dispatch | Runs the OANDA simulator via `InvokeSim.ps1` with `enableAlertPing=true` and `ALERT_ENV=prod` to validate broker handshake plus alert routing. | Enforces handshake evidence, strict/parity gates, `broker_dangling=false`, and asserts `Alert ping HTTP status: 204` in the summary. |
+| `weekly-digest` | Sundays 09:00 UTC (cron) + manual dispatch | Aggregates the last five successful `demo-daily-oanda` runs on `main`, extracts `events_sha`/`trades_sha`, and posts a digest to Discord. | Archives `weekly-digest.txt`, logs the webhook status code, and includes the digest table in the run summary without exposing the webhook URL. |
