@@ -2,7 +2,7 @@ name: demo-daily-oanda
 
 on:
   schedule:
-    - cron: '0 0 * * *'
+    - cron: '10 2 * * 1-5'
   workflow_dispatch:
     inputs:
       dryRun:
@@ -15,14 +15,27 @@ on:
         required: false
         default: false
         type: boolean
+      requireOrderEvidence:
+        description: 'Require OrderSend evidence when trades trigger'
+        required: false
+        default: false
+        type: boolean
+      alertEnv:
+        description: 'Alert routing environment (prod | staging)'
+        required: false
+        default: ''
 
 permissions:
   contents: read
 
+concurrency:
+  group: daily-oanda-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   demo-daily-oanda:
     runs-on: [self-hosted, Linux, X64, tiyf-vps]
-    timeout-minutes: 30
+    timeout-minutes: 20
     defaults:
       run:
         shell: pwsh
@@ -32,6 +45,9 @@ jobs:
       RUN_ID: ${{ format('OANDA-DAILY-{0}', github.run_number) }}
       DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || inputs.dryRun }}
       ENABLE_ALERT_PING: ${{ inputs.enableAlertPing || 'false' }}
+      REQUIRE_ORDER_EVIDENCE: ${{ inputs.requireOrderEvidence || 'false' }}
+      ALERT_ENV_INPUT: ${{ github.event.inputs.alertEnv }}
+      ALERT_ENV_DEFAULT: ${{ vars.ALERT_ENV }}
       OANDA_ENV: ${{ secrets.OANDA_ENV }}
       OANDA_PRACTICE_ACCOUNT_ID: ${{ secrets.OANDA_PRACTICE_ACCOUNT_ID }}
       OANDA_PRACTICE_TOKEN: ${{ secrets.OANDA_PRACTICE_TOKEN }}
@@ -41,7 +57,7 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           POWERSHELL_VERSION="7.4.6"
           INSTALL_ROOT="$HOME/powershell"
 
@@ -86,10 +102,10 @@ jobs:
           fi
 
       - name: Checkout
-        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
+        uses: actions/checkout@v4
 
       - name: Setup .NET 8
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
 
@@ -231,7 +247,7 @@ jobs:
 
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@v4
         with:
           name: oanda-daily-artifacts
           path: |
@@ -240,7 +256,7 @@ jobs:
 
       - name: Upload unit test results (strict/parity)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@v4
         with:
           name: oanda-daily-checks
           path: |
