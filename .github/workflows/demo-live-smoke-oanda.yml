@@ -183,13 +183,6 @@ jobs:
             throw "Expected handshake evidence 'Connected to OANDA' not found in $logFile"
           }
 
-      - name: Capture engine health
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $healthPath = Join-Path 'scratch' 'health.json'
-          Invoke-WebRequest -Uri 'http://127.0.0.1:8080/health' -OutFile $healthPath
-          "HEALTH_PATH=$healthPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
       - name: Collect artifacts
         run: |
           $ErrorActionPreference = 'Stop'
@@ -202,9 +195,6 @@ jobs:
           }
           if (Test-Path 'scratch/parity.json') {
             Copy-Item -Path 'scratch/parity.json' -Destination (Join-Path $artifactDir 'parity.json') -Force
-          }
-          if ($env:HEALTH_PATH -and (Test-Path $env:HEALTH_PATH)) {
-            Copy-Item -Path $env:HEALTH_PATH -Destination (Join-Path $artifactDir 'health.json') -Force
           }
 
       - name: Summarize results
