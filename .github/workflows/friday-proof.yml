@@ -1,0 +1,309 @@
+name: friday-proof
+
+on:
+  schedule:
+    - cron: '0 10 * * 5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: friday-proof-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  oanda-friday-proof:
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      ADAPTER_MODE: oanda-demo
+      CONFIG_PATH: sample-config.demo-oanda.json
+      RUN_ID: ${{ format('OANDA-FRIDAY-{0}', github.run_number) }}
+      DRY_RUN: 'false'
+      ENABLE_ALERT_PING: 'true'
+      ALERT_ENV: 'prod'
+      EXPECTED_UNIVERSE_LINE: EURUSD, GBPUSD, USDJPY, USDCHF, USDCAD, AUDUSD, NZDUSD, XAUUSD
+      OANDA_ENV: ${{ secrets.OANDA_ENV }}
+      OANDA_PRACTICE_ACCOUNT_ID: ${{ secrets.OANDA_PRACTICE_ACCOUNT_ID }}
+      OANDA_PRACTICE_TOKEN: ${{ secrets.OANDA_PRACTICE_TOKEN }}
+    steps:
+      - name: Install PowerShell 7
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          POWERSHELL_VERSION="7.4.6"
+          INSTALL_ROOT="$HOME/powershell"
+
+          if [ -x "$INSTALL_ROOT/pwsh" ]; then
+            echo "$INSTALL_ROOT" >> "$GITHUB_PATH"
+            exit 0
+          fi
+
+          if [ -x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh" ]; then
+            echo "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64" >> "$GITHUB_PATH"
+            exit 0
+          fi
+
+          mkdir -p "$INSTALL_ROOT"
+          curl -fSLo powershell.tar.gz "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz"
+          curl -fSLo checksums.txt "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/SHA256SUMS"
+          EXPECTED_SUM="$(grep "powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz" checksums.txt | awk '{print $1}')"
+          if [ -z "$EXPECTED_SUM" ]; then
+            echo "ERROR: Unable to locate expected checksum for PowerShell archive" >&2
+            exit 1
+          fi
+          ACTUAL_SUM="$(sha256sum powershell.tar.gz | awk '{print $1}')"
+          if [ "$EXPECTED_SUM" != "$ACTUAL_SUM" ]; then
+            echo "ERROR: Checksum verification failed for powershell.tar.gz" >&2
+            echo "Expected: $EXPECTED_SUM" >&2
+            echo "Actual:   $ACTUAL_SUM" >&2
+            exit 1
+          fi
+          tar -xzf powershell.tar.gz -C "$INSTALL_ROOT"
+          rm powershell.tar.gz checksums.txt
+
+          if [ -x "$INSTALL_ROOT/pwsh" ]; then
+            chmod +x "$INSTALL_ROOT/pwsh"
+            echo "$INSTALL_ROOT" >> "$GITHUB_PATH"
+          elif [ -x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh" ]; then
+            chmod +x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh"
+            echo "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64" >> "$GITHUB_PATH"
+          else
+            echo "Failed to locate pwsh after extraction" >&2
+            find "$INSTALL_ROOT" -maxdepth 3 -type f -name 'pwsh' -print || true
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Validate secrets
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $required = @(
+            @{ Name = 'OANDA_PRACTICE_TOKEN'; Value = $env:OANDA_PRACTICE_TOKEN },
+            @{ Name = 'OANDA_PRACTICE_ACCOUNT_ID'; Value = $env:OANDA_PRACTICE_ACCOUNT_ID },
+            @{ Name = 'OANDA_ENV'; Value = $env:OANDA_ENV }
+          )
+          foreach ($entry in $required) {
+            if ([string]::IsNullOrWhiteSpace($entry.Value) -or $entry.Value -eq 'null') {
+              throw "Missing required secret: $($entry.Name)"
+            }
+          }
+          if ($env:OANDA_ENV -ne 'practice') {
+            throw "OANDA_ENV must be 'practice' (was '$($env:OANDA_ENV)')"
+          }
+
+      - name: Resolve config and safety rails
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $configPath = Join-Path $env:GITHUB_WORKSPACE $env:CONFIG_PATH
+          if (-not (Test-Path -Path $configPath)) {
+            throw "Config path not found: $configPath"
+          }
+          $cfg = Get-Content -Raw -Path $configPath | ConvertFrom-Json
+          if ($cfg.perTradeRiskPct -gt 0.05) { throw "perTradeRiskPct too high ($($cfg.perTradeRiskPct))" }
+          if ($cfg.realLeverageCap -gt 2.0) { throw "realLeverageCap too high ($($cfg.realLeverageCap))" }
+          $expected = $env:EXPECTED_UNIVERSE_LINE -split ',\s*'
+          $actual = @($cfg.universe | Sort-Object)
+          if (@($actual) -ne @($expected | Sort-Object)) {
+            throw "Universe drift detected. Actual=$($actual -join ', ')"
+          }
+          "CONFIG_PATH=$configPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Restore and build Release
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet restore TiYf.Engine.sln
+          dotnet build TiYf.Engine.sln -c Release --no-restore --nologo
+
+      - name: Prepare directories
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($path in @('artifacts/oanda-friday', 'scratch')) {
+            if (Test-Path $path) { Remove-Item -Recurse -Force $path }
+          }
+          New-Item -ItemType Directory -Force -Path 'artifacts/oanda-friday' | Out-Null
+          New-Item -ItemType Directory -Force -Path 'scratch' | Out-Null
+
+      - name: Resolve binaries
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sim = Join-Path $PWD 'src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll'
+          $tools = Join-Path $PWD 'src/TiYf.Engine.Tools/bin/Release/net8.0/TiYf.Engine.Tools.dll'
+          if (-not (Test-Path $sim)) { throw "Simulator binary not found at $sim" }
+          if (-not (Test-Path $tools)) { throw "Tools binary not found at $tools" }
+          "SIM_DLL=$sim" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TOOLS_DLL=$tools" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Self-test simulator CLI
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet exec $env:SIM_DLL -- --version
+
+      - name: Run simulator (Friday proof)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $logPath = Join-Path $PWD 'scratch/oanda-friday.log'
+          $args = @(
+            '--config', $env:CONFIG_PATH,
+            '--env', 'demo',
+            '--adapter', $env:ADAPTER_MODE,
+            '--journal-dir', (Join-Path $PWD 'journals')
+          )
+          ./scripts/pwsh/InvokeSim.ps1 `
+            -SimulatorDll $env:SIM_DLL `
+            -Arguments $args `
+            -LogPath $logPath `
+            -OutEventsPathVariable 'EVENTS_PATH' `
+            -OutTradesPathVariable 'TRADES_PATH' `
+            -OutLogPathVariable 'LOG_PATH'
+
+      - name: Verify strict journal
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet exec $env:TOOLS_DLL verify strict --events $env:EVENTS_PATH --trades $env:TRADES_PATH --schema 1.3.0 --json | Tee-Object -FilePath 'scratch/strict.json'
+          $strictExit = $LASTEXITCODE
+          "STRICT_EXIT=$strictExit" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          if ($strictExit -ne 0) { throw "verify strict exited with $strictExit" }
+
+      - name: Verify parity self-check
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet exec $env:TOOLS_DLL verify parity --events-a $env:EVENTS_PATH --events-b $env:EVENTS_PATH --trades-a $env:TRADES_PATH --trades-b $env:TRADES_PATH --json | Tee-Object -FilePath 'scratch/parity.json'
+          $parityExit = $LASTEXITCODE
+          "PARITY_EXIT=$parityExit" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          if ($parityExit -ne 0) { throw "verify parity exited with $parityExit" }
+
+      - name: Check broker dangling
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $trades = Get-Content $env:TRADES_PATH | Select-Object -Skip 1
+          $hasTrades = $false
+          if ($trades) {
+            foreach ($line in $trades) {
+              if (-not [string]::IsNullOrWhiteSpace($line)) { $hasTrades = $true; break }
+            }
+          }
+          $brokerDangling = if ($hasTrades) { 'true' } else { 'false' }
+          "BROKER_DANGLING=$brokerDangling" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          if ($brokerDangling -ne 'false') {
+            throw "broker_dangling expected false but was $brokerDangling"
+          }
+
+      - name: Verify connectivity handshake
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $logFile = if ([string]::IsNullOrWhiteSpace($env:LOG_PATH)) { 'scratch/oanda-friday.log' } else { $env:LOG_PATH }
+          if (-not (Test-Path -Path $logFile)) {
+            throw "Log file not found: $logFile"
+          }
+          $handshake = Select-String -Path $logFile -Pattern 'Connected to OANDA \(practice\)' | Select-Object -First 1
+          if (-not $handshake) {
+            throw "Expected handshake evidence not found in $logFile"
+          }
+          "CONNECTIVITY_HANDSHAKE=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Send alert ping
+        env:
+          WEBHOOK_PROD: ${{ secrets.DEMO_ALERT_WEBHOOK_PROD }}
+          WEBHOOK_STAGING: ${{ secrets.DEMO_ALERT_WEBHOOK_STAGING }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $webhook = $env:WEBHOOK_PROD
+          if ([string]::IsNullOrWhiteSpace($webhook) -or $webhook -eq 'null') {
+            throw "DEMO_ALERT_WEBHOOK_PROD is required for friday-proof runs"
+          }
+          $payload = @{
+            content = "friday-proof success run $env:GITHUB_RUN_ID handshake=1 order=0"
+          } | ConvertTo-Json -Compress
+
+          try {
+            $response = Invoke-WebRequest -Uri $webhook -Method Post -Body $payload -ContentType 'application/json'
+            $status = [int]$response.StatusCode
+            Write-Host "Alert ping HTTP status: $status"
+            "ALERT_HTTP_STATUS=$status" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            if ($status -ne 204) {
+              throw "Expected HTTP 204 from alert webhook but received $status"
+            }
+          } catch {
+            $statusCode = 'unknown'
+            if ($_.Exception.Response -and $null -ne $_.Exception.Response.StatusCode) {
+              $statusCode = [int]$_.Exception.Response.StatusCode
+            }
+            "ALERT_HTTP_STATUS=$statusCode" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            throw
+          }
+
+      - name: Assert alert ping summary
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $status = $env:ALERT_HTTP_STATUS
+          if ($status -ne '204') {
+            throw "Alert ping expected 204 but was $status"
+          }
+          Add-Content -Encoding UTF8 -Path $env:GITHUB_STEP_SUMMARY -Value "Alert ping HTTP status: $status"
+
+      - name: Summarize results
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $strictExit = $env:STRICT_EXIT
+          $parityExit = $env:PARITY_EXIT
+          $brokerDangling = $env:BROKER_DANGLING
+          $eventsPath = $env:EVENTS_PATH
+          $tradesPath = $env:TRADES_PATH
+          $eventsSha = (Get-FileHash -Algorithm SHA256 -Path $eventsPath).Hash
+          $tradesSha = (Get-FileHash -Algorithm SHA256 -Path $tradesPath).Hash
+          $logFile = $env:LOG_PATH
+          $handshake = if ([string]::IsNullOrWhiteSpace($env:CONNECTIVITY_HANDSHAKE)) { 'false' } else { $env:CONNECTIVITY_HANDSHAKE }
+          $alertStatus = $env:ALERT_HTTP_STATUS
+
+          $summary = @(
+            '## Friday alert proof',
+            "- Adapter: $env:ADAPTER_MODE",
+            "- Config: $env:CONFIG_PATH",
+            "- Run ID: $env:RUN_ID",
+            "- STRICT_EXIT=$strictExit",
+            "- PARITY_EXIT=$parityExit",
+            "- broker_dangling=$brokerDangling",
+            "- handshake=$handshake",
+            "- alert_http_status=$alertStatus",
+            "- events_sha=$eventsSha",
+            "- trades_sha=$tradesSha",
+            "- log_path=$logFile"
+          )
+          $summary | Set-Content -Encoding UTF8 -Path (Join-Path 'scratch' 'summary.md')
+          $summary | ForEach-Object { Add-Content -Encoding UTF8 $env:GITHUB_STEP_SUMMARY $_ }
+
+      - name: Collect artifacts
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $artifactDir = Join-Path $PWD 'artifacts/oanda-friday'
+          Copy-Item -Path $env:EVENTS_PATH -Destination (Join-Path $artifactDir 'events.csv') -Force
+          Copy-Item -Path $env:TRADES_PATH -Destination (Join-Path $artifactDir 'trades.csv') -Force
+          Copy-Item -Path $env:LOG_PATH -Destination (Join-Path $artifactDir 'sim.log') -Force
+          if (Test-Path 'scratch/strict.json') {
+            Copy-Item -Path 'scratch/strict.json' -Destination (Join-Path $artifactDir 'strict.json') -Force
+          }
+          if (Test-Path 'scratch/parity.json') {
+            Copy-Item -Path 'scratch/parity.json' -Destination (Join-Path $artifactDir 'parity.json') -Force
+          }
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vps-demo-artifacts-adapter-oanda-demo
+          path: |
+            artifacts/oanda-friday/**
+            scratch/summary.md

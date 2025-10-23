@@ -33,4 +33,43 @@ jobs:
       - name: Verify Sim Release DLL exists
         run: |
           test -f src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll || (echo "Sim Release DLL missing" && ls -R src/TiYf.Engine.Sim/bin/Release || true && exit 1)
-          echo "Sim Release DLL present ✅"
+          echo "Sim Release DLL present OK"
+
+  guard-required-workflows:
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
+    needs: build-test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate required workflow roster
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $required = @(
+            @{ Path = '.github/workflows/demo-live-smoke-oanda.yml'; ExpectedName = 'demo-live-smoke-oanda' },
+            @{ Path = '.github/workflows/demo-daily-oanda.yml'; ExpectedName = 'demo-daily-oanda' },
+            @{ Path = '.github/workflows/demo-health-oanda.yml'; ExpectedName = 'demo-health-oanda' },
+            @{ Path = '.github/workflows/daily-monitor.yml'; ExpectedName = 'daily-monitor' },
+            @{ Path = '.github/workflows/friday-proof.yml'; ExpectedName = 'friday-proof' },
+            @{ Path = '.github/workflows/weekly-digest.yml'; ExpectedName = 'weekly-digest' },
+            @{ Path = '.github/workflows/deploy-demo-host.yml'; ExpectedName = 'deploy-demo-host' }
+          )
+
+          foreach ($item in $required) {
+            $path = $item.Path
+            $expectedName = $item.ExpectedName
+            if (-not (Test-Path -Path $path)) {
+              throw "Workflow file missing: $path"
+            }
+            $content = Get-Content -Path $path
+            $nameLine = $content | Where-Object { $_ -match '^\s*name:' } | Select-Object -First 1
+            if (-not $nameLine) {
+              throw "No name: field found in $path"
+            }
+            $actualName = ($nameLine -split 'name:\s*', 2)[1].Trim()
+            if ($actualName -ne $expectedName) {
+              throw "Workflow $path expected name '$expectedName' but found '$actualName'"
+            }
+          }
+          Write-Host 'All required workflows present with expected names.'
