@@ -291,11 +291,21 @@ jobs:
       - name: Verify journal provenance
         run: |
           $ErrorActionPreference = 'Stop'
-          if (-not (Select-String -Path $env:EVENTS_PATH -Pattern 'src_adapter=oanda-demo' -Quiet)) {
-            throw "events.csv missing src_adapter=oanda-demo"
+          $eventsData = Get-Content $env:EVENTS_PATH | Select-Object -Skip 1 | ConvertFrom-Csv
+          if (-not $eventsData) {
+            throw "events.csv did not contain any rows after metadata"
           }
-          if (-not (Select-String -Path $env:TRADES_PATH -Pattern 'src_adapter=oanda-demo' -Quiet)) {
-            throw "trades.csv missing src_adapter=oanda-demo"
+          $eventAdapters = $eventsData | Select-Object -ExpandProperty src_adapter -Unique
+          if ($eventAdapters -ne 'oanda-demo') {
+            throw "events.csv src_adapter mismatch. Found: $($eventAdapters -join ',')"
+          }
+
+          $tradesData = Get-Content $env:TRADES_PATH | Select-Object -Skip 1 | ConvertFrom-Csv
+          if ($tradesData) {
+            $tradeAdapters = $tradesData | Select-Object -ExpandProperty src_adapter -Unique
+            if ($tradeAdapters -ne 'oanda-demo') {
+              throw "trades.csv src_adapter mismatch. Found: $($tradeAdapters -join ',')"
+            }
           }
 
       - name: Collect artifacts
