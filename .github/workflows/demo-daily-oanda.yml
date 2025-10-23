@@ -183,28 +183,20 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $logPath = 'scratch/oanda-sim.log'
-          $errPath = 'scratch/oanda-sim.err'
           $runArgs = @('--config', $env:CONFIG_PATH, '--run-id', $env:RUN_ID, '--quiet')
           if ($env:DRY_RUN -eq 'true') {
             $runArgs += '--dry-run'
           }
 
-          $process = Start-Process -FilePath 'dotnet' -ArgumentList @('exec', $env:SIM_DLL) + $runArgs -RedirectStandardOutput $logPath -RedirectStandardError 'scratch/oanda-sim.err' -NoNewWindow -PassThru
-          if (-not $process.WaitForExit(90000)) {
-            $process.Kill()
-            throw "Simulator run timed out"
-          }
-          if ($process.ExitCode -ne 0) {
-            Write-Warning ("Simulator exited with code {0}. Dumping logs..." -f $process.ExitCode)
+          dotnet exec $env:SIM_DLL @runArgs 2>&1 | Tee-Object -FilePath $logPath
+          $simExit = $LASTEXITCODE
+          if ($simExit -ne 0) {
+            Write-Warning ("Simulator exited with code {0}. Dumping logs..." -f $simExit)
             if (Test-Path $logPath) {
               Write-Host '--- oanda-sim.log (tail) ---'
               Get-Content $logPath | Select-Object -Last 200
             }
-            if (Test-Path $errPath) {
-              Write-Host '--- oanda-sim.err (tail) ---'
-              Get-Content $errPath | Select-Object -Last 200
-            }
-            throw "Simulator exited with code $($process.ExitCode)"
+            throw "Simulator exited with code $simExit"
           }
           "LOG_PATH=$logPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
