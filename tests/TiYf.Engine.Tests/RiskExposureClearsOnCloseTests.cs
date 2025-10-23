@@ -98,6 +98,12 @@ public class RiskExposureClearsOnCloseTests
         var solutionRoot = FindSolutionRoot();
         var dll = Path.Combine(solutionRoot, "src", "TiYf.Engine.Sim", "bin", "Release", "net8.0", "TiYf.Engine.Sim.dll");
         Assert.True(File.Exists(dll), "Sim DLL missing. Build Release first.");
+
+        // Ensure journal root exists so atomic writers can create files on fresh CI workspaces.
+        var journalRoot = Path.Combine(solutionRoot, "journals", "M0");
+        Directory.CreateDirectory(journalRoot);
+        Directory.CreateDirectory(Path.Combine(journalRoot, "stub"));
+
         var psi = new ProcessStartInfo("dotnet", $"exec \"{dll}\" --config \"{cfg}\" --quiet")
         { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, WorkingDirectory = solutionRoot };
         var p = Process.Start(psi)!; p.WaitForExit(60000);
