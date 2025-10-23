@@ -1,0 +1,70 @@
+name: demo-health-oanda
+
+on:
+  schedule:
+    - cron: '5 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  demo-health-oanda:
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Prepare workspace
+        run: |
+          set -euo pipefail
+          mkdir -p scratch
+
+      - name: Capture health snapshot
+        run: |
+          set -euo pipefail
+          if ! command -v jq >/dev/null 2>&1; then
+            echo 'jq is required for health validation' >&2
+            exit 1
+          fi
+
+          attempts=0
+          until [ $attempts -ge 5 ]; do
+            if curl -fsS http://127.0.0.1:8080/health -o scratch/health.json; then
+              break
+            fi
+            attempts=$((attempts + 1))
+            sleep 2
+          done
+
+          if [ ! -s scratch/health.json ]; then
+            echo 'Failed to capture /health after 5 attempts' >&2
+            exit 1
+          fi
+
+          jq -e '.connected == true' scratch/health.json >/dev/null
+          jq '.' scratch/health.json > scratch/health.pretty.json
+
+      - name: Summarize health
+        run: |
+          set -euo pipefail
+          jq '.' scratch/health.json
+          printf '## /health snapshot
+' >> "$GITHUB_STEP_SUMMARY"
+          printf '
+```json
+' >> "$GITHUB_STEP_SUMMARY"
+          cat scratch/health.json >> "$GITHUB_STEP_SUMMARY"
+          printf '
+```
+' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oanda-health
+          path: |
+            scratch/health.json
+            scratch/health.pretty.json

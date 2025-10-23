@@ -41,7 +41,6 @@ jobs:
         shell: pwsh
     env:
       ADAPTER_MODE: oanda-demo
-      CONFIG_PATH: sample-config.demo-oanda.json
       RUN_ID: ${{ format('OANDA-DAILY-{0}', github.run_number) }}
       DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || inputs.dryRun }}
       ENABLE_ALERT_PING: ${{ inputs.enableAlertPing || 'false' }}
@@ -109,6 +108,52 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      - name: Validate secrets
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $required = @(
+            @{ Name = 'OANDA_PRACTICE_TOKEN'; Value = $env:OANDA_PRACTICE_TOKEN },
+            @{ Name = 'OANDA_PRACTICE_ACCOUNT_ID'; Value = $env:OANDA_PRACTICE_ACCOUNT_ID },
+            @{ Name = 'OANDA_ENV'; Value = $env:OANDA_ENV }
+          )
+          foreach ($entry in $required) {
+            if ([string]::IsNullOrWhiteSpace($entry.Value) -or $entry.Value -eq 'null') {
+              throw "Missing required secret: $($entry.Name)"
+            }
+          }
+          if ($env:OANDA_ENV -ne 'practice') {
+            throw "OANDA_ENV must be 'practice' for demo daily runs (was '$($env:OANDA_ENV)')"
+          }
+
+      - name: Resolve config and safety rails
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $configPath = Join-Path $env:GITHUB_WORKSPACE 'sample-config.demo-oanda.json'
+          if (-not (Test-Path $configPath)) {
+            throw "Config file not found: $configPath"
+          }
+          $env:CONFIG_PATH = $configPath
+          "CONFIG_PATH=$configPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          $cfg = Get-Content $configPath | ConvertFrom-Json
+          if ($null -eq $cfg) { throw "Unable to parse config at $configPath" }
+
+          if ($cfg.perTradeRiskPct -gt 0.05) {
+            throw "perTradeRiskPct too high: $($cfg.perTradeRiskPct)"
+          }
+          if ($cfg.realLeverageCap -gt 2.0) {
+            throw "realLeverageCap too high: $($cfg.realLeverageCap)"
+          }
+
+          $expected = 'EURUSD','GBPUSD','USDJPY','USDCHF','USDCAD','AUDUSD','NZDUSD','XAUUSD'
+          $expectedSorted = @($expected | Sort-Object)
+          $actualSorted = @($cfg.universe | Sort-Object)
+          if ($actualSorted.Count -ne $expectedSorted.Count -or ($actualSorted -join ',') -ne ($expectedSorted -join ',')) {
+            throw "Universe drift detected. Expected: $($expectedSorted -join ',') Actual: $($actualSorted -join ',')"
+          }
+
+          "CONFIG_UNIVERSE=$($actualSorted -join ',')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Restore and build Release
         run: |
           $ErrorActionPreference = 'Stop'
@@ -118,10 +163,10 @@ jobs:
       - name: Prepare directories
         run: |
           $ErrorActionPreference = 'Stop'
-          foreach ($path in @('artifacts/oanda-smoke', 'scratch')) {
+          foreach ($path in @('artifacts/oanda-daily', 'scratch')) {
             if (Test-Path $path) { Remove-Item -Recurse -Force $path }
           }
-          New-Item -ItemType Directory -Force -Path 'artifacts/oanda-smoke' | Out-Null
+          New-Item -ItemType Directory -Force -Path 'artifacts/oanda-daily' | Out-Null
           New-Item -ItemType Directory -Force -Path 'scratch' | Out-Null
 
       - name: Resolve binaries
@@ -199,15 +244,56 @@ jobs:
           if (-not (Test-Path -Path $logFile)) {
             throw "Log file not found: $logFile"
           }
-          $handshake = Select-String -Path $logFile -Pattern 'Connected to OANDA' | Select-Object -First 1
+          $pattern = 'Connected to OANDA \(practice\)'
+          $handshake = Select-String -Path $logFile -Pattern $pattern | Select-Object -First 1
           if (-not $handshake) {
-            throw "Expected handshake evidence 'Connected to OANDA' not found in $logFile"
+            throw "Expected handshake evidence '$pattern' not found in $logFile"
+          }
+          $line = $handshake.Line.Trim()
+          "CONNECTIVITY_HANDSHAKE=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CONNECTIVITY_NOTE=$line" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Evaluate order evidence
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $eventsPath = $env:EVENTS_PATH
+          $orderMatches = Select-String -Path $eventsPath -Pattern 'OrderSend' -AllMatches
+          $orderFound = if ($orderMatches) { 'true' } else { 'false' }
+          $note = if ($orderFound -eq 'true') { 'OrderSend evidence present' } else { 'No OrderSend journal entries observed' }
+
+          $logNote = Select-String -Path $env:LOG_PATH -Pattern 'no trade criteria met (weekend/closed)' | Select-Object -First 1
+          if ($logNote) {
+            $note = "$note; $($logNote.Line.Trim())"
+          }
+
+          "ORDER_EVIDENCE=$orderFound" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ORDER_NOTE=$note" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          $requireRaw = if ([string]::IsNullOrWhiteSpace($env:REQUIRE_ORDER_EVIDENCE)) { 'false' } else { $env:REQUIRE_ORDER_EVIDENCE }
+          try {
+            $require = [System.Convert]::ToBoolean($requireRaw)
+          } catch {
+            throw "Invalid REQUIRE_ORDER_EVIDENCE value '$requireRaw'."
+          }
+
+          if ($require -and $orderFound -ne 'true') {
+            throw "Order evidence required but not found"
+          }
+
+      - name: Verify journal provenance
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Select-String -Path $env:EVENTS_PATH -Pattern 'src_adapter=oanda-demo' -Quiet)) {
+            throw "events.csv missing src_adapter=oanda-demo"
+          }
+          if (-not (Select-String -Path $env:TRADES_PATH -Pattern 'src_adapter=oanda-demo' -Quiet)) {
+            throw "trades.csv missing src_adapter=oanda-demo"
           }
 
       - name: Collect artifacts
         run: |
           $ErrorActionPreference = 'Stop'
-          $artifactDir = Join-Path $PWD 'artifacts/oanda-smoke'
+          $artifactDir = Join-Path $PWD 'artifacts/oanda-daily'
           Copy-Item -Path $env:EVENTS_PATH -Destination (Join-Path $artifactDir 'events.csv') -Force
           Copy-Item -Path $env:TRADES_PATH -Destination (Join-Path $artifactDir 'trades.csv') -Force
           Copy-Item -Path $env:LOG_PATH -Destination (Join-Path $artifactDir 'sim.log') -Force
@@ -229,18 +315,24 @@ jobs:
           $tradesPath = $env:TRADES_PATH
           $eventsSha = (Get-FileHash -Algorithm SHA256 -Path $eventsPath).Hash
           $tradesSha = (Get-FileHash -Algorithm SHA256 -Path $tradesPath).Hash
+          $handshake = if ([string]::IsNullOrWhiteSpace($env:CONNECTIVITY_HANDSHAKE)) { 'false' } else { $env:CONNECTIVITY_HANDSHAKE }
+          $handshakeNote = if ([string]::IsNullOrWhiteSpace($env:CONNECTIVITY_NOTE)) { 'n/a' } else { $env:CONNECTIVITY_NOTE }
+          $orderEvidence = if ([string]::IsNullOrWhiteSpace($env:ORDER_EVIDENCE)) { 'false' } else { $env:ORDER_EVIDENCE }
+          $orderNote = if ([string]::IsNullOrWhiteSpace($env:ORDER_NOTE)) { 'n/a' } else { $env:ORDER_NOTE }
 
           $summary = @(
             '## OANDA daily snapshot',
             "- Adapter: $env:ADAPTER_MODE",
+            "- Commit: $env:GITHUB_SHA",
             "- Config: $env:CONFIG_PATH",
-            "- Run ID: $env:RUN_ID",
+            "- Dry run: $env:DRY_RUN",
             "- STRICT_EXIT=$strictExit",
             "- PARITY_EXIT=$parityExit",
             "- broker_dangling=$brokerDangling",
             "- events_sha=$eventsSha",
             "- trades_sha=$tradesSha",
-            "- log_path=$logFile"
+            "- connectivity: handshake=$handshake note=$handshakeNote",
+            "- order_evidence: $orderEvidence ($orderNote)"
           )
           $summary | Set-Content -Encoding UTF8 -Path (Join-Path 'scratch' 'summary.md')
           $summary | ForEach-Object { Add-Content -Encoding UTF8 $env:GITHUB_STEP_SUMMARY $_ }
@@ -249,9 +341,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: oanda-daily-artifacts
+          name: vps-demo-artifacts-adapter-oanda-demo
           path: |
-            artifacts/oanda-smoke/**
+            artifacts/oanda-daily/**
             scratch/summary.md
 
       - name: Upload unit test results (strict/parity)
@@ -263,3 +355,56 @@ jobs:
             scratch/strict.json
             scratch/parity.json
           if-no-files-found: ignore
+
+      - name: Send alert ping
+        if: success()
+        env:
+          WEBHOOK_PROD: ${{ secrets.DEMO_ALERT_WEBHOOK_PROD }}
+          WEBHOOK_STAGING: ${{ secrets.DEMO_ALERT_WEBHOOK_STAGING }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $enableRaw = if ([string]::IsNullOrWhiteSpace($env:ENABLE_ALERT_PING)) { 'false' } else { $env:ENABLE_ALERT_PING }
+          try {
+            $enable = [System.Convert]::ToBoolean($enableRaw)
+          } catch {
+            throw "Invalid ENABLE_ALERT_PING value '$enableRaw'."
+          }
+          if (-not $enable) {
+            Write-Host 'Alert ping disabled; skipping.'
+            "ALERT_HTTP_STATUS=skipped" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            return
+          }
+
+          $resolved = if ([string]::IsNullOrWhiteSpace($env:ALERT_ENV_INPUT)) { $env:ALERT_ENV_DEFAULT } else { $env:ALERT_ENV_INPUT }
+          if ([string]::IsNullOrWhiteSpace($resolved)) {
+            $resolved = 'prod'
+          }
+
+          $webhook = if ($resolved -eq 'prod') { $env:WEBHOOK_PROD } else { $env:WEBHOOK_STAGING }
+          if ([string]::IsNullOrWhiteSpace($webhook) -or $webhook -eq 'null') {
+            Write-Host "Alert webhook not configured for ALERT_ENV=$resolved; skipping."
+            "ALERT_HTTP_STATUS=skipped" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            return
+          }
+
+          $payload = @{
+            content = "demo-daily-oanda success run $env:GITHUB_RUN_ID handshake=$env:CONNECTIVITY_HANDSHAKE order=$env:ORDER_EVIDENCE"
+          } | ConvertTo-Json -Compress
+
+          try {
+            $response = Invoke-WebRequest -Uri $webhook -Method Post -Body $payload -ContentType 'application/json'
+            $status = [int]$response.StatusCode
+            Write-Host "Alert ping HTTP status: $status"
+            "ALERT_HTTP_STATUS=$status" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            if ($status -lt 200 -or $status -ge 300) {
+              throw "Webhook returned non-success status $status"
+            }
+          } catch {
+            $statusCode = 'unknown'
+            if ($_.Exception.Response -and $null -ne $_.Exception.Response.StatusCode) {
+              $statusCode = [int]$_.Exception.Response.StatusCode
+            }
+            "ALERT_HTTP_STATUS=$statusCode" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            Write-Warning "Alert ping failed. HTTP status: $statusCode. Error: $($_.Exception.Message)"
+            throw
+          }
