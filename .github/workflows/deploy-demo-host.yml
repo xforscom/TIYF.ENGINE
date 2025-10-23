@@ -19,6 +19,11 @@ on:
         required: false
         default: true
         type: boolean
+      allowNonMainDeploy:
+        description: 'Allow full deploy from non-main branches (use with caution)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   id-token: write
@@ -26,7 +31,8 @@ permissions:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || inputs.dryRun == true || inputs.allowNonMainDeploy == true
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
     timeout-minutes: 30
     defaults:
       run:
@@ -44,6 +50,77 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
+
+      - name: Validate required secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          missing=()
+          if [ -z "${DEPLOY_HOST}" ]; then missing+=("DEPLOY_HOST"); fi
+          if [ -z "${DEPLOY_USER}" ]; then missing+=("DEPLOY_USER"); fi
+          if [ -z "${DEPLOY_SSH_KEY}" ]; then missing+=("DEPLOY_SSH_KEY"); fi
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "Missing required secrets: ${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Ensure deployment tooling
+        run: |
+          set -euo pipefail
+          if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+            sudo apt-get update -y >/dev/null
+            sudo apt-get install -y rsync jq shellcheck >/dev/null
+          else
+            TOOLS_DIR="$HOME/.local/bin"
+            mkdir -p "$TOOLS_DIR"
+            export PATH="$TOOLS_DIR:$PATH"
+            printf '%s\n' "$TOOLS_DIR" >> "$GITHUB_PATH"
+
+            ensure_tool() {
+              local name="$1"
+              if command -v "$name" >/dev/null 2>&1; then
+                return 0
+              fi
+
+              case "$name" in
+                jq)
+                  curl -fsSL "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64" -o "$TOOLS_DIR/jq"
+                  chmod +x "$TOOLS_DIR/jq"
+                  ;;
+                shellcheck)
+                  local tmp
+                  tmp="$(mktemp -d)"
+                  curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz" -o "$tmp/shellcheck.tar.xz"
+                  tar -xf "$tmp/shellcheck.tar.xz" -C "$tmp"
+                  mv "$tmp"/shellcheck-*/shellcheck "$TOOLS_DIR/shellcheck"
+                  chmod +x "$TOOLS_DIR/shellcheck"
+                  rm -rf "$tmp"
+                  ;;
+                rsync)
+                  return 1
+                  ;;
+                *)
+                  return 1
+                  ;;
+              esac
+
+              command -v "$name" >/dev/null 2>&1
+            }
+
+            missing=()
+            for tool in rsync jq shellcheck; do
+              if ! ensure_tool "$tool"; then
+                missing+=("$tool")
+              fi
+            done
+            if [ ${#missing[@]} -gt 0 ]; then
+              echo "Missing required tools: ${missing[*]}. Install them or enable passwordless sudo." >&2
+              exit 1
+            fi
+          fi
 
       - name: Shellcheck deploy scripts
         run: |
@@ -74,19 +151,39 @@ jobs:
           cp sample-config.demo-ctrader.json publish/
           cp sample-config.demo-oanda.json publish/
 
-      - name: Verify systemd unit
-        run: |
-          set -euo pipefail
-          if ! command -v systemd-analyze >/dev/null 2>&1; then
-            sudo apt-get update -y >/dev/null
-            sudo apt-get install -y systemd >/dev/null
-          fi
-          systemd-analyze verify publish/systemd/tiyf-engine-demo.service
-
       - name: Configure SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Verify remote directory access
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          RELEASE_ROOT: ${{ env.RELEASE_ROOT }}
+          CURRENT_LINK: ${{ env.CURRENT_LINK }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_HOST}" ] || [ -z "${DEPLOY_USER}" ]; then
+            echo "Deployment host credentials are not configured."
+            exit 1
+          fi
+          ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "
+            set -euo pipefail
+            if [ ! -d '${RELEASE_ROOT}' ]; then
+              echo 'Missing release root ${RELEASE_ROOT}' >&2
+              exit 1
+            fi
+            if [ ! -w '${RELEASE_ROOT}' ]; then
+              echo 'Release root ${RELEASE_ROOT} is not writable by ${USER}' >&2
+              exit 1
+            fi
+            if [ ! -d '${CURRENT_LINK%/*}' ]; then
+              echo 'Parent of current link ${CURRENT_LINK%/*} missing' >&2
+              exit 1
+            fi
+            exit 0
+          "
 
       - name: Push release to server
         env:
@@ -94,6 +191,10 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           set -euo pipefail
+          LOG_DIR="deploy-artifacts"
+          mkdir -p "$LOG_DIR"
+          STEP_LOG="$LOG_DIR/push-release.log"
+          exec > >(tee -a "$STEP_LOG") 2>&1
 
           if [ -z "${DEPLOY_HOST}" ] || [ -z "${DEPLOY_USER}" ]; then
             echo "Deployment host credentials are not configured."
@@ -117,6 +218,7 @@ jobs:
 
           rsync -az --delete ${RSYNC_FLAGS:-} publish/ "${DEPLOY_USER}@${DEPLOY_HOST}:${REMOTE_PATH}/"
           echo "RELEASE_ID=${RELEASE_ID}" >> "${GITHUB_ENV}"
+          echo "REMOTE_PATH=${REMOTE_PATH}" >> "${GITHUB_ENV}"
 
       - name: Update remote engine environment
         env:
@@ -144,70 +246,88 @@ jobs:
             exit 0
           fi
 
-          python <<'PY'
-import os
-from pathlib import Path
+          mode="${ADAPTER_MODE:-ctrader-demo}"
+          case "$mode" in
+            ctrader-demo|ctrader-live)
+              ENGINE_CONFIG_PATH="/opt/tiyf/current/sample-config.demo-ctrader.json"
+              ;;
+            oanda-demo|oanda-live)
+              ENGINE_CONFIG_PATH="/opt/tiyf/current/sample-config.demo-oanda.json"
+              ;;
+            *)
+              ENGINE_CONFIG_PATH="/opt/tiyf/current/sample-config.demo-ctrader.json"
+              ;;
+          esac
 
-mode = (os.getenv("ADAPTER_MODE") or "ctrader-demo").strip().lower() or "ctrader-demo"
-config_map = {
-    "ctrader-demo": "/opt/tiyf/current/sample-config.demo-ctrader.json",
-    "ctrader-live": "/opt/tiyf/current/sample-config.demo-ctrader.json",
-    "oanda-demo": "/opt/tiyf/current/sample-config.demo-oanda.json",
-    "oanda-live": "/opt/tiyf/current/sample-config.demo-oanda.json",
-}
-config_path = config_map.get(mode, "/opt/tiyf/current/sample-config.demo-ctrader.json")
-heartbeat = (os.getenv("ENGINE_HOST_HEARTBEAT_SECONDS") or "").strip() or "30"
-
-lines = [
-    f"ENGINE_HOST_HEARTBEAT_SECONDS={heartbeat}",
-    f"ADAPTER_MODE={mode}",
-    f"ENGINE_CONFIG_PATH={config_path}",
-]
-
-def add(key: str) -> None:
-    value = os.getenv(key)
-    if value:
-        lines.append(f"{key}={value}")
-
-for key in (
-    "CT_APP_ID",
-    "CT_APP_SECRET",
-    "CT_DEMO_OAUTH_TOKEN",
-    "CT_DEMO_REFRESH_TOKEN",
-    "CT_DEMO_ACCOUNT_ID",
-    "CT_DEMO_BROKER",
-    "OANDA_ENV",
-    "OANDA_PRACTICE_ACCOUNT_ID",
-    "OANDA_PRACTICE_TOKEN",
-):
-    add(key)
-
-Path("engine.env").write_text("\n".join(lines) + "\n", encoding="utf-8")
-PY
-
+          heartbeat="${ENGINE_HOST_HEARTBEAT_SECONDS:-30}"
+          {
+            printf "ENGINE_HOST_HEARTBEAT_SECONDS=%s\n" "$heartbeat"
+            printf "ADAPTER_MODE=%s\n" "$mode"
+            printf "ENGINE_CONFIG_PATH=%s\n" "$ENGINE_CONFIG_PATH"
+            for var in CT_APP_ID CT_APP_SECRET CT_DEMO_OAUTH_TOKEN CT_DEMO_REFRESH_TOKEN CT_DEMO_ACCOUNT_ID CT_DEMO_BROKER OANDA_ENV OANDA_PRACTICE_ACCOUNT_ID OANDA_PRACTICE_TOKEN; do
+              value="${!var}"
+              if [ -n "$value" ]; then
+                printf "%s=%s\n" "$var" "$value"
+              fi
+            done
+          } > engine.env
           scp -o StrictHostKeyChecking=no engine.env "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/engine.env"
-          ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "sudo install -m 640 -o root -g root /tmp/engine.env /etc/tiyf/engine.env && sudo rm -f /tmp/engine.env"
+          ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "sudo install -m 600 -o root -g root /tmp/engine.env /etc/tiyf/engine.env && sudo rm -f /tmp/engine.env"
           rm -f engine.env
 
-      - name: Apply release (symlink, systemd, health)
+      - name: Verify systemd unit on host
+        if: inputs.dryRun != true
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          SERVICE_NAME: ${{ env.SERVICE_NAME }}
         run: |
           set -euo pipefail
-
-          if [ -z "${DEPLOY_HOST}" ] || [ -z "${DEPLOY_USER}" ]; then
-            echo "Deployment host credentials are not configured."
-            exit 1
-          fi
-
-          if [ -z "${RELEASE_ID:-}" ]; then
-            echo "RELEASE_ID is not populated from previous step."
-            exit 1
-          fi
-
+          : "${REMOTE_PATH:?REMOTE_PATH unavailable; ensure push step ran successfully.}"
+          : "${SERVICE_NAME:?SERVICE_NAME unavailable; ensure SERVICE_NAME env is set.}"
+          LOG_DIR="deploy-artifacts"
+          mkdir -p "${LOG_DIR}"
+          APPLY_LOG="${LOG_DIR}/apply-release.log"
+          exec > >(tee -a "${APPLY_LOG}") 2>&1
           DRY_RUN="${DRY_RUN:-true}"
+          ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "systemd-analyze verify '${REMOTE_PATH}/systemd/${SERVICE_NAME}'"
+
           ssh -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
             "DRY_RUN='${DRY_RUN}' RELEASE_ID='${RELEASE_ID}' RELEASE_ROOT='${RELEASE_ROOT}' CURRENT_LINK='${CURRENT_LINK}' SERVICE_NAME='${SERVICE_NAME}' HEALTH_ENDPOINT='${HEALTH_ENDPOINT}' bash -s" \
             < deploy/scripts/remote-deploy.sh
 
+          HEALTH_FILE="${LOG_DIR}/health.json"
+          if [ "${DRY_RUN}" = "true" ]; then
+            printf '{ "dry_run": true }\n' > "${HEALTH_FILE}"
+          else
+            health_line=$(grep -F 'Health check response:' "${APPLY_LOG}" | tail -n1 || true)
+            if [ -n "${health_line}" ]; then
+              printf '%s\n' "${health_line#Health check response: }" > "${HEALTH_FILE}"
+            else
+              printf '{ "error": "Health check output not captured" }\n' > "${HEALTH_FILE}"
+            fi
+          fi
+
+      - name: Validate health payload
+        if: inputs.dryRun != true
+        run: |
+          set -euo pipefail
+          HEALTH_FILE="deploy-artifacts/health.json"
+          test -s "${HEALTH_FILE}" || {
+            echo "health.json missing or empty" >&2
+            exit 1
+          }
+          jq -e '.connected == true' "${HEALTH_FILE}" >/dev/null || {
+            echo "Health check failed: connected=false" >&2
+            jq '.' "${HEALTH_FILE}" || true
+            exit 1
+          }
+
+      - name: Upload deploy artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: deploy-host-artifacts
+          path: deploy-artifacts/**
+          if-no-files-found: ignore

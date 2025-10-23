@@ -31,7 +31,7 @@ public sealed record OandaAdapterSettings(
                 var value = prop.GetString() ?? string.Empty;
                 if (value.StartsWith("env:", StringComparison.OrdinalIgnoreCase))
                 {
-                    var env = Environment.GetEnvironmentVariable(value.Substring(4));
+                    var env = Environment.GetEnvironmentVariable(value[4..]);
                     return string.IsNullOrWhiteSpace(env) ? fallback : env!;
                 }
                 return value;

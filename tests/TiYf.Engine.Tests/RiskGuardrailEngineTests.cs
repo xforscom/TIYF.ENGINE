@@ -90,12 +90,37 @@ public class RiskGuardrailEngineTests
         if (!p.HasExited) { try { p.Kill(); } catch { } throw new Exception("Sim timeout"); }
         Assert.Equal(0, p.ExitCode);
         var stdout = p.StandardOutput.ReadToEnd();
-        var runIdLine = stdout.Split('\n').FirstOrDefault(l => l.StartsWith("RUN_ID=", StringComparison.OrdinalIgnoreCase));
+        var lines = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        string ResolvePath(string key, string fallbackRelative)
+        {
+            var match = lines.FirstOrDefault(l => l.StartsWith(key, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(match))
+            {
+                var rel = match.Substring(key.Length).Trim();
+                var normalized = rel.Replace('/', Path.DirectorySeparatorChar);
+                try
+                {
+                    return Path.GetFullPath(normalized, SolutionRoot);
+                }
+                catch (Exception)
+                {
+                    // fall back to legacy layout below
+                }
+            }
+            var legacy = Path.Combine(SolutionRoot, fallbackRelative);
+            return legacy;
+        }
+
+        var runIdLine = lines.FirstOrDefault(l => l.StartsWith("RUN_ID=", StringComparison.OrdinalIgnoreCase));
         Assert.False(string.IsNullOrWhiteSpace(runIdLine));
         var runId = runIdLine!.Substring("RUN_ID=".Length).Trim();
-        var jDir = Path.Combine(SolutionRoot, "journals", "M0", runId);
-        Assert.True(Directory.Exists(jDir), $"Run dir not found: {jDir}\nSTDOUT:{stdout}\nSTDERR:{p.StandardError.ReadToEnd()}");
-        return (Path.Combine(jDir, "events.csv"), Path.Combine(jDir, "trades.csv"));
+
+        var eventsPath = ResolvePath("JOURNAL_DIR_EVENTS=", Path.Combine("journals", "M0", runId, "events.csv"));
+        var tradesPath = ResolvePath("JOURNAL_DIR_TRADES=", Path.Combine("journals", "M0", runId, "trades.csv"));
+
+        Assert.True(File.Exists(eventsPath), $"Events journal not found: {eventsPath}\nSTDOUT:{stdout}\nSTDERR:{p.StandardError.ReadToEnd()}");
+        Assert.True(File.Exists(tradesPath), $"Trades journal not found: {tradesPath}\nSTDOUT:{stdout}\nSTDERR:{p.StandardError.ReadToEnd()}");
+        return (eventsPath, tradesPath);
     }
 
     private string TempConfigWithRisk(string baseConfig, string riskMode, string? extraRiskFields)

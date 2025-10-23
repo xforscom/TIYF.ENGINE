@@ -26,9 +26,10 @@ fi
 sudo cp "${REMOTE_PATH}/systemd/${SERVICE_NAME}" "/etc/systemd/system/${SERVICE_NAME}"
 sudo systemctl daemon-reload
 sudo ln -sfn "$REMOTE_PATH" "$CURRENT_LINK"
+# restart service and wait for it to bind
 sudo systemctl restart "$SERVICE_NAME"
 
-for attempt in $(seq 1 5); do
+for attempt in $(seq 1 12); do
     if response=$(curl -fsS "$HEALTH_ENDPOINT"); then
         echo "Health check response: $response"
         exit 0
@@ -38,5 +39,9 @@ for attempt in $(seq 1 5); do
 done
 
 echo "Health check failed for $HEALTH_ENDPOINT" >&2
+echo "--- systemctl status ${SERVICE_NAME} ---" >&2
+sudo systemctl status "$SERVICE_NAME" --no-pager || true
+echo "--- recent journal (${SERVICE_NAME}) ---" >&2
+sudo journalctl -u "$SERVICE_NAME" -n 200 --no-pager || true
 exit 1
 
