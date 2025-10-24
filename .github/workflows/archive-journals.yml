@@ -36,8 +36,8 @@ jobs:
           if [ -d "$JOURNAL_DIR" ]; then
             find "$JOURNAL_DIR" -type f -mtime -7 -print > "$TMP_LIST"
           else
-            echo "Directory $JOURNAL_DIR not found."
-            : > "$TMP_LIST"
+            echo "ERROR: Directory $JOURNAL_DIR not found." >&2
+            exit 1
           fi
 
           if [ ! -s "$TMP_LIST" ]; then
