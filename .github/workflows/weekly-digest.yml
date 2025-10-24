@@ -107,17 +107,11 @@ jobs:
             'User-Agent' = "$owner-$repo-weekly-digest"
           }
 
-          $healthLine = "health connected=unknown last_heartbeat_utc=unknown"
-          try {
-            $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8080/health' -TimeoutSec 5
-            if ($null -ne $health) {
-              $isConnected = [bool]$health.connected
-              $heartbeat = $health.last_heartbeat_utc
-              $healthLine = "health connected={0} last_heartbeat_utc={1}" -f $isConnected, $heartbeat
-            }
-          } catch {
-            Write-Warning "Failed to capture /health for digest: $($_.Exception.Message)"
+          $healthScript = Join-Path $env:GITHUB_WORKSPACE 'scripts/pwsh/health-check.ps1'
+          if (-not (Test-Path -Path $healthScript)) {
+            throw "Health check script missing at $healthScript"
           }
+          $healthLine = & $healthScript
 
           $workflowId = $env:WORKFLOW_ID
           $runsUri = "$baseUri/repos/$owner/$repo/actions/workflows/$workflowId/runs?branch=main&status=success&per_page=15"

@@ -224,8 +224,8 @@ jobs:
           if (-not $eventsLine) { throw 'Missing JOURNAL_DIR_EVENTS entry in simulator output' }
           if (-not $tradesLine) { throw 'Missing JOURNAL_DIR_TRADES entry in simulator output' }
 
-          $eventsPath = $eventsLine.Line.Split('=')[1]
-          $tradesPath = $tradesLine.Line.Split('=')[1]
+          $eventsPath = $eventsLine.Line.Split('=', 2)[1]
+          $tradesPath = $tradesLine.Line.Split('=', 2)[1]
 
           "LOG_PATH=$logPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "EVENTS_PATH=$eventsPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append

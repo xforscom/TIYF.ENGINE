@@ -32,7 +32,13 @@ jobs:
           ARCHIVE_NAME="scratch/oanda-journals-$(date -u +'%Y%m%dT%H%M%SZ').tar.gz"
           TMP_LIST="$(mktemp)"
 
-          find /opt/tiyf/current/journals/oanda-demo/ -type f -mtime -7 -print > "$TMP_LIST" || true
+          JOURNAL_DIR="/opt/tiyf/current/journals/oanda-demo/"
+          if [ -d "$JOURNAL_DIR" ]; then
+            find "$JOURNAL_DIR" -type f -mtime -7 -print > "$TMP_LIST"
+          else
+            echo "ERROR: Directory $JOURNAL_DIR not found." >&2
+            exit 1
+          fi
 
           if [ ! -s "$TMP_LIST" ]; then
             echo "No journal files modified in the last 7 days."
