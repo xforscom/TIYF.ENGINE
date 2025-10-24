@@ -107,6 +107,18 @@ jobs:
             'User-Agent' = "$owner-$repo-weekly-digest"
           }
 
+          $healthLine = "health connected=unknown last_heartbeat_utc=unknown"
+          try {
+            $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8080/health' -TimeoutSec 5
+            if ($null -ne $health) {
+              $isConnected = [bool]$health.connected
+              $heartbeat = $health.last_heartbeat_utc
+              $healthLine = "health connected={0} last_heartbeat_utc={1}" -f $isConnected, $heartbeat
+            }
+          } catch {
+            Write-Warning "Failed to capture /health for digest: $($_.Exception.Message)"
+          }
+
           $workflowId = $env:WORKFLOW_ID
           $runsUri = "$baseUri/repos/$owner/$repo/actions/workflows/$workflowId/runs?branch=main&status=success&per_page=15"
           $runsResponse = Invoke-RestMethod -Uri $runsUri -Headers $headers -Method Get
@@ -171,8 +183,13 @@ jobs:
             throw "No digest entries were produced"
           }
 
-          $digestLines = $lines | ForEach-Object { "{0} {1} events={2} trades={3}" -f $_.Started, $_.Url, $_.EventsSha, $_.TradesSha }
-          $digestText = $digestLines -join [Environment]::NewLine
+          $digestEntries = @()
+          $digestEntries += $healthLine
+          foreach ($line in $lines) {
+            $digestEntries += ("{0} {1} events={2} trades={3}" -f $line.Started, $line.Url, $line.EventsSha, $line.TradesSha)
+          }
+
+          $digestText = [string]::Join([Environment]::NewLine, $digestEntries)
           $summaryPath = Join-Path $env:SCRATCH_DIR 'weekly-digest.txt'
           Set-Content -Path $summaryPath -Value $digestText -Encoding UTF8
 

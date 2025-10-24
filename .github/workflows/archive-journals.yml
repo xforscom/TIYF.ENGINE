@@ -1,0 +1,60 @@
+name: archive-journals
+
+on:
+  schedule:
+    - cron: '0 4 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: archive-journals-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  archive:
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
+    timeout-minutes: 15
+    steps:
+      - name: Prepare scratch directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf scratch
+          mkdir -p scratch
+
+      - name: Create journal archive
+        id: bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE_NAME="scratch/oanda-journals-$(date -u +'%Y%m%dT%H%M%SZ').tar.gz"
+          TMP_LIST="$(mktemp)"
+
+          find /opt/tiyf/current/journals/oanda-demo/ -type f -mtime -7 -print > "$TMP_LIST" || true
+
+          if [ ! -s "$TMP_LIST" ]; then
+            echo "No journal files modified in the last 7 days."
+            rm -f "$TMP_LIST"
+            touch scratch/no-journals.txt
+            echo "archive_path=" >> "$GITHUB_OUTPUT"
+          else
+            tar -czf "$ARCHIVE_NAME" -T "$TMP_LIST"
+            rm -f "$TMP_LIST"
+            echo "archive_path=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload journal archive
+        if: steps.bundle.outputs.archive_path != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: oanda-journal-archive
+          path: ${{ steps.bundle.outputs.archive_path }}
+
+      - name: Upload empty marker
+        if: steps.bundle.outputs.archive_path == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: oanda-journal-archive-empty
+          path: scratch/no-journals.txt
