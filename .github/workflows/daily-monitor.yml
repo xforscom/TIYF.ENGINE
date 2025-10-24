@@ -1,0 +1,140 @@
+name: daily-monitor
+
+on:
+  schedule:
+    - cron: '15 2 * * 1-5'
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-monitor-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  monitor-health:
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    env:
+      HEALTH_PATH: scratch/health.json
+    steps:
+      - name: Install PowerShell 7
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          POWERSHELL_VERSION="7.4.6"
+          INSTALL_ROOT="$HOME/powershell"
+
+          if [ -x "$INSTALL_ROOT/pwsh" ]; then
+            echo "$INSTALL_ROOT" >> "$GITHUB_PATH"
+            exit 0
+          fi
+
+          if [ -x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh" ]; then
+            echo "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64" >> "$GITHUB_PATH"
+            exit 0
+          fi
+
+          mkdir -p "$INSTALL_ROOT"
+          curl -fSLo powershell.tar.gz "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz"
+          curl -fSLo checksums.txt "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/SHA256SUMS"
+          EXPECTED_SUM="$(grep "powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz" checksums.txt | awk '{print $1}')"
+          if [ -z "$EXPECTED_SUM" ]; then
+            echo "ERROR: Unable to locate expected checksum for PowerShell archive" >&2
+            exit 1
+          fi
+          ACTUAL_SUM="$(sha256sum powershell.tar.gz | awk '{print $1}')"
+          if [ "$EXPECTED_SUM" != "$ACTUAL_SUM" ]; then
+            echo "ERROR: Checksum verification failed for powershell.tar.gz" >&2
+            echo "Expected: $EXPECTED_SUM" >&2
+            echo "Actual:   $ACTUAL_SUM" >&2
+            exit 1
+          fi
+          tar -xzf powershell.tar.gz -C "$INSTALL_ROOT"
+          rm powershell.tar.gz checksums.txt
+
+          if [ -x "$INSTALL_ROOT/pwsh" ]; then
+            chmod +x "$INSTALL_ROOT/pwsh"
+            echo "$INSTALL_ROOT" >> "$GITHUB_PATH"
+          elif [ -x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh" ]; then
+            chmod +x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh"
+            echo "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64" >> "$GITHUB_PATH"
+          else
+            echo "Failed to locate pwsh after extraction" >&2
+            find "$INSTALL_ROOT" -maxdepth 3 -type f -name 'pwsh' -print || true
+            exit 1
+          fi
+
+      - name: Prepare workspace
+        run: |
+          set -euo pipefail
+          rm -rf scratch
+          mkdir -p scratch
+
+      - name: Fetch /health snapshot
+        run: |
+          set -euo pipefail
+          attempts=0
+          while [ $attempts -lt 5 ]; do
+            if curl -fsS http://127.0.0.1:8080/health -o "$HEALTH_PATH"; then
+              break
+            fi
+            attempts=$((attempts + 1))
+            sleep 2
+          done
+
+          if [ ! -s "$HEALTH_PATH" ]; then
+            echo "Failed to capture /health after $attempts attempts" >&2
+            exit 1
+          fi
+
+      - name: Validate health payload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = $env:HEALTH_PATH
+          if (-not (Test-Path -Path $path)) {
+            throw "/health payload missing at $path"
+          }
+
+          $health = Get-Content -Raw -Path $path | ConvertFrom-Json
+          if ($null -eq $health) {
+            throw "Unable to parse JSON from $path"
+          }
+          $adapter = $health.adapter
+          $connected = [bool]$health.connected
+          $heartbeat = $health.last_heartbeat_utc
+          if (-not $connected) {
+            throw "Expected connected=true but found connected=$connected"
+          }
+
+          "DAILY_MONITOR_ADAPTER=$adapter" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DAILY_MONITOR_CONNECTED=$connected" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DAILY_MONITOR_HEARTBEAT=$heartbeat" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Upload health artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-monitor-health
+          path: |
+            ${{ env.HEALTH_PATH }}
+
+      - name: Summarize verdict
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $adapter = $env:DAILY_MONITOR_ADAPTER
+          $connected = $env:DAILY_MONITOR_CONNECTED
+          $heartbeat = $env:DAILY_MONITOR_HEARTBEAT
+          $line = "daily-monitor: adapter=$adapter connected=$connected last_heartbeat_utc=$heartbeat"
+          Set-Content -Path (Join-Path 'scratch' 'summary.txt') -Value $line -Encoding UTF8
+          Add-Content -Encoding UTF8 -Path $env:GITHUB_STEP_SUMMARY -Value "## daily-monitor verdict"
+          Add-Content -Encoding UTF8 -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Encoding UTF8 -Path $env:GITHUB_STEP_SUMMARY -Value $line

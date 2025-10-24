@@ -4,7 +4,13 @@ on:
     branches: [ main, feat/m4-seed ]
   pull_request:
     branches: [ main, feat/m4-seed ]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      exerciseScheduled:
+        description: 'Run scheduled automation workflows via workflow_call'
+        required: false
+        default: 'false'
+        type: boolean
 
 jobs:
   build-test:
@@ -19,18 +25,130 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Restore
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.exerciseScheduled == 'true') }}
         run: dotnet restore TiYf.Engine.sln
 
       - name: Build all projects (Release)
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.exerciseScheduled == 'true') }}
         run: dotnet build TiYf.Engine.sln -c Release -warnaserror --no-restore
 
       - name: Run Engine tests (Release, no-build)
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.exerciseScheduled == 'true') }}
         run: dotnet test tests/TiYf.Engine.Tests/TiYf.Engine.Tests.csproj -c Release --no-build --logger "trx;LogFileName=test.trx"
 
       - name: Run Tools tests (Release, no-build)
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.exerciseScheduled == 'true') }}
         run: dotnet test tests/TiYf.Engine.Tools.Tests/TiYf.Engine.Tools.Tests.csproj -c Release --no-build --logger "trx;LogFileName=test-tools.trx"
 
       - name: Verify Sim Release DLL exists
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.exerciseScheduled == 'true') }}
         run: |
           test -f src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll || (echo "Sim Release DLL missing" && ls -R src/TiYf.Engine.Sim/bin/Release || true && exit 1)
-          echo "Sim Release DLL present ✅"
+          echo "Sim Release DLL present OK"
+
+  guard-required-workflows:
+    runs-on: [self-hosted, Linux, X64, tiyf-vps]
+    needs: build-test
+    steps:
+      - name: Install PowerShell 7
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          POWERSHELL_VERSION="7.4.6"
+          INSTALL_ROOT="$HOME/powershell"
+
+          if [ -x "$INSTALL_ROOT/pwsh" ]; then
+            echo "$INSTALL_ROOT" >> "$GITHUB_PATH"
+            exit 0
+          fi
+
+          if [ -x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh" ]; then
+            echo "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64" >> "$GITHUB_PATH"
+            exit 0
+          fi
+
+          mkdir -p "$INSTALL_ROOT"
+          curl -fSLo powershell.tar.gz "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz"
+          curl -fSLo checksums.txt "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/SHA256SUMS"
+          EXPECTED_SUM="$(grep "powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz" checksums.txt | awk '{print $1}')"
+          if [ -z "$EXPECTED_SUM" ]; then
+            echo "ERROR: Unable to locate expected checksum for PowerShell archive" >&2
+            exit 1
+          fi
+          ACTUAL_SUM="$(sha256sum powershell.tar.gz | awk '{print $1}')"
+          if [ "$EXPECTED_SUM" != "$ACTUAL_SUM" ]; then
+            echo "ERROR: Checksum verification failed for powershell.tar.gz" >&2
+            echo "Expected: $EXPECTED_SUM" >&2
+            echo "Actual:   $ACTUAL_SUM" >&2
+            exit 1
+          fi
+          tar -xzf powershell.tar.gz -C "$INSTALL_ROOT"
+          rm powershell.tar.gz checksums.txt
+
+          if [ -x "$INSTALL_ROOT/pwsh" ]; then
+            chmod +x "$INSTALL_ROOT/pwsh"
+            echo "$INSTALL_ROOT" >> "$GITHUB_PATH"
+          elif [ -x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh" ]; then
+            chmod +x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh"
+            echo "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64" >> "$GITHUB_PATH"
+          else
+            echo "Failed to locate pwsh after extraction" >&2
+            find "$INSTALL_ROOT" -maxdepth 3 -type f -name 'pwsh' -print || true
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate required workflow roster
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $required = @(
+            @{ Path = '.github/workflows/demo-live-smoke-oanda.yml'; ExpectedName = 'demo-live-smoke-oanda' },
+            @{ Path = '.github/workflows/demo-daily-oanda.yml'; ExpectedName = 'demo-daily-oanda' },
+            @{ Path = '.github/workflows/demo-health-oanda.yml'; ExpectedName = 'demo-health-oanda' },
+            @{ Path = '.github/workflows/daily-monitor.yml'; ExpectedName = 'daily-monitor' },
+            @{ Path = '.github/workflows/friday-proof.yml'; ExpectedName = 'friday-proof' },
+            @{ Path = '.github/workflows/weekly-digest.yml'; ExpectedName = 'weekly-digest' },
+            @{ Path = '.github/workflows/deploy-demo-host.yml'; ExpectedName = 'deploy-demo-host' }
+          )
+
+          foreach ($item in $required) {
+            $path = $item.Path
+            $expectedName = $item.ExpectedName
+            if (-not (Test-Path -Path $path)) {
+              throw "Workflow file missing: $path"
+            }
+            $content = Get-Content -Path $path
+            $nameLine = $content | Where-Object { $_ -match '^\s*name:' } | Select-Object -First 1
+            if (-not $nameLine) {
+              throw "No name: field found in $path"
+            }
+            $actualName = ($nameLine -split 'name:\s*', 2)[1].Trim()
+            if ($actualName -ne $expectedName) {
+              throw "Workflow $path expected name '$expectedName' but found '$actualName'"
+            }
+          }
+          Write-Host 'All required workflows present with expected names.'
+
+  exercise-daily-monitor:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.exerciseScheduled == 'true'
+    needs: guard-required-workflows
+    uses: ./.github/workflows/daily-monitor.yml
+
+  exercise-friday-proof:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.exerciseScheduled == 'true'
+    needs: exercise-daily-monitor
+    uses: ./.github/workflows/friday-proof.yml
+    with:
+      enforcePracticeCheck: false
+      skipSafetyRails: true
+    secrets: inherit
+
+  exercise-weekly-digest:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.exerciseScheduled == 'true'
+    needs: exercise-friday-proof
+    uses: ./.github/workflows/weekly-digest.yml
+    secrets: inherit

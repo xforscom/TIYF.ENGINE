@@ -73,6 +73,9 @@ if (@($cfg.universe | Sort-Object) -ne @($expected | Sort-Object)) { throw 'Univ
 - `.github/workflows/demo-live-smoke-oanda.yml` – canonical adapter smoke flow
 - `.github/workflows/demo-daily-oanda.yml` – scheduled daily OANDA simulation with parity/alerts
 - `.github/workflows/demo-health-oanda.yml` – dedicated `/health` capture for the daemon
+- `.github/workflows/daily-monitor.yml` – weekday `/health` sampler that fails unless `connected=true`
+- `.github/workflows/friday-proof.yml` – weekly OANDA smoke with prod alert ping (expects HTTP 204)
+- `.github/workflows/weekly-digest.yml` – Sunday digest that posts the last five daily hashes to Discord
 - `.github/workflows/deploy-demo-host.yml` – deployment + systemd refresh
 - `.github/workflows/verify-deep.yml` / `.github/workflows/nightly-canary.yml` – determinism governance
 
