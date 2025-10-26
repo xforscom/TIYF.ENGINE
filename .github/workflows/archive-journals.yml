@@ -43,6 +43,7 @@ jobs:
           if [ ! -s "$TMP_LIST" ]; then
             echo "No journal files modified in the last 7 days (or directory absent)."
             rm -f "$TMP_LIST"
+            # Timestamp follows UTC ISO-8601 (matches digest/journal artifacts).
             echo "no journals to archive - $(date -u +'%Y-%m-%dT%H:%M:%SZ')" > scratch/no-journals.txt
             echo "archive_path=" >> "$GITHUB_OUTPUT"
           else
