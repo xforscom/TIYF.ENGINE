@@ -111,7 +111,15 @@ jobs:
           if (-not (Test-Path -Path $healthScript)) {
             throw "Health check script missing at $healthScript"
           }
-          $healthLine = & $healthScript
+          $healthLine = 'health connected=unknown last_heartbeat_utc=unknown'
+          try {
+            $result = & $healthScript
+            if (-not [string]::IsNullOrWhiteSpace($result)) {
+              $healthLine = $result.Trim()
+            }
+          } catch {
+            Write-Host "health-check.ps1 failed ($($_.Exception.Message)); using fallback."
+          }
 
           $workflowId = $env:WORKFLOW_ID
           $runsUri = "$baseUri/repos/$owner/$repo/actions/workflows/$workflowId/runs?branch=main&status=success&per_page=15"

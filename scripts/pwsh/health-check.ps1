@@ -1,9 +1,9 @@
-$ErrorActionPreference = 'Stop'
-
 param(
     [string]$Uri = 'http://127.0.0.1:8080/health',
     [int]$TimeoutSec = 5
 )
+
+$ErrorActionPreference = 'Stop'
 
 $healthLine = 'health connected=unknown last_heartbeat_utc=unknown'
 
@@ -15,7 +15,7 @@ try {
         $healthLine = 'health connected={0} last_heartbeat_utc={1}' -f $isConnected, $heartbeat
     }
 } catch {
-    Write-Warning "Failed to capture /health for digest: $($_.Exception.Message)"
+    # Swallow errors; caller will handle fallback.
 }
 
 Write-Output $healthLine
