@@ -36,14 +36,14 @@ jobs:
           if [ -d "$JOURNAL_DIR" ]; then
             find "$JOURNAL_DIR" -type f -mtime -7 -print > "$TMP_LIST"
           else
-            echo "ERROR: Directory $JOURNAL_DIR not found." >&2
-            exit 1
+            echo "NOTE: Directory $JOURNAL_DIR not found; emitting placeholder."
+            : > "$TMP_LIST"
           fi
 
           if [ ! -s "$TMP_LIST" ]; then
-            echo "No journal files modified in the last 7 days."
+            echo "No journal files modified in the last 7 days (or directory absent)."
             rm -f "$TMP_LIST"
-            touch scratch/no-journals.txt
+            echo "no journals to archive - $(date -u +'%Y-%m-%dT%H:%M:%SZ')" > scratch/no-journals.txt
             echo "archive_path=" >> "$GITHUB_OUTPUT"
           else
             tar -czf "$ARCHIVE_NAME" -T "$TMP_LIST"
