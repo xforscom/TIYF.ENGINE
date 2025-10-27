@@ -1,4 +1,4 @@
-﻿# Demo Run Operations
+# Demo Run Operations
 
 ## Purpose
 - Allow operators to switch between the stub broker and the cTrader demo adapter without modifying workflow logic.
@@ -37,7 +37,7 @@ All jobs target the self-hosted runner labelled `[self-hosted, Linux, X64, tiyf-
 
 ## Observability and Artifacts
 
-- Log files begin with banner lines such as `Adapter = â€¦`, `adapter_id=â€¦`, `broker=â€¦`, `account_id=â€¦`, `Universe = â€¦`, and `Config = â€¦`. DemoFeed also emits `BROKER_MODE=<adapter> (stub=ON|OFF) accountId=â€¦` before any execution output. For cTrader runs the workflow searches `demo-ctrader.log` for `Connected to cTrader endpoint`, and for OANDA runs it searches `demo-oanda.log` for `Connected to OANDA endpoint`; any `OrderSend` lines whose `brokerOrderId` retains the `STUB-` prefix are rejected.
+- Log files begin with banner lines such as `Adapter = …`, `adapter_id=…`, `broker=…`, `account_id=…`, `Universe = …`, and `Config = …`. DemoFeed also emits `BROKER_MODE=<adapter> (stub=ON|OFF) accountId=…` before any execution output. For cTrader runs the workflow searches `demo-ctrader.log` for `Connected to cTrader endpoint`, and for OANDA runs it searches `demo-oanda.log` for `Connected to OANDA endpoint`; any `OrderSend` lines whose `brokerOrderId` retains the `STUB-` prefix are rejected.
 - Artifacts upload under `vps-demo-artifacts-adapter-<adapter>` and contain `events.csv`, `trades.csv`, strict/parity JSON, the DemoFeed log (`demo-ctrader.log`, `demo-oanda.log`, or `demo-stub.log`), and `preflight.sanity.txt` when generated. Placeholder files are written when a source artifact is absent so consumers see a consistent layout.
 - Event payloads now include a `src_adapter` JSON field, and the trades journal encodes `src_adapter=<adapter>` in the `data_version` column so provenance survives downstream ingestion.
 - `checks.csv` at the workspace root records UTC timestamp, strict/parity exit codes, `broker_dangling`, SHA hashes, and runner identity. The same data is summarised in the `RESULT_LINE` stored in the step summary.
@@ -66,7 +66,7 @@ All jobs target the self-hosted runner labelled `[self-hosted, Linux, X64, tiyf-
 
 - `deploy-demo-host` (`workflow_dispatch`) publishes the host with inputs `environment`, optional `releaseTag`, and `dryRun` (defaults to `true`). Dry runs run `rsync --dry-run` and execute the remote script in simulation mode; real runs flip `/opt/tiyf/current` and restart the unit.
 - Release artefacts land in `/opt/tiyf/releases/<release-id>/` with `systemd/tiyf-engine-demo.service`, `scripts/remote-deploy.sh`, and binaries produced by `dotnet publish -c Release`.
-- The systemd unit copies the service file into `/etc/systemd/system/`, performs `systemctl daemon-reload`, flips the symlink, restarts the service, and polls `/health` (5×, 5s back-off) on successful deployments.
+- The systemd unit copies the service file into `/etc/systemd/system/`, performs `systemctl daemon-reload`, flips the symlink, restarts the service, and polls `/health` (5�, 5s back-off) on successful deployments.
 - Service management quick reference:
 
 ```bash
@@ -115,3 +115,13 @@ sudo systemctl start tiyf-engine-demo.service
 | `daily-monitor` | Weekdays 02:15 UTC (cron) + manual dispatch | Polls the deployed host `/health` endpoint with five-attempt retry/back-off and fails fast unless `connected` is `true`. | Uploads `daily-monitor-health/health.json` and writes `adapter/connected/last_heartbeat_utc` to the job summary. |
 | `friday-proof` | Fridays 10:00 UTC (cron) + manual dispatch | Runs the OANDA simulator via `InvokeSim.ps1` with `enableAlertPing=true` and `ALERT_ENV=prod` to validate broker handshake plus alert routing. | Enforces handshake evidence, strict/parity gates, `broker_dangling=false`, and asserts `Alert ping HTTP status: 204` in the summary. |
 | `weekly-digest` | Sundays 09:00 UTC (cron) + manual dispatch | Aggregates the last five successful `demo-daily-oanda` runs on `main`, extracts `events_sha`/`trades_sha`, and posts a digest to Discord. | Archives `weekly-digest.txt`, logs the webhook status code, and includes the digest table in the run summary without exposing the webhook URL. |
+## Host Telemetry
+- The engine host exposes two loopback-only endpoints: http://127.0.0.1:8080/health (JSON) and http://127.0.0.1:8080/metrics (Prometheus text). Both respond even when trading is idle, falling back to zero/unknown values when data is unavailable.
+- /health now includes heartbeat_age_seconds, open_positions, active_orders, risk_events_total, and alerts_total alongside the existing adapter status. Daily monitor runs quote these fields in the summary: daily-monitor: adapter=<name> connected=<bool> heartbeat_age=<xs> bar_lag_ms=<ms> open_positions=<n> active_orders=<n> risk_events_total=<n> alerts_total=<n>.
+- /metrics publishes the same values as gauges/counters (engine_heartbeat_age_seconds, engine_bar_lag_ms, engine_pending_orders, engine_open_positions, engine_active_orders, engine_risk_events_total, engine_alerts_total) so Prometheus-compatible scrapers can ingest them without extra formatting.
+
+
+
+
+
+
