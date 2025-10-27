@@ -29,45 +29,51 @@ $journalRoot = Join-Path $workDir "out"
 New-Item -ItemType Directory -Path $journalRoot | Out-Null
 
 # Build replay config with JournalRoot pointing to working directory
-$config = @{
-    schemaVersion = "1.3.0"
-    run = @{ runId = "REPLAY-PROOF" }
-    adapter = @{
-        type = "oanda-demo"
-        settings = @{
-            baseUrl = "https://api-fxpractice.oanda.com/v3/"
-            accessToken = "env:OANDA_REPLAY_TOKEN"
-            accountId = "env:OANDA_REPLAY_ACCOUNT"
-            maxOrderUnits = 100000
-            requestTimeoutSeconds = 10
-            retryInitialDelaySeconds = 0.2
-            retryMaxDelaySeconds = 2
-            retryMaxAttempts = 5
-            handshakeEndpoint = "/accounts/{accountId}/summary"
-            orderEndpoint = "/accounts/{accountId}/orders"
-            useMock = $true
-            stream = @{
-                enable = $true
-                baseUrl = "https://stream-fxpractice.oanda.com/v3/"
-                pricingEndpoint = "/accounts/{accountId}/pricing/stream"
-                heartbeatTimeoutSeconds = 15
-                maxBackoffSeconds = 10
-                feedMode = "replay"
-                replayTicksFile = "ticks.csv"
-                instruments = @("EUR_USD")
-            }
-        }
+$journalRootEscaped = $journalRoot.Replace('\', '\\')
+$configJson = @"
+{
+  "schemaVersion": "1.3.0",
+  "run": {
+    "runId": "REPLAY-PROOF"
+  },
+  "adapter": {
+    "type": "oanda-demo",
+    "settings": {
+      "baseUrl": "https://api-fxpractice.oanda.com/v3/",
+      "accessToken": "env:OANDA_REPLAY_TOKEN",
+      "accountId": "env:OANDA_REPLAY_ACCOUNT",
+      "maxOrderUnits": 100000,
+      "requestTimeoutSeconds": 10,
+      "retryInitialDelaySeconds": 0.2,
+      "retryMaxDelaySeconds": 2,
+      "retryMaxAttempts": 5,
+      "handshakeEndpoint": "/accounts/{accountId}/summary",
+      "orderEndpoint": "/accounts/{accountId}/orders",
+      "useMock": true,
+      "stream": {
+        "enable": true,
+        "baseUrl": "https://stream-fxpractice.oanda.com/v3/",
+        "pricingEndpoint": "/accounts/{accountId}/pricing/stream",
+        "heartbeatTimeoutSeconds": 15,
+        "maxBackoffSeconds": 10,
+        "feedMode": "replay",
+        "replayTicksFile": "ticks.csv",
+        "instruments": ["EUR_USD"]
+      }
     }
-    InstrumentFile = "instruments.csv"
-    InputTicksFile = "ticks.csv"
-    BrokerId = "oanda-practice"
-    AccountId = "env:OANDA_REPLAY_ACCOUNT"
-    universe = @("EURUSD")
-    featureFlags = @{ risk = "active" }
-    JournalRoot = $journalRoot
+  },
+  "InstrumentFile": "instruments.csv",
+  "InputTicksFile": "ticks.csv",
+  "BrokerId": "oanda-practice",
+  "AccountId": "env:OANDA_REPLAY_ACCOUNT",
+  "universe": ["EURUSD"],
+  "featureFlags": {
+    "risk": "active"
+  },
+  "JournalRoot": "$journalRootEscaped"
 }
+"@
 
-$configJson = $config | ConvertTo-Json -Depth 6
 [System.IO.File]::WriteAllText((Join-Path $workDir "config.json"), $configJson, (New-Object System.Text.UTF8Encoding($false)))
 
 function Invoke-ReplayRun {
