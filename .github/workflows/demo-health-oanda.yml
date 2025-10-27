@@ -46,7 +46,7 @@ jobs:
             exit 1
           fi
           ACTUAL_SUM="$(sha256sum powershell.tar.gz | awk '{print $1}')"
-          if ( [ "$EXPECTED_SUM" != "$ACTUAL_SUM" ] ); then
+          if [ "$EXPECTED_SUM" != "$ACTUAL_SUM" ]; then
             echo "ERROR: Checksum verification failed for powershell.tar.gz" >&2
             echo "Expected: $EXPECTED_SUM" >&2
             echo "Actual:   $ACTUAL_SUM" >&2
