@@ -15,6 +15,8 @@ internal static class EngineMetricsFormatter
         AppendMetric(builder, "engine_active_orders", snapshot.ActiveOrders);
         AppendMetric(builder, "engine_risk_events_total", snapshot.RiskEventsTotal);
         AppendMetric(builder, "engine_alerts_total", snapshot.AlertsTotal);
+        AppendMetric(builder, "engine_stream_connected", snapshot.StreamConnected);
+        AppendMetric(builder, "engine_stream_heartbeat_age_seconds", snapshot.StreamHeartbeatAgeSeconds);
         return builder.ToString();
     }
 

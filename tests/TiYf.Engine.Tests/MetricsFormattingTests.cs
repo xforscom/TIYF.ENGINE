@@ -13,6 +13,8 @@ public class MetricsFormattingTests
         state.UpdateLag(12.5);
         state.UpdatePendingOrders(1);
         state.SetMetrics(openPositions: 2, activeOrders: 1, riskEventsTotal: 3, alertsTotal: 4);
+        state.RecordStreamHeartbeat(DateTime.UtcNow);
+        state.UpdateStreamConnection(true);
 
         var snapshot = state.CreateMetricsSnapshot();
         var metricsText = EngineMetricsFormatter.Format(snapshot);
@@ -21,6 +23,8 @@ public class MetricsFormattingTests
         Assert.Contains("engine_bar_lag_ms", metricsText);
         Assert.Contains("engine_open_positions 2", metricsText);
         Assert.Contains("engine_alerts_total 4", metricsText);
+        Assert.Contains("engine_stream_connected 1", metricsText);
+        Assert.Contains("engine_stream_heartbeat_age_seconds", metricsText);
     }
 
     [Fact]
@@ -29,6 +33,8 @@ public class MetricsFormattingTests
         var state = new EngineHostState("stub", new[] { "ff_a" });
         state.MarkConnected(true);
         state.SetMetrics(openPositions: 1, activeOrders: 0, riskEventsTotal: 5, alertsTotal: 6);
+        state.RecordStreamHeartbeat(DateTime.UtcNow);
+        state.UpdateStreamConnection(true);
         var payload = state.CreateHealthPayload();
         var json = JsonSerializer.Serialize(payload);
         using var document = JsonDocument.Parse(json);
@@ -37,5 +43,7 @@ public class MetricsFormattingTests
         Assert.Equal(1, root.GetProperty("open_positions").GetInt32());
         Assert.Equal(5, root.GetProperty("risk_events_total").GetInt64());
         Assert.Equal(6, root.GetProperty("alerts_total").GetInt64());
+        Assert.Equal(1, root.GetProperty("stream_connected").GetInt32());
+        Assert.True(root.TryGetProperty("stream_heartbeat_age_seconds", out _));
     }
 }

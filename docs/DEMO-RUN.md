@@ -1,4 +1,4 @@
-# Demo Run Operations
+﻿# Demo Run Operations
 
 ## Purpose
 - Allow operators to switch between the stub broker and the cTrader demo adapter without modifying workflow logic.
@@ -12,13 +12,14 @@
 | `demo-live-smoke-oanda` | `workflow_dispatch` | Manual smoke against OANDA practice | Minimal harness that builds Release, runs the simulator with `sample-config.demo-oanda.json`, enforces `Connected to OANDA` handshake evidence, and uploads `vps-demo-artifacts-adapter-oanda-demo/`. |
 | `demo-daily-ctrader` | Cron (00:00 UTC) + `workflow_dispatch` | Scheduled end-to-end guardrail | Shares the same inputs; scheduled runs force `dryRun=false`, reuse the alert routing resolver, and require `enableAlertPing=true` only when operators want a prod success-path proof. |
 | `demo-session-manual` | `workflow_dispatch` | Operator-led session with issue transcript | Inputs: `adapter`, optional `run_id`, `broker_enabled` (auto-aligned with adapter). Generates a fresh Demo Session issue entry. |
+| `demo-health-oanda` | Cron (6-hour) + `workflow_dispatch` | Capture current host /health snapshot | Fetches telemetry from the running daemon, writes the metrics summary to the job output, and uploads `health.json` without running the simulator. |
 
 All jobs target the self-hosted runner labelled `[self-hosted, Linux, X64, tiyf-vps]`, install PowerShell 7, set execution policy to `RemoteSigned`, and provision .NET 8 before executing DemoFeed.
 
 ## Adapter Modes
 - `stub` (default) disables broker integration and uses `sample-config.demo.json`.
 - ctrader-demo enables broker calls, swaps to sample-config.demo-ctrader.json, and requires repository secrets CT_APP_ID, CT_APP_SECRET, CT_DEMO_OAUTH_TOKEN, CT_DEMO_REFRESH_TOKEN, CT_DEMO_ACCOUNT_ID, CT_DEMO_BROKER. Adapter settings support env:NAME placeholders so config files can reference secrets without inlining values (see sample-config.demo-ctrader.json).
-- oanda-demo enables broker calls, swaps to sample-config.demo-oanda.json, and requires repository secrets OANDA_PRACTICE_TOKEN and OANDA_PRACTICE_ACCOUNT_ID. The adapter also honours `env:NAME` placeholders so secrets can be injected at runtime without committing values.
+- oanda-demo enables broker calls, swaps to sample-config.demo-oanda.json, and requires repository secrets OANDA_PRACTICE_TOKEN and OANDA_PRACTICE_ACCOUNT_ID. The adapter also honours `env:NAME` placeholders so secrets can be injected at runtime without committing values. The `adapter.settings.stream` stanza controls the OANDA v20 streaming feed (`enable=true` to subscribe live, `feedMode=replay` to ingest a local tick file for diagnostics).
 - Rollback path is always "re-dispatch with `adapter=stub`"; the workflows echo this in their summaries for quick reference.
 
 ## Automatic Safeguards
@@ -37,7 +38,7 @@ All jobs target the self-hosted runner labelled `[self-hosted, Linux, X64, tiyf-
 
 ## Observability and Artifacts
 
-- Log files begin with banner lines such as `Adapter = …`, `adapter_id=…`, `broker=…`, `account_id=…`, `Universe = …`, and `Config = …`. DemoFeed also emits `BROKER_MODE=<adapter> (stub=ON|OFF) accountId=…` before any execution output. For cTrader runs the workflow searches `demo-ctrader.log` for `Connected to cTrader endpoint`, and for OANDA runs it searches `demo-oanda.log` for `Connected to OANDA endpoint`; any `OrderSend` lines whose `brokerOrderId` retains the `STUB-` prefix are rejected.
+- Log files begin with banner lines such as `Adapter = â€¦`, `adapter_id=â€¦`, `broker=â€¦`, `account_id=â€¦`, `Universe = â€¦`, and `Config = â€¦`. DemoFeed also emits `BROKER_MODE=<adapter> (stub=ON|OFF) accountId=â€¦` before any execution output. For cTrader runs the workflow searches `demo-ctrader.log` for `Connected to cTrader endpoint`, and for OANDA runs it searches `demo-oanda.log` for `Connected to OANDA endpoint`; any `OrderSend` lines whose `brokerOrderId` retains the `STUB-` prefix are rejected.
 - Artifacts upload under `vps-demo-artifacts-adapter-<adapter>` and contain `events.csv`, `trades.csv`, strict/parity JSON, the DemoFeed log (`demo-ctrader.log`, `demo-oanda.log`, or `demo-stub.log`), and `preflight.sanity.txt` when generated. Placeholder files are written when a source artifact is absent so consumers see a consistent layout.
 - Event payloads now include a `src_adapter` JSON field, and the trades journal encodes `src_adapter=<adapter>` in the `data_version` column so provenance survives downstream ingestion.
 - `checks.csv` at the workspace root records UTC timestamp, strict/parity exit codes, `broker_dangling`, SHA hashes, and runner identity. The same data is summarised in the `RESULT_LINE` stored in the step summary.
@@ -66,7 +67,7 @@ All jobs target the self-hosted runner labelled `[self-hosted, Linux, X64, tiyf-
 
 - `deploy-demo-host` (`workflow_dispatch`) publishes the host with inputs `environment`, optional `releaseTag`, and `dryRun` (defaults to `true`). Dry runs run `rsync --dry-run` and execute the remote script in simulation mode; real runs flip `/opt/tiyf/current` and restart the unit.
 - Release artefacts land in `/opt/tiyf/releases/<release-id>/` with `systemd/tiyf-engine-demo.service`, `scripts/remote-deploy.sh`, and binaries produced by `dotnet publish -c Release`.
-- The systemd unit copies the service file into `/etc/systemd/system/`, performs `systemctl daemon-reload`, flips the symlink, restarts the service, and polls `/health` (5�, 5s back-off) on successful deployments.
+- The systemd unit copies the service file into `/etc/systemd/system/`, performs `systemctl daemon-reload`, flips the symlink, restarts the service, and polls `/health` (5×, 5s back-off) on successful deployments.
 - Service management quick reference:
 
 ```bash
@@ -119,6 +120,7 @@ sudo systemctl start tiyf-engine-demo.service
 - The engine host exposes two loopback-only endpoints: http://127.0.0.1:8080/health (JSON) and http://127.0.0.1:8080/metrics (Prometheus text). Both respond even when trading is idle, falling back to zero/unknown values when data is unavailable.
 - /health now includes heartbeat_age_seconds, open_positions, active_orders, risk_events_total, and alerts_total alongside the existing adapter status. Daily monitor runs quote these fields in the summary: daily-monitor: adapter=<name> connected=<bool> heartbeat_age=<xs> bar_lag_ms=<ms> open_positions=<n> active_orders=<n> risk_events_total=<n> alerts_total=<n>.
 - /metrics publishes the same values as gauges/counters (engine_heartbeat_age_seconds, engine_bar_lag_ms, engine_pending_orders, engine_open_positions, engine_active_orders, engine_risk_events_total, engine_alerts_total) so Prometheus-compatible scrapers can ingest them without extra formatting.
+
 
 
 

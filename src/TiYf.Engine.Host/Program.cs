@@ -1,4 +1,5 @@
-﻿using System.Globalization;
+using System.Globalization;
+using System.Net.Http;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Builder;
@@ -23,6 +24,10 @@ if (!string.IsNullOrWhiteSpace(portEnv) && int.TryParse(portEnv, out var parsedP
 }
 builder.WebHost.ConfigureKestrel(options => options.ListenLocalhost(listenPort));
 builder.Services.AddHttpClient();
+builder.Services.AddHttpClient("oanda-stream", client =>
+{
+    client.Timeout = Timeout.InfiniteTimeSpan;
+});
 builder.Services.AddSingleton(new EngineHostConfiguration(configPath, configHash));
 builder.Services.AddSingleton(adapterContext.State);
 builder.Services.Configure<EngineHostOptions>(options =>
@@ -38,6 +43,33 @@ builder.Services.Configure<EngineHostOptions>(options =>
     if (!string.IsNullOrWhiteSpace(metricsEnv) && bool.TryParse(metricsEnv, out var metricsEnabled))
     {
         options.EnableMetrics = metricsEnabled;
+    }
+    if (adapterContext.StreamSettings is not null)
+    {
+        options.EnableStreamingFeed = adapterContext.StreamSettings.Enable;
+        if (adapterContext.StreamSettings.HeartbeatTimeout > TimeSpan.Zero)
+        {
+            options.StreamStaleThreshold = adapterContext.StreamSettings.HeartbeatTimeout;
+        }
+    }
+    var streamEnableEnv = Environment.GetEnvironmentVariable("ENGINE_HOST_ENABLE_STREAM");
+    if (!string.IsNullOrWhiteSpace(streamEnableEnv) && bool.TryParse(streamEnableEnv, out var streamEnabled))
+    {
+        options.EnableStreamingFeed = streamEnabled;
+    }
+    var streamStaleEnv = Environment.GetEnvironmentVariable("ENGINE_HOST_STREAM_STALE_SECONDS");
+    if (!string.IsNullOrWhiteSpace(streamStaleEnv) &&
+        double.TryParse(streamStaleEnv, NumberStyles.Float, CultureInfo.InvariantCulture, out var streamStaleSeconds) &&
+        streamStaleSeconds > 0)
+    {
+        options.StreamStaleThreshold = TimeSpan.FromSeconds(streamStaleSeconds);
+    }
+    var streamAlertEnv = Environment.GetEnvironmentVariable("ENGINE_HOST_STREAM_ALERT_THRESHOLD");
+    if (!string.IsNullOrWhiteSpace(streamAlertEnv) &&
+        int.TryParse(streamAlertEnv, NumberStyles.Integer, CultureInfo.InvariantCulture, out var alertThreshold) &&
+        alertThreshold > 0)
+    {
+        options.StreamAlertThreshold = alertThreshold;
     }
 });
 if (adapterContext.CTraderSettings is not null)
@@ -66,6 +98,10 @@ if (adapterContext.CTraderSettings is not null)
 else if (adapterContext.OandaSettings is not null)
 {
     builder.Services.AddSingleton(adapterContext.OandaSettings);
+    if (adapterContext.StreamSettings is not null)
+    {
+        builder.Services.AddSingleton(adapterContext.StreamSettings);
+    }
     builder.Services.AddSingleton<OandaRestExecutionAdapter>(sp =>
     {
         var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient();
@@ -87,6 +123,10 @@ else if (adapterContext.OandaSettings is not null)
     builder.Services.AddSingleton<IConnectableExecutionAdapter>(sp => sp.GetRequiredService<OandaRestExecutionAdapter>());
 }
 builder.Services.AddHostedService<EngineHostService>();
+if (adapterContext.StreamSettings is not null)
+{
+    builder.Services.AddHostedService<OandaStreamingService>();
+}
 
 if (OperatingSystem.IsLinux())
 {
@@ -143,6 +183,7 @@ static AdapterContext ResolveAdapterContext(EngineConfig config, JsonDocument ra
     string sourceAdapter = string.IsNullOrWhiteSpace(config.AdapterId) ? "stub" : config.AdapterId.Trim().ToLowerInvariant();
     CTraderAdapterSettings? ctraderSettings = null;
     OandaAdapterSettings? oandaSettings = null;
+    OandaStreamSettings? streamSettings = null;
     if (raw.RootElement.TryGetProperty("adapter", out var adapterNode) && adapterNode.ValueKind == JsonValueKind.Object)
     {
         var typeName = adapterNode.TryGetProperty("type", out var typeEl) && typeEl.ValueKind == JsonValueKind.String
@@ -158,6 +199,7 @@ static AdapterContext ResolveAdapterContext(EngineConfig config, JsonDocument ra
             else if (sourceAdapter.StartsWith("oanda", StringComparison.Ordinal))
             {
                 oandaSettings = OandaAdapterSettings.FromJson(adapterNode, sourceAdapter);
+                streamSettings = OandaStreamSettings.FromJson(adapterNode, raw.RootElement, sourceAdapter);
             }
         }
     }
@@ -171,10 +213,10 @@ static AdapterContext ResolveAdapterContext(EngineConfig config, JsonDocument ra
         }
     }
 
-    return new AdapterContext(sourceAdapter, ctraderSettings, oandaSettings, featureFlags);
+    return new AdapterContext(sourceAdapter, ctraderSettings, oandaSettings, streamSettings, featureFlags);
 }
 
-internal sealed record AdapterContext(string SourceAdapter, CTraderAdapterSettings? CTraderSettings, OandaAdapterSettings? OandaSettings, IReadOnlyList<string> FeatureFlags)
+internal sealed record AdapterContext(string SourceAdapter, CTraderAdapterSettings? CTraderSettings, OandaAdapterSettings? OandaSettings, OandaStreamSettings? StreamSettings, IReadOnlyList<string> FeatureFlags)
 {
     public EngineHostState State { get; } = new EngineHostState(SourceAdapter, FeatureFlags);
 }
