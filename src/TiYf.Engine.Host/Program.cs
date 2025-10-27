@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using TiYf.Engine.Host;
 using TiYf.Engine.Sim;
 
@@ -13,15 +14,14 @@ var configPath = ResolveConfigPath(args);
 var (engineConfig, configHash, rawConfig) = EngineConfigLoader.Load(configPath);
 var adapterContext = ResolveAdapterContext(engineConfig, rawConfig);
 
+var builder = WebApplication.CreateBuilder(args);
 var portEnv = Environment.GetEnvironmentVariable("ENGINE_HOST_PORT");
 var listenPort = 8080;
 if (!string.IsNullOrWhiteSpace(portEnv) && int.TryParse(portEnv, out var parsedPort) && parsedPort > 0)
 {
     listenPort = parsedPort;
 }
-
-var builder = WebApplication.CreateBuilder(args);
-builder.WebHost.ConfigureKestrel(options => options.ListenAnyIP(listenPort));
+builder.WebHost.ConfigureKestrel(options => options.ListenLocalhost(listenPort));
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton(new EngineHostConfiguration(configPath, configHash));
 builder.Services.AddSingleton(adapterContext.State);
@@ -33,6 +33,11 @@ builder.Services.Configure<EngineHostOptions>(options =>
         seconds > 0)
     {
         options.HeartbeatInterval = TimeSpan.FromSeconds(seconds);
+    }
+    var metricsEnv = Environment.GetEnvironmentVariable("ENGINE_HOST_ENABLE_METRICS");
+    if (!string.IsNullOrWhiteSpace(metricsEnv) && bool.TryParse(metricsEnv, out var metricsEnabled))
+    {
+        options.EnableMetrics = metricsEnabled;
     }
 });
 if (adapterContext.CTraderSettings is not null)
@@ -97,7 +102,20 @@ app.Lifetime.ApplicationStarted.Register(() =>
 
 app.MapGet("/health", (EngineHostState state) => Results.Json(state.CreateHealthPayload()));
 app.MapGet("/", () => Results.Json(new { status = "ok" }));
-app.MapGet("/metrics", () => Results.Content("# TiYf Engine host metrics\n", "text/plain"));
+var hostOptions = app.Services.GetRequiredService<IOptions<EngineHostOptions>>().Value;
+if (hostOptions.EnableMetrics)
+{
+    app.MapGet("/metrics", (EngineHostState state) =>
+    {
+        var snapshot = state.CreateMetricsSnapshot();
+        var content = EngineMetricsFormatter.Format(snapshot);
+        return Results.Text(content, "text/plain");
+    });
+}
+else
+{
+    app.MapGet("/metrics", () => Results.Text("# metrics disabled\n", "text/plain"));
+}
 
 app.MapPost("/shutdown", async (IHostApplicationLifetime lifetime, ILogger<Program> logger) =>
 {
@@ -162,4 +180,6 @@ internal sealed record AdapterContext(string SourceAdapter, CTraderAdapterSettin
 }
 
 internal sealed record EngineHostConfiguration(string ConfigPath, string ConfigHash);
+
+public partial class Program;
 

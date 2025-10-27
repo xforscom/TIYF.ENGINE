@@ -5,6 +5,11 @@ public sealed class EngineHostState
     private readonly object _sync = new();
     private readonly List<string> _featureFlags;
 
+    private int _openPositions;
+    private int _activeOrders;
+    private long _riskEventsTotal;
+    private long _alertsTotal;
+
     public EngineHostState(string adapter, IEnumerable<string>? featureFlags)
     {
         Adapter = adapter;
@@ -81,10 +86,31 @@ public sealed class EngineHostState
         }
     }
 
-    public object CreateHealthPayload()
+    public void SetMetrics(int openPositions, int activeOrders, long riskEventsTotal, long alertsTotal)
     {
         lock (_sync)
         {
+            _openPositions = Math.Max(0, openPositions);
+            _activeOrders = Math.Max(0, activeOrders);
+            _riskEventsTotal = Math.Max(0, riskEventsTotal);
+            _alertsTotal = Math.Max(0, alertsTotal);
+        }
+    }
+
+    public EngineMetricsSnapshot CreateMetricsSnapshot()
+    {
+        lock (_sync)
+        {
+            return CreateMetricsSnapshotUnsafe(DateTime.UtcNow);
+        }
+    }
+
+    public object CreateHealthPayload()
+    {
+        var utcNow = DateTime.UtcNow;
+        lock (_sync)
+        {
+            var metrics = CreateMetricsSnapshotUnsafe(utcNow);
             return new
             {
                 adapter = Adapter,
@@ -94,8 +120,26 @@ public sealed class EngineHostState
                 pending_orders = PendingOrders,
                 feature_flags = _featureFlags.ToArray(),
                 last_heartbeat_utc = LastHeartbeatUtc,
-                last_log = LastLog
+                last_log = LastLog,
+                heartbeat_age_seconds = metrics.HeartbeatAgeSeconds,
+                open_positions = metrics.OpenPositions,
+                active_orders = metrics.ActiveOrders,
+                risk_events_total = metrics.RiskEventsTotal,
+                alerts_total = metrics.AlertsTotal
             };
         }
+    }
+
+    private EngineMetricsSnapshot CreateMetricsSnapshotUnsafe(DateTime utcNow)
+    {
+        var heartbeatAge = Math.Max(0d, (utcNow - LastHeartbeatUtc).TotalSeconds);
+        return new EngineMetricsSnapshot(
+            heartbeatAge,
+            BarLagMilliseconds,
+            PendingOrders,
+            _openPositions,
+            _activeOrders,
+            _riskEventsTotal,
+            _alertsTotal);
     }
 }

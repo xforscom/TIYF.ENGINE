@@ -5,6 +5,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Always emit a single-line status for downstream parsers.
 $healthLine = 'health connected=unknown last_heartbeat_utc=unknown'
 
 try {
