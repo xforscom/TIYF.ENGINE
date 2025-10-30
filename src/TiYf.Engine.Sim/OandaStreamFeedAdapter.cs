@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Linq;
 using System.Text.Json;
 namespace TiYf.Engine.Sim;
 
@@ -14,6 +15,8 @@ public sealed class OandaStreamFeedAdapter : IAsyncDisposable
     private readonly Action<string>? _logWarning;
     private readonly Action<Exception, string>? _logError;
     private bool _disposed;
+    private bool _timestampParseWarningEmitted;
+    private static readonly DateTime TimestampSentinel = DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc);
 
     public OandaStreamFeedAdapter(
         HttpClient httpClient,
@@ -191,7 +194,8 @@ public sealed class OandaStreamFeedAdapter : IAsyncDisposable
             builder.Path += "/";
         }
         builder.Path = string.Concat(builder.Path, endpoint.TrimStart('/'));
-        var instrumentsParam = string.Join(',', _streamSettings.Instruments);
+        var instrumentsParam = string.Join(',',
+            _streamSettings.Instruments.Select(symbol => OandaInstrumentNormalizer.ToApiSymbol(symbol) ?? symbol));
         builder.Query = $"instruments={Uri.EscapeDataString(instrumentsParam)}";
         return builder.Uri;
     }
@@ -228,14 +232,19 @@ public sealed class OandaStreamFeedAdapter : IAsyncDisposable
         return template.Replace("{accountId}", _settings.AccountId ?? string.Empty, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static DateTime ParseTimestamp(string? value)
+    private DateTime ParseTimestamp(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value)) return DateTime.UtcNow;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            EmitTimestampWarning(value);
+            return TimestampSentinel;
+        }
         if (DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var ts))
         {
             return DateTime.SpecifyKind(ts, DateTimeKind.Utc);
         }
-        return DateTime.UtcNow;
+        EmitTimestampWarning(value);
+        return TimestampSentinel;
     }
 
     public ValueTask DisposeAsync()
@@ -247,4 +256,16 @@ public sealed class OandaStreamFeedAdapter : IAsyncDisposable
         _disposed = true;
         return ValueTask.CompletedTask;
     }
+
+    private void EmitTimestampWarning(string? rawValue)
+    {
+        if (_timestampParseWarningEmitted)
+        {
+            return;
+        }
+        _timestampParseWarningEmitted = true;
+        _logWarning?.Invoke($"OANDA stream timestamp parse failed; using sentinel for value '{rawValue ?? "<null>"}'. Further occurrences suppressed.");
+    }
+
+    internal static bool IsTimestampSentinel(DateTime timestamp) => timestamp == TimestampSentinel;
 }

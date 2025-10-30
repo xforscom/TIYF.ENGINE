@@ -116,9 +116,10 @@ public sealed record OandaStreamSettings(
                 if (item.ValueKind == JsonValueKind.String)
                 {
                     var symbol = item.GetString();
-                    if (!string.IsNullOrWhiteSpace(symbol))
+                    var normalized = NormalizeInstrument(symbol);
+                    if (!string.IsNullOrWhiteSpace(normalized))
                     {
-                        list.Add(NormalizeInstrument(symbol));
+                        list.Add(normalized);
                     }
                 }
             }
@@ -131,9 +132,10 @@ public sealed record OandaStreamSettings(
                 if (item.ValueKind == JsonValueKind.String)
                 {
                     var symbol = item.GetString();
-                    if (!string.IsNullOrWhiteSpace(symbol))
+                    var normalized = NormalizeInstrument(symbol);
+                    if (!string.IsNullOrWhiteSpace(normalized))
                     {
-                        list.Add(NormalizeInstrument(symbol));
+                        list.Add(normalized);
                     }
                 }
             }
@@ -147,19 +149,5 @@ public sealed record OandaStreamSettings(
         return list;
     }
 
-    private static string NormalizeInstrument(string raw)
-    {
-        if (string.IsNullOrWhiteSpace(raw)) return raw;
-        var trimmed = raw.Trim().ToUpperInvariant();
-        if (trimmed.Contains('_')) return trimmed;
-        if (trimmed.Length == 7 && trimmed[3] == '/')
-        {
-            trimmed = trimmed.Replace("/", "");
-        }
-        if (trimmed.Length == 6)
-        {
-            return $"{trimmed[..3]}_{trimmed[3..]}";
-        }
-        return trimmed;
-    }
+    private static string? NormalizeInstrument(string? raw) => OandaInstrumentNormalizer.ToApiSymbol(raw);
 }

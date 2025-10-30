@@ -108,7 +108,6 @@ public sealed class EngineHostState
 
         lock (_sync)
         {
-            _streamConnected = true;
             _lastStreamHeartbeatUtc = utcTimestamp;
         }
     }

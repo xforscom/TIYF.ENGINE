@@ -131,6 +131,12 @@ function Invoke-ReplayRun {
     try { $proc.WaitForExit() } catch { }
 
     $exitCode = $proc.ExitCode
+    if ($null -eq $exitCode) {
+        # Some environments do not propagate the exit code immediately after Stop-Process; treat as forced kill.
+        $exitCode = 137
+    }
+    # Exit code 137 indicates SIGKILL from the forced Stop-Process above after artifacts are collected.
+    # Treat it as success because the host shuts down via kill once replay evidence is captured.
     if ($exitCode -ne 0 -and $exitCode -ne 137) {
         throw "Replay run '$Label' failed (exit code $exitCode)."
     }

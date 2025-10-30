@@ -96,4 +96,28 @@ public class OandaStreamFeedAdapterTests
         Assert.Equal(expectedSeconds, Math.Round(delay.TotalSeconds, 6));
         Assert.True(delay <= streamSettings.MaxBackoff);
     }
+
+    [Fact]
+    public async Task TryParse_InvalidTimestamp_UsesSentinel()
+    {
+        var streamSettings = CreateStreamSettings();
+        await using var adapter = new OandaStreamFeedAdapter(
+            new HttpClient(),
+            CreateAdapterSettings(),
+            streamSettings);
+
+        var payload = """
+        {
+          "type": "HEARTBEAT",
+          "time": ""
+        }
+        """;
+
+        var parsed = adapter.TryParse(payload, out var evt);
+
+        Assert.True(parsed);
+        Assert.True(evt.IsHeartbeat);
+        Assert.True(OandaStreamFeedAdapter.IsTimestampSentinel(evt.Timestamp));
+        Assert.Equal(DateTimeKind.Utc, evt.Timestamp.Kind);
+    }
 }

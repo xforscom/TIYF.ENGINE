@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -39,6 +40,7 @@ internal sealed class OandaStreamingService : BackgroundService
     private int _lastOpenPositions;
     private int _lastActiveOrders;
     private int _consecutiveFailures;
+    private static readonly DateTime TimestampSentinel = DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc);
 
     public OandaStreamingService(
         EngineHostState state,
@@ -258,12 +260,22 @@ internal sealed class OandaStreamingService : BackgroundService
         _logger.LogInformation("Starting replay stream ticks={Path}", path);
         _state.UpdateStreamConnection(true);
 
+        var replayLines = File.ReadLines(path)
+            .Skip(1)
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .ToArray();
+
+        if (replayLines.Length == 0)
+        {
+            _logger.LogWarning("Replay ticks file is empty path={Path}", path);
+            return;
+        }
+
         while (!ct.IsCancellationRequested)
         {
-            foreach (var line in File.ReadLines(path).Skip(1))
+            foreach (var line in replayLines)
             {
                 ct.ThrowIfCancellationRequested();
-                if (string.IsNullOrWhiteSpace(line)) continue;
                 var parts = line.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                 if (parts.Length < 2) continue;
                 if (!DateTime.TryParse(parts[0], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var ts))
@@ -295,6 +307,10 @@ internal sealed class OandaStreamingService : BackgroundService
 
         if (evt.IsHeartbeat)
         {
+            if (IsSentinelTimestamp(evt.Timestamp))
+            {
+                return Task.CompletedTask;
+            }
             _state.RecordStreamHeartbeat(evt.Timestamp);
             return Task.CompletedTask;
         }
@@ -306,6 +322,11 @@ internal sealed class OandaStreamingService : BackgroundService
 
         var normalizedInstrument = NormalizeInstrument(evt.Instrument);
         if (string.IsNullOrWhiteSpace(normalizedInstrument))
+        {
+            return Task.CompletedTask;
+        }
+
+        if (IsSentinelTimestamp(evt.Timestamp))
         {
             return Task.CompletedTask;
         }
@@ -595,13 +616,12 @@ internal sealed class OandaStreamingService : BackgroundService
         return new DateTime(ts.Year, ts.Month, ts.Day, ts.Hour, ts.Minute, 0, DateTimeKind.Utc);
     }
 
-    private static string NormalizeInstrument(string raw)
+    private static bool IsSentinelTimestamp(DateTime timestamp) => timestamp == TimestampSentinel;
+
+    private static string NormalizeInstrument(string? raw)
     {
-        if (string.IsNullOrWhiteSpace(raw)) return raw;
-        var text = raw.Trim().ToUpperInvariant();
-        text = text.Replace("_", string.Empty, StringComparison.Ordinal);
-        text = text.Replace("/", string.Empty, StringComparison.Ordinal);
-        return text;
+        var canonical = OandaInstrumentNormalizer.ToCanonical(raw);
+        return string.IsNullOrWhiteSpace(canonical) ? string.Empty : canonical;
     }
 
     private static decimal ComputeMid(decimal bid, decimal ask)
