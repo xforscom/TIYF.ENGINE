@@ -1,0 +1,48 @@
+name: replay-determinism
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/m2-oanda-stream
+
+permissions:
+  contents: read
+
+jobs:
+  replay-proof:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Run replay determinism harness
+        run: |
+          ./scripts/pwsh/ReplayDeterminism.ps1 -WorkingDirectory "scratch/replay-proof" -RunSeconds 60
+
+      - name: Capture proof summary
+        run: |
+          $report = Get-Content scratch/replay-proof/replay-proof.json | ConvertFrom-Json
+          $hash = $report.matchingHash
+          Write-Host "Replay determinism hash: $hash"
+          $summary = "## Replay Determinism`n- Hash: $hash`n- Run1: $($report.run1.EventsPath)`n- Run2: $($report.run2.EventsPath)"
+          $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+      - name: Upload replay artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: replay-proof
+          path: |
+            scratch/replay-proof/run1.zip
+            scratch/replay-proof/run2.zip
+            scratch/replay-proof/replay-proof.json

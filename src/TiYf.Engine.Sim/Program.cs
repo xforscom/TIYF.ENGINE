@@ -852,11 +852,25 @@ SentimentGuardConfig? BuildSentimentConfig(JsonDocument rawDoc)
     return null;
 }
 
-var loop = new EngineLoop(clock, builders, barKeyTracker!, journal, tickSource, cfg.BarOutputEventType ?? "BAR_V1", () =>
-{
-    // Persist after each emitted bar (simple, can batch later)
-    BarKeyTrackerPersistence.Save(snapshotPath, (InMemoryBarKeyTracker)barKeyTracker, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, EngineInstanceId);
-}, riskFormulas, basketAgg, cfgHash, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, enforcer, riskConfig, equity,
+var loop = new EngineLoop(
+    clock,
+    builders,
+    barKeyTracker!,
+    journal,
+    tickSource,
+    cfg.BarOutputEventType ?? "BAR_V1",
+    bar =>
+    {
+        // Persist after each emitted bar (simple, can batch later)
+        BarKeyTrackerPersistence.Save(snapshotPath, (InMemoryBarKeyTracker)barKeyTracker, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, EngineInstanceId);
+    },
+    riskFormulas: riskFormulas,
+    basketAggregator: basketAgg,
+    configHash: cfgHash,
+    schemaVersion: cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version,
+    riskEnforcer: enforcer,
+    riskConfig: riskConfig,
+    equityOverride: equity,
     deterministicStrategy: isM0 ? new DeterministicScriptStrategy(clock, catalog.All(), sequence.First()) : null,
     execution: execution,
     positions: positions,

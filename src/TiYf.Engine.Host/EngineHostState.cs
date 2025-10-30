@@ -9,6 +9,8 @@ public sealed class EngineHostState
     private int _activeOrders;
     private long _riskEventsTotal;
     private long _alertsTotal;
+    private bool _streamConnected;
+    private DateTime? _lastStreamHeartbeatUtc;
 
     public EngineHostState(string adapter, IEnumerable<string>? featureFlags)
     {
@@ -97,6 +99,39 @@ public sealed class EngineHostState
         }
     }
 
+    public void RecordStreamHeartbeat(DateTime utcTimestamp)
+    {
+        if (utcTimestamp.Kind != DateTimeKind.Utc)
+        {
+            utcTimestamp = DateTime.SpecifyKind(utcTimestamp, DateTimeKind.Utc);
+        }
+
+        lock (_sync)
+        {
+            _lastStreamHeartbeatUtc = utcTimestamp;
+        }
+    }
+
+    public void UpdateStreamConnection(bool connected)
+    {
+        lock (_sync)
+        {
+            _streamConnected = connected;
+            if (!connected && _lastStreamHeartbeatUtc is null)
+            {
+                _lastStreamHeartbeatUtc = DateTime.UtcNow;
+            }
+        }
+    }
+
+    public void IncrementAlertCounter()
+    {
+        lock (_sync)
+        {
+            _alertsTotal++;
+        }
+    }
+
     public EngineMetricsSnapshot CreateMetricsSnapshot()
     {
         lock (_sync)
@@ -125,7 +160,9 @@ public sealed class EngineHostState
                 open_positions = metrics.OpenPositions,
                 active_orders = metrics.ActiveOrders,
                 risk_events_total = metrics.RiskEventsTotal,
-                alerts_total = metrics.AlertsTotal
+                alerts_total = metrics.AlertsTotal,
+                stream_connected = metrics.StreamConnected,
+                stream_heartbeat_age_seconds = metrics.StreamHeartbeatAgeSeconds
             };
         }
     }
@@ -133,6 +170,9 @@ public sealed class EngineHostState
     private EngineMetricsSnapshot CreateMetricsSnapshotUnsafe(DateTime utcNow)
     {
         var heartbeatAge = Math.Max(0d, (utcNow - LastHeartbeatUtc).TotalSeconds);
+        var streamHeartbeatUtc = _lastStreamHeartbeatUtc ?? LastHeartbeatUtc;
+        var streamHeartbeatAge = Math.Max(0d, (utcNow - streamHeartbeatUtc).TotalSeconds);
+        var streamConnected = _streamConnected ? 1 : 0;
         return new EngineMetricsSnapshot(
             heartbeatAge,
             BarLagMilliseconds,
@@ -140,6 +180,8 @@ public sealed class EngineHostState
             _openPositions,
             _activeOrders,
             _riskEventsTotal,
-            _alertsTotal);
+            _alertsTotal,
+            streamConnected,
+            streamHeartbeatAge);
     }
 }

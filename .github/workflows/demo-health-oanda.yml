@@ -1,65 +1,134 @@
 name: demo-health-oanda
 
 on:
-  schedule:
-    - cron: '5 */6 * * *'
   workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'
 
 permissions:
   contents: read
 
+concurrency:
+  group: demo-health-oanda-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  demo-health-oanda:
+  capture-health:
     runs-on: [self-hosted, Linux, X64, tiyf-vps]
     timeout-minutes: 5
-    defaults:
-      run:
-        shell: bash
+    env:
+      HEALTH_PATH: scratch/health.json
     steps:
-      - name: Prepare workspace
+      - name: Install PowerShell 7
+        if: runner.os == 'Linux'
+        shell: bash
         run: |
           set -euo pipefail
-          mkdir -p scratch
+          POWERSHELL_VERSION="7.4.6"
+          INSTALL_ROOT="$HOME/powershell"
 
-      - name: Capture health snapshot
-        run: |
-          set -euo pipefail
-          if ! command -v jq >/dev/null 2>&1; then
-            echo 'jq is required for health validation' >&2
+          if [ -x "$INSTALL_ROOT/pwsh" ]; then
+            echo "$INSTALL_ROOT" >> "$GITHUB_PATH"
+            exit 0
+          fi
+
+          if [ -x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh" ]; then
+            echo "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64" >> "$GITHUB_PATH"
+            exit 0
+          fi
+
+          mkdir -p "$INSTALL_ROOT"
+          curl -fSLo powershell.tar.gz "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz"
+          curl -fSLo checksums.txt "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/SHA256SUMS"
+          EXPECTED_SUM="$(grep "powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz" checksums.txt | awk '{print $1}')"
+          if [ -z "$EXPECTED_SUM" ]; then
+            echo "ERROR: Unable to locate expected checksum for PowerShell archive" >&2
+            exit 1
+          fi
+          ACTUAL_SUM="$(sha256sum powershell.tar.gz | awk '{print $1}')"
+          if [ "$EXPECTED_SUM" != "$ACTUAL_SUM" ]; then
+            echo "ERROR: Checksum verification failed for powershell.tar.gz" >&2
+            echo "Expected: $EXPECTED_SUM" >&2
+            echo "Actual:   $ACTUAL_SUM" >&2
+            exit 1
+          fi
+          tar -xzf powershell.tar.gz -C "$INSTALL_ROOT"
+          rm powershell.tar.gz checksums.txt
+
+          if [ -x "$INSTALL_ROOT/pwsh" ]; then
+            chmod +x "$INSTALL_ROOT/pwsh"
+            echo "$INSTALL_ROOT" >> "$GITHUB_PATH"
+          elif [ -x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh" ]; then
+            chmod +x "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64/pwsh"
+            echo "$INSTALL_ROOT/powershell-${POWERSHELL_VERSION}-linux-x64" >> "$GITHUB_PATH"
+          else
+            echo "Failed to locate pwsh after extraction" >&2
+            find "$INSTALL_ROOT" -maxdepth 3 -type f -name 'pwsh' -print || true
             exit 1
           fi
 
+      - name: Prepare workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf scratch
+          mkdir -p scratch
+
+      - name: Fetch /health snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
           attempts=0
-          until [ $attempts -ge 5 ]; do
-            if curl -fsS http://127.0.0.1:8080/health -o scratch/health.json; then
+          while [ $attempts -lt 5 ]; do
+            if curl -fsS http://127.0.0.1:8080/health -o "$HEALTH_PATH"; then
               break
             fi
             attempts=$((attempts + 1))
             sleep 2
           done
 
-          if [ ! -s scratch/health.json ]; then
-            echo 'Failed to capture /health after 5 attempts' >&2
+          if [ ! -s "$HEALTH_PATH" ]; then
+            echo "Failed to capture /health after $attempts attempts" >&2
             exit 1
           fi
 
-          jq -e '.connected == true' scratch/health.json >/dev/null
-          jq '.' scratch/health.json > scratch/health.pretty.json
-
-      - name: Summarize health
+      - name: Summarize health metrics
+        shell: pwsh
         run: |
-          set -euo pipefail
-          jq '.' scratch/health.json
-          printf '## /health snapshot\n' >> "$GITHUB_STEP_SUMMARY"
-          printf '\n```json\n' >> "$GITHUB_STEP_SUMMARY"
-          cat scratch/health.json >> "$GITHUB_STEP_SUMMARY"
-          printf '\n```\n' >> "$GITHUB_STEP_SUMMARY"
+          $ErrorActionPreference = 'Stop'
+          $path = $env:HEALTH_PATH
+          if (-not (Test-Path -Path $path)) {
+            throw "/health payload missing at $path"
+          }
 
-      - name: Upload artifacts
+          $health = Get-Content -Raw -Path $path | ConvertFrom-Json
+          if ($null -eq $health) {
+            throw "Unable to parse JSON from $path"
+          }
+
+          $line = "demo-health-oanda: adapter={0} connected={1} heartbeat_age={2:0.0}s stream_connected={3} stream_heartbeat_age={4:0.0}s bar_lag_ms={5:0.0} open_positions={6} active_orders={7} risk_events_total={8} alerts_total={9}" -f `
+            $health.adapter, `
+            ([bool]$health.connected).ToString().ToLowerInvariant(), `
+            ($health.heartbeat_age_seconds ?? 0), `
+            ($health.stream_connected ?? 0), `
+            ($health.stream_heartbeat_age_seconds ?? 0), `
+            ($health.bar_lag_ms ?? 0), `
+            ($health.open_positions ?? 0), `
+            ($health.active_orders ?? 0), `
+            ($health.risk_events_total ?? 0), `
+            ($health.alerts_total ?? 0)
+
+          Write-Host $line
+          $summaryPath = Join-Path 'scratch' 'summary.txt'
+          Set-Content -Path $summaryPath -Value $line -Encoding UTF8
+
+          Add-Content -Encoding UTF8 -Path $env:GITHUB_STEP_SUMMARY -Value "## Latest /health snapshot"
+          Add-Content -Encoding UTF8 -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Encoding UTF8 -Path $env:GITHUB_STEP_SUMMARY -Value $line
+
+      - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: oanda-health
-          path: |
-            scratch/health.json
-            scratch/health.pretty.json
+          name: demo-health-oanda-health-json
+          path: ${{ env.HEALTH_PATH }}

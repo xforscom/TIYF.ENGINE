@@ -89,6 +89,7 @@ public sealed class PositionTracker
     private readonly List<CompletedTrade> _completed = new();
 
     public IReadOnlyList<CompletedTrade> Completed => _completed;
+    public int OpenCount => _open.Count;
 
     public void OnFill(ExecutionFill fill, string schemaVersion, string configHash, string sourceAdapter, string? dataVersion)
     {

@@ -7,4 +7,6 @@ public readonly record struct EngineMetricsSnapshot(
     int OpenPositions,
     int ActiveOrders,
     long RiskEventsTotal,
-    long AlertsTotal);
+    long AlertsTotal,
+    int StreamConnected,
+    double StreamHeartbeatAgeSeconds);

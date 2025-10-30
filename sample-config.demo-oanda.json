@@ -16,7 +16,16 @@
       "retryMaxAttempts": 5,
       "handshakeEndpoint": "/accounts/{accountId}/summary",
       "orderEndpoint": "/accounts/{accountId}/orders",
-      "useMock": false
+      "useMock": false,
+      "stream": {
+        "enable": true,
+        "baseUrl": "https://stream-fxpractice.oanda.com/v3/",
+        "pricingEndpoint": "/accounts/{accountId}/pricing/stream",
+        "heartbeatTimeoutSeconds": 15,
+        "maxBackoffSeconds": 10,
+        "feedMode": "live",
+        "replayTicksFile": "data/ticks/replay.csv"
+      }
     }
   },
   "InstrumentFile": "sample-instruments.csv",
