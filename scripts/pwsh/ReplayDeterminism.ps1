@@ -150,6 +150,9 @@ function Invoke-ReplayRun {
     try { $proc.WaitForExit() } catch { }
 
     $exitCode = $proc.ExitCode
+    # Exit code 137 (SIGKILL) is expected when the process is force-killed after we've
+    # already captured the replay artifacts (events.csv, etc.). Replay runs intentionally
+    # terminate the host once the journals are written, so 137 is not a failure here.
     if ($null -eq $exitCode) {
         # Some environments do not propagate the exit code immediately after Stop-Process; treat as forced kill.
         $exitCode = 137
