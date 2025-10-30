@@ -76,6 +76,25 @@ $configJson = @"
 
 [System.IO.File]::WriteAllText((Join-Path $workDir "config.json"), $configJson, (New-Object System.Text.UTF8Encoding($false)))
 
+function Get-CrossPlatformHash {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $content = Get-Content -Path $Path -Raw
+    $normalized = $content -replace "`r", ""
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($normalized)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hashBytes = $sha.ComputeHash($bytes)
+        return ([BitConverter]::ToString($hashBytes)).Replace("-", "")
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+
 function Invoke-ReplayRun {
     param(
         [string]$Label
@@ -143,7 +162,7 @@ function Invoke-ReplayRun {
 
     Copy-Item $eventsPath (Join-Path $labelDir "events.csv")
 
-    $hash = (Get-FileHash (Join-Path $labelDir "events.csv")).Hash
+    $hash = Get-CrossPlatformHash -Path (Join-Path $labelDir "events.csv")
     return [pscustomobject]@{
         Label = $Label
         EventsPath = (Join-Path $labelDir "events.csv")
