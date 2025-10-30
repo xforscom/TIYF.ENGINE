@@ -150,6 +150,8 @@ jobs:
           cp deploy/scripts/remote-deploy.sh publish/scripts/
           cp sample-config.demo-ctrader.json publish/
           cp sample-config.demo-oanda.json publish/
+          cp sample-instruments.csv publish/
+          cp sample-ticks.csv publish/
 
       - name: Configure SSH
         uses: webfactory/ssh-agent@v0.9.0

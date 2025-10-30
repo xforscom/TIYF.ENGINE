@@ -1,2 +1,5 @@
-id,symbol,decimals
-INST1,FOO,2
+Symbol,BaseCurrency,QuoteCurrency,PipSize,TickSize,ContractSize,LotStep,PriceDecimals,VolumeDecimals,TradingHours
+EURUSD,EUR,USD,0.0001,0.00005,100000,1000,5,0,24x5
+GBPUSD,GBP,USD,0.0001,0.00005,100000,1000,5,0,24x5
+USDJPY,USD,JPY,0.01,0.005,100000,1000,3,0,24x5
+XAUUSD,XAU,USD,0.1,0.05,100,1,2,0,24x5
