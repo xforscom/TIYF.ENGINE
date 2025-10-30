@@ -40,6 +40,8 @@ internal sealed class EngineLoopService : BackgroundService
     private readonly Dictionary<long, string> _timeframeLabelByTicks;
     private readonly string _snapshotPath;
     private readonly TimeSpan _decisionSkewTolerance;
+    private readonly string _snapshotSource;
+    private readonly string _schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version;
     private InMemoryBarKeyTracker? _barKeyTracker;
     private string _engineInstanceId = string.Empty;
     private DateTime _loopStartUtc;
@@ -80,6 +82,7 @@ internal sealed class EngineLoopService : BackgroundService
         _timeframeLabelByTicks = _configuredTimeframes.ToDictionary(tf => tf.Interval.Duration.Ticks, tf => tf.Label);
         _snapshotPath = ResolveSnapshotPath(_hostOptions.SnapshotPath);
         _decisionSkewTolerance = TimeSpan.FromMilliseconds(Math.Max(0, _hostOptions.DecisionSkewToleranceMilliseconds));
+        _snapshotSource = string.Equals(_streamSettings.FeedMode, "replay", StringComparison.OrdinalIgnoreCase) ? "replay" : "live";
         _executionAdapter = executionAdapter;
     }
 
@@ -458,7 +461,15 @@ internal sealed class EngineLoopService : BackgroundService
     {
         try
         {
+            var existed = File.Exists(_snapshotPath);
             var snapshot = LoopSnapshotPersistence.Load(_snapshotPath);
+            if (!string.Equals(snapshot.SchemaVersion, _schemaVersion, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("Loop snapshot schema mismatch found={Found} expected={Expected}; ignoring snapshot at {Path}.", snapshot.SchemaVersion, _schemaVersion, _snapshotPath);
+                ResetLoopState();
+                return;
+            }
+
             _barKeyTracker = snapshot.Tracker ?? new InMemoryBarKeyTracker();
             var decisionSnapshot = snapshot.DecisionsByTimeframe ?? new Dictionary<string, DateTime?>(StringComparer.OrdinalIgnoreCase);
             _state.BootstrapLoopState(snapshot.DecisionsTotal, snapshot.LoopIterationsTotal, snapshot.LastDecisionUtc, decisionSnapshot);
@@ -466,12 +477,25 @@ internal sealed class EngineLoopService : BackgroundService
             {
                 _engineInstanceId = snapshot.EngineInstanceId;
             }
+
+            var barCount = _barKeyTracker.Snapshot().Count();
+            if (!existed || (barCount == 0 && snapshot.DecisionsTotal == 0 && snapshot.LoopIterationsTotal == 0))
+            {
+                _logger.LogInformation("No prior loop snapshot found; starting fresh snapshot at {Path}.", _snapshotPath);
+            }
+            else
+            {
+                _logger.LogInformation("Loop snapshot loaded source={Source} bars={BarCount} decisions_total={Decisions} last_decision={LastDecision:o}", snapshot.Source, barCount, snapshot.DecisionsTotal, snapshot.LastDecisionUtc);
+            }
+            if (!string.Equals(snapshot.Source, _snapshotSource, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("Loop snapshot source differs (snapshot={SnapshotSource}, current={CurrentSource}); continuing.", snapshot.Source, _snapshotSource);
+            }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to load engine loop snapshot; starting from clean state.");
-            _barKeyTracker = new InMemoryBarKeyTracker();
-            _state.BootstrapLoopState(0, 0, null, new Dictionary<string, DateTime?>(StringComparer.OrdinalIgnoreCase));
+            ResetLoopState();
         }
 
         if (string.IsNullOrWhiteSpace(_engineInstanceId))
@@ -490,8 +514,23 @@ internal sealed class EngineLoopService : BackgroundService
         var loopData = _state.GetLoopSnapshotData();
         lock (_snapshotSync)
         {
-            var snapshot = new LoopSnapshot(_engineInstanceId, _barKeyTracker, loopData.DecisionsTotal, loopData.LoopIterationsTotal, loopData.LastDecisionUtc, loopData.DecisionsByTimeframe);
-            LoopSnapshotPersistence.Save(_snapshotPath, snapshot);
+            var snapshot = new LoopSnapshot(
+                _schemaVersion,
+                _engineInstanceId,
+                _snapshotSource,
+                _barKeyTracker,
+                loopData.DecisionsTotal,
+                loopData.LoopIterationsTotal,
+                loopData.LastDecisionUtc,
+                loopData.DecisionsByTimeframe);
+            try
+            {
+                LoopSnapshotPersistence.Save(_snapshotPath, snapshot);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to persist loop snapshot to {Path}.", _snapshotPath);
+            }
         }
     }
 
@@ -514,6 +553,12 @@ internal sealed class EngineLoopService : BackgroundService
 
         PersistSnapshot();
         UpdateHostMetrics();
+    }
+
+    private void ResetLoopState()
+    {
+        _barKeyTracker = new InMemoryBarKeyTracker();
+        _state.BootstrapLoopState(0, 0, null, new Dictionary<string, DateTime?>(StringComparer.OrdinalIgnoreCase));
     }
 
     private void OnPositionMetrics(int openPositions, int activeOrders)

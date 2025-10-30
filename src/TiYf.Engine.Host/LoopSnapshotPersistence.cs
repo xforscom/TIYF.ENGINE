@@ -13,6 +13,7 @@ internal static class LoopSnapshotPersistence
     private sealed record SnapshotModel(
         string SchemaVersion,
         string EngineInstanceId,
+        string Source,
         List<SnapshotBar> Bars,
         long DecisionsTotal = 0,
         long LoopIterationsTotal = 0,
@@ -30,7 +31,8 @@ internal static class LoopSnapshotPersistence
 
         var json = File.ReadAllText(path);
         var model = JsonSerializer.Deserialize<SnapshotModel>(json) ?? throw new InvalidOperationException("Invalid loop snapshot");
-        var bars = model.Bars
+        var barModels = model.Bars ?? new List<SnapshotBar>();
+        var bars = barModels
             .OrderBy(b => b.InstrumentId, StringComparer.Ordinal)
             .ThenBy(b => b.IntervalSeconds)
             .ThenBy(b => b.OpenTimeUtc)
@@ -44,8 +46,15 @@ internal static class LoopSnapshotPersistence
             ? DateTime.SpecifyKind(model.LastDecisionUtc.Value, DateTimeKind.Utc)
             : null;
 
+        var schema = string.IsNullOrWhiteSpace(model.SchemaVersion)
+            ? TiYf.Engine.Core.Infrastructure.Schema.Version
+            : model.SchemaVersion;
+        var source = string.IsNullOrWhiteSpace(model.Source) ? "unknown" : model.Source;
+
         return new LoopSnapshot(
-            model.EngineInstanceId,
+            schema,
+            model.EngineInstanceId ?? string.Empty,
+            source,
             tracker,
             model.DecisionsTotal,
             model.LoopIterationsTotal,
@@ -73,8 +82,9 @@ internal static class LoopSnapshotPersistence
             .ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.OrdinalIgnoreCase);
 
         var model = new SnapshotModel(
-            TiYf.Engine.Core.Infrastructure.Schema.Version,
+            snapshot.SchemaVersion,
             snapshot.EngineInstanceId,
+            snapshot.Source,
             bars,
             snapshot.DecisionsTotal,
             snapshot.LoopIterationsTotal,
@@ -97,7 +107,9 @@ internal static class LoopSnapshotPersistence
 }
 
 internal sealed record LoopSnapshot(
+    string SchemaVersion,
     string EngineInstanceId,
+    string Source,
     InMemoryBarKeyTracker Tracker,
     long DecisionsTotal,
     long LoopIterationsTotal,
@@ -105,7 +117,9 @@ internal sealed record LoopSnapshot(
     IReadOnlyDictionary<string, DateTime?> DecisionsByTimeframe)
 {
     internal static LoopSnapshot Empty { get; } = new(
+        TiYf.Engine.Core.Infrastructure.Schema.Version,
         string.Empty,
+        "unknown",
         new InMemoryBarKeyTracker(),
         0,
         0,
