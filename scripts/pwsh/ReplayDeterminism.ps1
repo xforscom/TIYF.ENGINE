@@ -25,11 +25,11 @@ Set-Content -Path (Join-Path $workDir "ticks.csv") -Value $ticks -Encoding UTF8
 
 Copy-Item (Join-Path $root "tests/fixtures/backtest_m0/instruments.csv") (Join-Path $workDir "instruments.csv")
 
-$journalRoot = Join-Path $workDir "out"
+$journalRelative = "out"
+$journalRoot = Join-Path $workDir $journalRelative
 New-Item -ItemType Directory -Path $journalRoot | Out-Null
 
 # Build replay config with JournalRoot pointing to working directory
-$journalRootEscaped = $journalRoot.Replace('\', '\\')
 $configJson = @"
 {
   "schemaVersion": "1.3.0",
@@ -70,7 +70,7 @@ $configJson = @"
   "featureFlags": {
     "risk": "active"
   },
-  "JournalRoot": "$journalRootEscaped"
+  "JournalRoot": "$journalRelative"
 }
 "@
 
