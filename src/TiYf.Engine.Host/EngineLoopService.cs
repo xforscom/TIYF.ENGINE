@@ -1,7 +1,12 @@
+using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -12,13 +17,13 @@ using TiYf.Engine.Sim;
 
 namespace TiYf.Engine.Host;
 
-internal sealed class OandaStreamingService : BackgroundService
+internal sealed class EngineLoopService : BackgroundService
 {
     private readonly EngineHostState _state;
     private readonly EngineHostConfiguration _configuration;
     private readonly OandaAdapterSettings _adapterSettings;
     private readonly OandaStreamSettings _streamSettings;
-    private readonly ILogger<OandaStreamingService> _logger;
+    private readonly ILogger<EngineLoopService> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly EngineHostOptions _hostOptions;
     private readonly IConnectableExecutionAdapter? _executionAdapter;
@@ -31,6 +36,14 @@ internal sealed class OandaStreamingService : BackgroundService
     private EngineConfig? _engineConfig;
     private string? _configDirectory;
     private string? _primaryInstrument;
+    private readonly IReadOnlyList<(string Label, BarInterval Interval)> _configuredTimeframes;
+    private readonly Dictionary<long, string> _timeframeLabelByTicks;
+    private readonly string _snapshotPath;
+    private readonly TimeSpan _decisionSkewTolerance;
+    private InMemoryBarKeyTracker? _barKeyTracker;
+    private string _engineInstanceId = string.Empty;
+    private DateTime _loopStartUtc;
+    private readonly object _snapshotSync = new();
 
     private Task? _engineTask;
     private Task? _heartbeatTask;
@@ -42,12 +55,12 @@ internal sealed class OandaStreamingService : BackgroundService
     private int _consecutiveFailures;
     private static readonly DateTime TimestampSentinel = DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc);
 
-    public OandaStreamingService(
+    public EngineLoopService(
         EngineHostState state,
         EngineHostConfiguration configuration,
         OandaAdapterSettings adapterSettings,
         OandaStreamSettings streamSettings,
-        ILogger<OandaStreamingService> logger,
+        ILogger<EngineLoopService> logger,
         IHttpClientFactory httpClientFactory,
         IOptions<EngineHostOptions> hostOptions,
         IConnectableExecutionAdapter? executionAdapter = null)
@@ -59,16 +72,36 @@ internal sealed class OandaStreamingService : BackgroundService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _hostOptions = hostOptions?.Value ?? throw new ArgumentNullException(nameof(hostOptions));
+        _configuredTimeframes = ParseTimeframes(_hostOptions.Timeframes);
+        if (_configuredTimeframes.Count == 0)
+        {
+            _configuredTimeframes = new List<(string Label, BarInterval Interval)>(new[] { ("H1", BarInterval.OneHour) });
+        }
+        _timeframeLabelByTicks = _configuredTimeframes.ToDictionary(tf => tf.Interval.Duration.Ticks, tf => tf.Label);
+        _snapshotPath = ResolveSnapshotPath(_hostOptions.SnapshotPath);
+        _decisionSkewTolerance = TimeSpan.FromMilliseconds(Math.Max(0, _hostOptions.DecisionSkewToleranceMilliseconds));
         _executionAdapter = executionAdapter;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!_streamSettings.Enable || !_hostOptions.EnableStreamingFeed)
+        if (!_hostOptions.EnableContinuousLoop)
         {
-            _logger.LogInformation("OANDA streaming feed disabled (enable={Enable}, option={Option})", _streamSettings.Enable, _hostOptions.EnableStreamingFeed);
+            _logger.LogInformation("Engine loop disabled via configuration; skipping startup.");
             return;
         }
+
+        if (!_streamSettings.Enable || !_hostOptions.EnableStreamingFeed)
+        {
+            _logger.LogInformation("Streaming feed disabled (stream_enable={Enable}, option={Option})", _streamSettings.Enable, _hostOptions.EnableStreamingFeed);
+            return;
+        }
+
+        _loopStartUtc = DateTime.UtcNow;
+        _state.SetLoopStart(_loopStartUtc);
+        _state.SetTimeframes(_configuredTimeframes.Select(tf => tf.Label));
+
+        LoadSnapshot();
 
         _state.UpdateStreamConnection(false);
         _state.RecordStreamHeartbeat(DateTime.UtcNow);
@@ -124,6 +157,7 @@ internal sealed class OandaStreamingService : BackgroundService
             }
 
             await DisposeRuntimeAsync().ConfigureAwait(false);
+            PersistSnapshot();
             _state.UpdateStreamConnection(false);
         }
     }
@@ -146,9 +180,14 @@ internal sealed class OandaStreamingService : BackgroundService
         var instruments = LoadInstrumentCatalog(config, rawDoc, _configDirectory);
         _primaryInstrument = instruments.All().FirstOrDefault()?.Id.Value;
 
-        var intervals = ResolveIntervals();
+        var intervals = _configuredTimeframes.Select(tf => tf.Interval).Distinct().ToList();
+        if (intervals.Count == 0)
+        {
+            intervals.Add(BarInterval.OneHour);
+        }
+
         var builders = CreateBuilders(instruments.All(), intervals);
-        var tracker = new InMemoryBarKeyTracker();
+        var tracker = _barKeyTracker ??= new InMemoryBarKeyTracker();
         _tickSource = new LiveTickSource();
         _positionTracker = new PositionTracker();
 
@@ -223,6 +262,20 @@ internal sealed class OandaStreamingService : BackgroundService
         _tickSource = null;
         _engineLoop = null;
         _positionTracker = null;
+    }
+
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            PersistSnapshot();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to persist loop snapshot during StopAsync.");
+        }
+
+        await base.StopAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task RunLiveAsync(CancellationToken ct)
@@ -401,10 +454,66 @@ internal sealed class OandaStreamingService : BackgroundService
         }
     }
 
+    private void LoadSnapshot()
+    {
+        try
+        {
+            var snapshot = LoopSnapshotPersistence.Load(_snapshotPath);
+            _barKeyTracker = snapshot.Tracker ?? new InMemoryBarKeyTracker();
+            var decisionSnapshot = snapshot.DecisionsByTimeframe ?? new Dictionary<string, DateTime?>(StringComparer.OrdinalIgnoreCase);
+            _state.BootstrapLoopState(snapshot.DecisionsTotal, snapshot.LoopIterationsTotal, snapshot.LastDecisionUtc, decisionSnapshot);
+            if (!string.IsNullOrWhiteSpace(snapshot.EngineInstanceId))
+            {
+                _engineInstanceId = snapshot.EngineInstanceId;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load engine loop snapshot; starting from clean state.");
+            _barKeyTracker = new InMemoryBarKeyTracker();
+            _state.BootstrapLoopState(0, 0, null, new Dictionary<string, DateTime?>(StringComparer.OrdinalIgnoreCase));
+        }
+
+        if (string.IsNullOrWhiteSpace(_engineInstanceId))
+        {
+            _engineInstanceId = GenerateEngineInstanceId();
+        }
+    }
+
+    private void PersistSnapshot()
+    {
+        if (_barKeyTracker is null)
+        {
+            return;
+        }
+
+        var loopData = _state.GetLoopSnapshotData();
+        lock (_snapshotSync)
+        {
+            var snapshot = new LoopSnapshot(_engineInstanceId, _barKeyTracker, loopData.DecisionsTotal, loopData.LoopIterationsTotal, loopData.LastDecisionUtc, loopData.DecisionsByTimeframe);
+            LoopSnapshotPersistence.Save(_snapshotPath, snapshot);
+        }
+    }
+
     private void OnBarEmitted(Bar bar)
     {
-        _state.SetLastDecision(bar.EndUtc);
-        _state.UpdateLag(Math.Max(0d, (DateTime.UtcNow - bar.EndUtc).TotalMilliseconds));
+        var now = DateTime.UtcNow;
+        _state.UpdateLag(Math.Max(0d, (now - bar.EndUtc).TotalMilliseconds));
+
+        var label = ResolveTimeframeLabel(bar.EndUtc - bar.StartUtc);
+        _state.RecordLoopDecision(label, bar.EndUtc);
+
+        if (_decisionSkewTolerance > TimeSpan.Zero)
+        {
+            var skew = Math.Abs((now - bar.EndUtc).TotalMilliseconds);
+            if (skew > _decisionSkewTolerance.TotalMilliseconds)
+            {
+                _logger.LogWarning("Decision skew {SkewMs:F0}ms exceeded tolerance {ToleranceMs:F0}ms timeframe={Timeframe} bar_end={EndUtc:o}", skew, _decisionSkewTolerance.TotalMilliseconds, label, bar.EndUtc);
+            }
+        }
+
+        PersistSnapshot();
+        UpdateHostMetrics();
     }
 
     private void OnPositionMetrics(int openPositions, int activeOrders)
@@ -496,16 +605,6 @@ internal sealed class OandaStreamingService : BackgroundService
         }).ToList();
 
         return new InMemoryInstrumentCatalog(instruments);
-    }
-
-    private static List<BarInterval> ResolveIntervals()
-    {
-        return new List<BarInterval>
-        {
-            BarInterval.OneHour,
-            new BarInterval(TimeSpan.FromHours(4)),
-            BarInterval.OneDay
-        };
     }
 
     private static Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> CreateBuilders(IEnumerable<Instrument> instruments, IEnumerable<BarInterval> intervals)
@@ -631,4 +730,97 @@ internal sealed class OandaStreamingService : BackgroundService
         if (bid > 0m) return bid;
         return 0m;
     }
+
+    private IReadOnlyList<(string Label, BarInterval Interval)> ParseTimeframes(IEnumerable<string>? rawValues)
+    {
+        if (rawValues is null)
+        {
+            return Array.Empty<(string, BarInterval)>();
+        }
+
+        var results = new List<(string Label, BarInterval Interval)>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var raw in rawValues)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                continue;
+            }
+
+            var code = raw.Trim().ToUpperInvariant();
+            if (!seen.Add(code))
+            {
+                continue;
+            }
+
+            var interval = code switch
+            {
+                "M15" => new BarInterval(TimeSpan.FromMinutes(15)),
+                "M30" => new BarInterval(TimeSpan.FromMinutes(30)),
+                "H1" => BarInterval.OneHour,
+                "H4" => new BarInterval(TimeSpan.FromHours(4)),
+                "D1" => BarInterval.OneDay,
+                _ => default
+            };
+
+            if (interval.Duration == TimeSpan.Zero)
+            {
+                _logger.LogWarning("Unsupported timeframe '{Timeframe}' in configuration; skipping.", code);
+                continue;
+            }
+
+            results.Add((code, interval));
+        }
+
+        return results;
+    }
+
+    private string ResolveSnapshotPath(string? configuredPath)
+    {
+        var baseDirectory = Path.GetDirectoryName(_configuration.ConfigPath);
+        if (!string.IsNullOrWhiteSpace(configuredPath))
+        {
+            return Path.IsPathRooted(configuredPath)
+                ? configuredPath
+                : Path.GetFullPath(Path.Combine(baseDirectory ?? Directory.GetCurrentDirectory(), configuredPath));
+        }
+
+        var root = string.IsNullOrWhiteSpace(baseDirectory) ? Directory.GetCurrentDirectory() : baseDirectory;
+        return Path.Combine(root, "state", "engine-loop-snapshot.json");
+    }
+
+    private static string GenerateEngineInstanceId()
+    {
+        var guid = Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
+        return $"loop-{guid[..12]}";
+    }
+
+    private string ResolveTimeframeLabel(TimeSpan duration)
+    {
+        if (_timeframeLabelByTicks.TryGetValue(duration.Ticks, out var label))
+        {
+            return label;
+        }
+
+        if (Math.Abs(duration.TotalMinutes - 15d) < 0.1d) return "M15";
+        if (Math.Abs(duration.TotalMinutes - 30d) < 0.1d) return "M30";
+        if (Math.Abs(duration.TotalHours - 1d) < 0.01d) return "H1";
+        if (Math.Abs(duration.TotalHours - 4d) < 0.01d) return "H4";
+        if (Math.Abs(duration.TotalDays - 1d) < 0.001d) return "D1";
+
+        var minutes = Math.Round(duration.TotalMinutes);
+        if (minutes > 0)
+        {
+            return $"{minutes:0}M";
+        }
+
+        return $"{duration.TotalSeconds:0}s";
+    }
 }
+
+
+
+
+
+
+

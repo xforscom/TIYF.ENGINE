@@ -17,6 +17,10 @@ internal static class EngineMetricsFormatter
         AppendMetric(builder, "engine_alerts_total", snapshot.AlertsTotal);
         AppendMetric(builder, "engine_stream_connected", snapshot.StreamConnected);
         AppendMetric(builder, "engine_stream_heartbeat_age_seconds", snapshot.StreamHeartbeatAgeSeconds);
+        AppendMetric(builder, "engine_loop_uptime_seconds", snapshot.LoopUptimeSeconds);
+        AppendMetric(builder, "engine_loop_iterations_total", snapshot.LoopIterationsTotal);
+        AppendMetric(builder, "engine_decisions_total", snapshot.DecisionsTotal);
+        AppendMetric(builder, "engine_loop_last_success_ts", snapshot.LoopLastSuccessUnixSeconds);
         return builder.ToString();
     }
 

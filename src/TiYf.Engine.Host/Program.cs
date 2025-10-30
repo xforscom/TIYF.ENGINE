@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net.Http;
 using System.Text.Json;
+using System.Linq;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -71,6 +72,37 @@ builder.Services.Configure<EngineHostOptions>(options =>
     {
         options.StreamAlertThreshold = alertThreshold;
     }
+    var timeframesEnv = Environment.GetEnvironmentVariable("ENGINE_HOST_TIMEFRAMES");
+    if (!string.IsNullOrWhiteSpace(timeframesEnv))
+    {
+        var frames = timeframesEnv
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(f => !string.IsNullOrWhiteSpace(f))
+            .Select(f => f.Trim())
+            .ToArray();
+        if (frames.Length > 0)
+        {
+            options.Timeframes.Clear();
+            options.Timeframes.AddRange(frames);
+        }
+    }
+    var skewEnv = Environment.GetEnvironmentVariable("ENGINE_HOST_DECISION_SKEW_MS");
+    if (!string.IsNullOrWhiteSpace(skewEnv) &&
+        double.TryParse(skewEnv, NumberStyles.Float, CultureInfo.InvariantCulture, out var skewMs) &&
+        skewMs >= 0)
+    {
+        options.DecisionSkewToleranceMilliseconds = skewMs;
+    }
+    var snapshotEnv = Environment.GetEnvironmentVariable("ENGINE_HOST_SNAPSHOT_PATH");
+    if (!string.IsNullOrWhiteSpace(snapshotEnv))
+    {
+        options.SnapshotPath = snapshotEnv;
+    }
+    var enableLoopEnv = Environment.GetEnvironmentVariable("ENGINE_HOST_ENABLE_LOOP");
+    if (!string.IsNullOrWhiteSpace(enableLoopEnv) && bool.TryParse(enableLoopEnv, out var loopEnabled))
+    {
+        options.EnableContinuousLoop = loopEnabled;
+    }
 });
 if (adapterContext.CTraderSettings is not null)
 {
@@ -125,7 +157,7 @@ else if (adapterContext.OandaSettings is not null)
 builder.Services.AddHostedService<EngineHostService>();
 if (adapterContext.StreamSettings is not null)
 {
-    builder.Services.AddHostedService<OandaStreamingService>();
+    builder.Services.AddHostedService<EngineLoopService>();
 }
 
 if (OperatingSystem.IsLinux())
