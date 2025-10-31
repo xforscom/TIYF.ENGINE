@@ -1,314 +1,79 @@
 name: M4 Risk Matrix
 
 on:
+  workflow_dispatch:
   push:
     branches:
-      - feat/m4-seed
       - feat/m4-risk-rails
   pull_request:
-    branches: [ feat/m4-seed ]
-  workflow_dispatch: {}
+    branches:
+      - feat/m4-risk-rails
 
 jobs:
-  build:
-    runs-on: [self-hosted, Linux, X64, tiyf-vps]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-      - name: Restore & Build (Release)
-        run: |
-          dotnet restore
-          dotnet build -c Release --no-restore
-      - name: Package build (sources for reflection/tests not needed here but include src/tests for consistency)
-        run: |
-          tar -czf engine-build.tar.gz src tests
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: engine-build
-          path: engine-build.tar.gz
-
-  run-matrix:
-    needs: build
-    runs-on: [self-hosted, Linux, X64, tiyf-vps]
-    strategy:
-      fail-fast: false
-      matrix:
-        mode: [ off, shadow, active_no_breach, active_with_breach ]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download build artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: engine-build
-      - name: Extract build
-        run: tar -xzf engine-build.tar.gz
-      - name: Setup .NET (runtime)
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-      - name: Ensure jq tool
-        run: |
-          set -euo pipefail
-          if ! command -v jq >/dev/null 2>&1; then
-            mkdir -p "$HOME/.local/bin"
-            curl -sSL "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64" -o "$HOME/.local/bin/jq"
-            chmod +x "$HOME/.local/bin/jq"
-            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          fi
-      - name: Run simulation (mode=${{ matrix.mode }})
-        env:
-          MODE: ${{ matrix.mode }}
-        run: |
-          set -euo pipefail
-          OUTCFG=$(mktemp)
-          CFG='tests/fixtures/backtest_m0/config.backtest-m0.json'
-          # Resolve risk mode mapping
-          case "$MODE" in
-            off) RISK=off ;;
-            shadow) RISK=shadow ;;
-            *) RISK=active ;;
-          esac
-          # Seed config with guardrail defaults and ensure map existence
-          jq --arg risk "$RISK" '
-            .featureFlags.risk = $risk
-            | .riskConfig.emitEvaluations = true
-            | .riskConfig.blockOnBreach = true
-            | .riskConfig.maxRunDrawdownCCY = 9999999
-            | (.riskConfig.maxNetExposureBySymbol |= (. // {}))
-          ' "$CFG" > "$OUTCFG"
-          # Per-mode exposure cap
-          if [ "$MODE" = "active_with_breach" ]; then
-            jq '.riskConfig.maxNetExposureBySymbol["EURUSD"]=0' "$OUTCFG" > "$OUTCFG.tmp" && mv "$OUTCFG.tmp" "$OUTCFG"
-          else
-            jq '.riskConfig.maxNetExposureBySymbol["EURUSD"]=10000000' "$OUTCFG" > "$OUTCFG.tmp" && mv "$OUTCFG.tmp" "$OUTCFG"
-          fi
-          echo "Mutated config for mode=$MODE -> $OUTCFG"
-          RUN_ID=MATRIX-$MODE-$RANDOM
-          SIM=src/TiYf.Engine.Sim/bin/Release/net8.0/TiYf.Engine.Sim.dll
-          dotnet exec "$SIM" --config "$OUTCFG" --quiet --run-id $RUN_ID
-          RUN_DIR=journals/M0/M0-RUN-$RUN_ID
-          test -f "$RUN_DIR/events.csv"
-          test -f "$RUN_DIR/trades.csv"
-          mkdir -p artifacts/parity/$MODE
-          # Normalize events: skip meta + header
-          tail -n +3 "$RUN_DIR/events.csv" | sha256sum | awk '{print $1}' > artifacts/parity/$MODE/events.sha
-          # Normalize trades: remove header + strip config_hash column (assume column named config_hash)
-          awk -F, 'NR==1 {for (i=1;i<=NF;i++){if($i=="config_hash") c=i} next} {out=""; for(i=1;i<=NF;i++){ if(i==c) continue; if(out!="") out=out","; out=out $i;} print out}' "$RUN_DIR/trades.csv" | sha256sum | awk '{print $1}' > artifacts/parity/$MODE/trades.sha
-          EVENTS_SHA=$(cat artifacts/parity/$MODE/events.sha)
-          TRADES_SHA=$(cat artifacts/parity/$MODE/trades.sha)
-          ALERTS=$(grep -c 'ALERT_BLOCK_' "$RUN_DIR/events.csv" || true)
-          {
-            echo "events_sha=$EVENTS_SHA"
-            echo "trades_sha=$TRADES_SHA"
-            echo "alert_count=$ALERTS"
-            [ "$MODE" = "active_with_breach" ] && echo "gated_zero_cap=true" || true
-            echo "run_dir=$RUN_DIR"
-          } > artifacts/parity/$MODE/hashes.txt
-          # Write a per-mode filename variant alongside for robustness
-          cp artifacts/parity/$MODE/hashes.txt artifacts/parity/$MODE/hashes-$MODE.txt
-          echo "--- hashes ($MODE) ---"; cat artifacts/parity/$MODE/hashes.txt
-          # Also maintain a flattened index for debugging/backup (in case of artifact merge flattening)
-          mkdir -p artifacts/parity
-          {
-            echo "mode=$MODE"
-            echo "events_sha=$EVENTS_SHA"
-            echo "trades_sha=$TRADES_SHA"
-            echo "alert_count=$ALERTS"
-            [ "$MODE" = "active_with_breach" ] && echo "gated_zero_cap=true" || true
-            echo "run_dir=$RUN_DIR"
-          } > artifacts/parity/hashes-$MODE.txt
-      - name: Upload parity artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: parity-${{ matrix.mode }}
-          path: artifacts/parity/${{ matrix.mode }}
-
-  invariants:
-    needs: run-matrix
-    runs-on: [self-hosted, Linux, X64, tiyf-vps]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download parity artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: parity-*
-          path: parity_all
-      - name: Evaluate invariants
-        run: |
-          set -euo pipefail
-          echo 'Collected parity hash files:' >&2
-          find parity_all -type f -name 'hashes*.txt' -print -exec cat {} \; || true
-          declare -A TSHAS ALERTS ZERO
-          shopt -s nullglob globstar
-          files=(parity_all/parity-*/hashes.txt)
-          if [ ${#files[@]} -eq 0 ]; then
-            # Fallback to merged flat files like hashes-<mode>.txt
-            files=(parity_all/**/hashes-*.txt)
-          fi
-          for f in "${files[@]}"; do
-            base=$(basename "$f")
-            dir=$(basename "$(dirname "$f")")
-            mode=''
-            if [[ "$base" =~ ^hashes-([a-z_]+)\.txt$ ]]; then
-              mode="${BASH_REMATCH[1]}"
-            elif [[ "$dir" =~ ^parity-(.*)$ ]]; then
-              mode="${BASH_REMATCH[1]}"
-            else
-              mode=$(grep -m1 '^mode=' "$f" | cut -d= -f2 || true)
-            fi
-            [ -n "$mode" ] || { echo "Could not determine mode for $f" >&2; continue; }
-            tsha=$(grep -m1 '^trades_sha=' "$f" | cut -d= -f2)
-            alerts=$(grep -m1 '^alert_count=' "$f" | cut -d= -f2)
-            zero=$(grep -m1 '^gated_zero_cap=' "$f" | cut -d= -f2 || echo 'false')
-            TSHAS[$mode]=$tsha
-            ALERTS[$mode]=$alerts
-            ZERO[$mode]=$zero
-          done
-          # Required modes presence
-          for m in off shadow active_no_breach active_with_breach; do
-            [ -n "${TSHAS[$m]:-}" ] || { echo "Missing mode $m" >&2; exit 1; }
-          done
-          # Invariants
-          [ "${TSHAS[off]}" = "${TSHAS[shadow]}" ] || { echo 'off vs shadow trades hash mismatch' >&2; exit 1; }
-          [ "${TSHAS[shadow]}" = "${TSHAS[active_no_breach]}" ] || { echo 'shadow vs active_no_breach mismatch' >&2; exit 1; }
-          if [ "${TSHAS[shadow]}" = "${TSHAS[active_with_breach]}" ]; then
-            if [ "${ALERTS[active_with_breach]}" -eq 0 ] && [ "${ZERO[active_with_breach]}" != 'true' ]; then
-              echo 'active_with_breach did not diverge and no alerts/zero_cap flag' >&2; exit 1; fi
-          else
-            if [ "${ALERTS[active_with_breach]}" -eq 0 ] && [ "${ZERO[active_with_breach]}" != 'true' ]; then
-              echo 'active_with_breach diverged without alerts or zero_cap flag' >&2; exit 1; fi
-          fi
-          echo 'Risk matrix invariants satisfied.'
-
   risk-proof:
-    if: github.event_name == 'workflow_dispatch'
-    needs: build
-    runs-on: [self-hosted, Linux, X64, tiyf-vps]
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: 8.0.x
 
-      - name: Restore & Build (Release)
+      - name: Restore and build (Release)
         run: |
           set -euo pipefail
           dotnet restore TiYf.Engine.sln
           dotnet build TiYf.Engine.sln -c Release --no-restore --nologo
 
-      - name: Prepare risk-proof config and news stub
-        shell: bash
+      - name: Ensure jq
         run: |
           set -euo pipefail
-          mkdir -p configs
-          EVENT_TS=$(date -u -d "+10 minutes" +"%Y-%m-%dT%H:%M:%SZ")
-          cat >configs/news-proof.json <<EOF
-[{
-  "utc": "$EVENT_TS",
-  "impact": "high",
-  "tags": ["USD", "EUR"]
-}]
-EOF
-
-          cat >risk-proof.json <<'EOF'
-{
-  "schemaVersion": "1.3.0",
-  "run": { "runId": "RUN-RISK-PROOF" },
-  "adapter": {
-    "type": "stub",
-    "settings": {
-      "stream": {
-        "enable": true,
-        "feedMode": "replay",
-        "replayTicksFile": "tests/fixtures/backtest_m0/ticks_EURUSD.csv",
-        "heartbeatTimeoutSeconds": 5,
-        "maxBackoffSeconds": 1,
-        "instruments": ["EUR_USD"]
-      }
-    }
-  },
-  "InstrumentFile": "tests/fixtures/backtest_m0/instruments.csv",
-  "InputTicksFile": "tests/fixtures/backtest_m0/ticks_EURUSD.csv",
-  "universe": ["EURUSD"],
-  "risk": {
-    "perTradeRiskPct": 0.01,
-    "realLeverageCap": 1.0,
-    "sessionWindow": { "startUtc": "07:00", "endUtc": "08:00" },
-    "dailyCap": { "loss": 0, "gain": 0.25, "actionOnBreach": "block" },
-    "globalDrawdown": { "maxDd": -0.25 },
-    "newsBlackout": { "enabled": true, "minutesBefore": 30, "minutesAfter": 30, "sourcePath": "configs/news-proof.json" },
-    "forceDrawdownAfterEvals": { "EURUSD": 1 },
-    "maxRunDrawdownCCY": 0.01,
-    "blockOnBreach": true
-  },
-  "featureFlags": {
-    "risk": "active",
-    "riskProbe": "disabled",
-    "sentiment": "disabled"
-  }
-}
-EOF
-
-      - name: Run host risk proof
-        shell: bash
-        run: |
-          set -euo pipefail
-          stdlog="host-risk-proof.log"
-          dotnet run --project src/TiYf.Engine.Host/TiYf.Engine.Host.csproj -c Release -- --config risk-proof.json >"$stdlog" 2>&1 &
-          HOST_PID=$!
-          sleep 15
-          # Capture health/metrics with retries
-          for attempt in 1 2 3; do
-            if curl -fsS http://127.0.0.1:8080/health -o health.json; then
-              break
-            fi
-            sleep 5
-          done
-          curl -fsS http://127.0.0.1:8080/metrics -o metrics.txt || true
-          sleep 5
-          kill "$HOST_PID" 2>/dev/null || true
-          wait "$HOST_PID" 2>/dev/null || true
-          RUN_DIR=$(find journals -maxdepth 3 -type d -name 'RUN-RISK-PROOF*' | head -n1 || true)
-          if [ -z "$RUN_DIR" ]; then
-            echo "Run directory not found" >&2
-            exit 1
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y jq
           fi
-          cp "$RUN_DIR/events.csv" events.csv
-          cp "$RUN_DIR/trades.csv" trades.csv
 
-      - name: Summarise alerts
-        shell: bash
+      - name: Run session gate proof
         run: |
           set -euo pipefail
-          {
-            echo "## Risk Gate Alerts"
-            grep 'ALERT_' events.csv | head -n 20
-            echo
-            echo "## /health"
-            cat health.json
-            echo
-            echo "## Metrics (risk counters)"
-            grep -E 'engine_risk_(blocks|throttles)_total' metrics.txt || true
-          } > proof-summary.txt
-          cat proof-summary.txt
+          bash scripts/ci/risk-rails-proof.sh proof/session.json artifacts/session
 
-      - name: Upload risk proof artifacts
+      - name: Run daily cap proof
+        run: |
+          set -euo pipefail
+          bash scripts/ci/risk-rails-proof.sh proof/dailycap.json artifacts/dailycap
+
+      - name: Run global drawdown proof
+        run: |
+          set -euo pipefail
+          bash scripts/ci/risk-rails-proof.sh proof/drawdown.json artifacts/drawdown proof/drawdown-snapshot.json
+
+      - name: Run news blackout proof
+        run: |
+          set -euo pipefail
+          bash scripts/ci/risk-rails-proof.sh proof/news.json artifacts/news
+          cp proof/news-stub.json artifacts/news/news-stub.json
+
+      - name: Build summary
+        run: |
+          set -euo pipefail
+          > artifacts/summary.txt
+          for gate in session dailycap drawdown news; do
+            alert=$(grep -m1 -E 'ALERT_(BLOCK|THROTTLE)_' artifacts/$gate/events.csv || true)
+            if [[ -z "$alert" ]]; then
+              echo "$gate: NOT FOUND" >> artifacts/summary.txt
+            else
+              echo "$gate: $alert" >> artifacts/summary.txt
+            fi
+          done
+          cat artifacts/summary.txt
+
+      - name: Upload proof artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: risk-rails-proof
-          path: |
-            events.csv
-            trades.csv
-            health.json
-            metrics.txt
-            host-risk-proof.log
-            proof-summary.txt
-            risk-proof.json
-            configs/news-proof.json
+          name: m4-risk-proof
+          path: artifacts
