@@ -32,7 +32,7 @@
     "real_leverage_cap": 2.0,
     "block_on_breach": true,
     "emit_evaluations": true,
-    "session_window": { "start_utc": "00:00", "end_utc": "23:59" },
+    "session_window": { "start_utc": "00:00:00", "end_utc": "23:59:59" },
     "max_run_drawdown_ccy": 0.5,
     "force_drawdown_after_evals": { "EURUSD": 1 },
     "global_drawdown": { "max_dd": -1 }
