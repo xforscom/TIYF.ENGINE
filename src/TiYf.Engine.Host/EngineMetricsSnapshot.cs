@@ -9,4 +9,9 @@ public readonly record struct EngineMetricsSnapshot(
     long RiskEventsTotal,
     long AlertsTotal,
     int StreamConnected,
-    double StreamHeartbeatAgeSeconds);
+    double StreamHeartbeatAgeSeconds,
+    double LoopUptimeSeconds,
+    long LoopIterationsTotal,
+    long DecisionsTotal,
+    double LoopLastSuccessUnixSeconds);
+

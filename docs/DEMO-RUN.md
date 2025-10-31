@@ -52,14 +52,27 @@ All jobs target the self-hosted runner labelled `[self-hosted, Linux, X64, tiyf-
 
 ```json
 {
-  "adapter": "ctrader-demo",
+  "adapter": "oanda-demo",
   "connected": true,
   "last_h1_decision_utc": "2025-01-20T13:20:00Z",
+  "last_decision_utc": "2025-01-20T13:20:00Z",
+  "timeframes_active": ["H1", "H4"],
   "bar_lag_ms": 12.5,
   "pending_orders": 0,
   "feature_flags": ["dataQa=active", "riskProbe=enabled"],
+  "loop_iterations_total": 42,
+  "decisions_total": 42,
+  "loop_last_success_utc": "2025-01-20T13:20:00Z",
+  "loop_start_utc": "2025-01-20T09:00:00Z",
   "last_heartbeat_utc": "2025-01-20T13:24:30Z",
-  "last_log": "Connected to cTrader endpoint"
+  "heartbeat_age_seconds": 2.1,
+  "stream_connected": 1,
+  "stream_heartbeat_age_seconds": 0.4,
+  "open_positions": 1,
+  "active_orders": 0,
+  "risk_events_total": 5,
+  "alerts_total": 0,
+  "last_log": "Connected to OANDA (practice)"
 }
 ```
 
@@ -113,13 +126,13 @@ sudo systemctl start tiyf-engine-demo.service
 
 | Workflow | Cadence | Purpose | Evidence |
 | --- | --- | --- | --- |
-| `daily-monitor` | Weekdays 02:15 UTC (cron) + manual dispatch | Polls the deployed host `/health` endpoint with five-attempt retry/back-off and fails fast unless `connected` is `true`. | Uploads `daily-monitor-health/health.json` and writes `adapter/connected/last_heartbeat_utc` to the job summary. |
+| `daily-monitor` | Weekdays 02:15 UTC (cron) + manual dispatch | Polls the deployed host `/health` endpoint with five-attempt retry/back-off and fails fast unless `connected` is `true`. | Uploads `daily-monitor-health/health.json` and writes `adapter/connected/last_decision_utc/timeframes_active` alongside heartbeat stats to the job summary. |
 | `friday-proof` | Fridays 10:00 UTC (cron) + manual dispatch | Runs the OANDA simulator via `InvokeSim.ps1` with `enableAlertPing=true` and `ALERT_ENV=prod` to validate broker handshake plus alert routing. | Enforces handshake evidence, strict/parity gates, `broker_dangling=false`, and asserts `Alert ping HTTP status: 204` in the summary. |
 | `weekly-digest` | Sundays 09:00 UTC (cron) + manual dispatch | Aggregates the last five successful `demo-daily-oanda` runs on `main`, extracts `events_sha`/`trades_sha`, and posts a digest to Discord. | Archives `weekly-digest.txt`, logs the webhook status code, and includes the digest table in the run summary without exposing the webhook URL. |
 ## Host Telemetry
 - The engine host exposes two loopback-only endpoints: http://127.0.0.1:8080/health (JSON) and http://127.0.0.1:8080/metrics (Prometheus text). Both respond even when trading is idle, falling back to zero/unknown values when data is unavailable.
-- /health now includes heartbeat_age_seconds, open_positions, active_orders, risk_events_total, and alerts_total alongside the existing adapter status. Daily monitor runs quote these fields in the summary: daily-monitor: adapter=<name> connected=<bool> heartbeat_age=<xs> bar_lag_ms=<ms> open_positions=<n> active_orders=<n> risk_events_total=<n> alerts_total=<n>.
-- /metrics publishes the same values as gauges/counters (engine_heartbeat_age_seconds, engine_bar_lag_ms, engine_pending_orders, engine_open_positions, engine_active_orders, engine_risk_events_total, engine_alerts_total) so Prometheus-compatible scrapers can ingest them without extra formatting.
+- /health now includes heartbeat_age_seconds, open_positions, active_orders, risk_events_total, alerts_total, last_decision_utc, timeframes_active, decisions_total, and loop_iterations_total alongside the existing adapter status. Daily monitor runs quote these fields in the summary: daily-monitor: adapter=<name> connected=<bool> heartbeat_age=<xs> stream_connected=<n> stream_heartbeat_age=<xs> bar_lag_ms=<ms> open_positions=<n> active_orders=<n> risk_events_total=<n> alerts_total=<n> last_decision_utc=<iso> timeframes_active=<csv> decisions_total=<n> loop_iterations_total=<n>.
+- /metrics publishes the same values as gauges/counters (engine_heartbeat_age_seconds, engine_bar_lag_ms, engine_pending_orders, engine_open_positions, engine_active_orders, engine_risk_events_total, engine_alerts_total, engine_stream_connected, engine_stream_heartbeat_age_seconds, engine_loop_uptime_seconds, engine_loop_iterations_total, engine_decisions_total, engine_loop_last_success_ts) so Prometheus-compatible scrapers can ingest them without extra formatting.
 
 
 

@@ -92,6 +92,14 @@ jobs:
             exit 1
           fi
 
+      - name: Fetch /metrics snapshot
+        shell: bash
+        env:
+          METRICS_PATH: scratch/metrics.txt
+        run: |
+          set -euo pipefail
+          curl -fsS http://127.0.0.1:8080/metrics -o "$METRICS_PATH"
+
       - name: Summarize health metrics
         shell: pwsh
         run: |
@@ -118,13 +126,39 @@ jobs:
             ($health.risk_events_total ?? 0), `
             ($health.alerts_total ?? 0)
 
+          $metricsPath = Join-Path 'scratch' 'metrics.txt'
+          $metricsLines = if (Test-Path -Path $metricsPath) {
+            Get-Content -Raw -Path $metricsPath
+          } else {
+            ''
+          }
+
+          $metricsSummary = ''
+          if (-not [string]::IsNullOrWhiteSpace($metricsLines)) {
+            $interesting = $metricsLines -split "`n" | Where-Object {
+              $_ -match '^engine_loop_(uptime_seconds|iterations_total|last_success_ts)' -or
+              $_ -match '^engine_decisions_total'
+            }
+            if ($interesting) {
+              $metricsSummary = ($interesting -join '; ').Trim()
+            }
+          }
+
           Write-Host $line
           $summaryPath = Join-Path 'scratch' 'summary.txt'
           Set-Content -Path $summaryPath -Value $line -Encoding UTF8
+          if (-not [string]::IsNullOrWhiteSpace($metricsSummary)) {
+            Write-Host ("metrics-excerpt: {0}" -f $metricsSummary)
+            Add-Content -Path $summaryPath -Value $metricsSummary -Encoding UTF8
+          }
 
           Add-Content -Encoding UTF8 -Path $env:GITHUB_STEP_SUMMARY -Value "## Latest /health snapshot"
           Add-Content -Encoding UTF8 -Path $env:GITHUB_STEP_SUMMARY -Value ""
           Add-Content -Encoding UTF8 -Path $env:GITHUB_STEP_SUMMARY -Value $line
+          if (-not [string]::IsNullOrWhiteSpace($metricsSummary)) {
+            Add-Content -Encoding UTF8 -Path $env:GITHUB_STEP_SUMMARY -Value ""
+            Add-Content -Encoding UTF8 -Path $env:GITHUB_STEP_SUMMARY -Value "`n**Metrics excerpt**: $metricsSummary"
+          }
 
       - name: Upload artifact
         if: always()

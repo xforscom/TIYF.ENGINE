@@ -1,9 +1,14 @@
+using System.Collections.Generic;
+using System.Linq;
+
 namespace TiYf.Engine.Host;
 
 public sealed class EngineHostState
 {
     private readonly object _sync = new();
     private readonly List<string> _featureFlags;
+    private readonly Dictionary<string, DateTime?> _lastDecisionByTimeframe = new(StringComparer.OrdinalIgnoreCase);
+    private string[] _timeframesActive = Array.Empty<string>();
 
     private int _openPositions;
     private int _activeOrders;
@@ -11,6 +16,12 @@ public sealed class EngineHostState
     private long _alertsTotal;
     private bool _streamConnected;
     private DateTime? _lastStreamHeartbeatUtc;
+
+    private long _loopIterationsTotal;
+    private long _decisionsTotal;
+    private DateTime? _lastDecisionUtc;
+    private DateTime? _loopLastSuccessUtc;
+    private DateTime? _loopStartUtc;
 
     public EngineHostState(string adapter, IEnumerable<string>? featureFlags)
     {
@@ -39,6 +50,17 @@ public sealed class EngineHostState
         }
     }
 
+    public IReadOnlyDictionary<string, DateTime?> LastDecisionsByTimeframe
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return new Dictionary<string, DateTime?>(_lastDecisionByTimeframe, StringComparer.OrdinalIgnoreCase);
+            }
+        }
+    }
+
     public void MarkConnected(bool value)
     {
         lock (_sync)
@@ -56,12 +78,102 @@ public sealed class EngineHostState
         }
     }
 
-    public void SetLastDecision(DateTime utc)
+    public void SetLoopStart(DateTime utc)
+    {
+        if (utc.Kind != DateTimeKind.Utc)
+        {
+            utc = DateTime.SpecifyKind(utc, DateTimeKind.Utc);
+        }
+        lock (_sync)
+        {
+            _loopStartUtc = utc;
+        }
+    }
+
+    public void SetTimeframes(IEnumerable<string> timeframes)
+    {
+        var frames = (timeframes ?? Array.Empty<string>())
+            .Where(tf => !string.IsNullOrWhiteSpace(tf))
+            .Select(tf => tf.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        lock (_sync)
+        {
+            _timeframesActive = frames;
+            foreach (var frame in frames)
+            {
+                if (!_lastDecisionByTimeframe.ContainsKey(frame))
+                {
+                    _lastDecisionByTimeframe[frame] = null;
+                }
+            }
+        }
+    }
+
+    public void BootstrapLoopState(long decisionsTotal, long loopIterationsTotal, DateTime? lastDecisionUtc, IReadOnlyDictionary<string, DateTime?> decisionsByTimeframe)
     {
         lock (_sync)
         {
-            LastH1DecisionUtc = utc;
+            _decisionsTotal = Math.Max(0, decisionsTotal);
+            _loopIterationsTotal = Math.Max(0, loopIterationsTotal);
+            _lastDecisionUtc = NormalizeNullableUtc(lastDecisionUtc);
+            _loopLastSuccessUtc = _lastDecisionUtc;
+            _lastDecisionByTimeframe.Clear();
+            if (decisionsByTimeframe != null)
+            {
+                foreach (var kvp in decisionsByTimeframe)
+                {
+                    _lastDecisionByTimeframe[kvp.Key] = NormalizeNullableUtc(kvp.Value);
+                    if (string.Equals(kvp.Key, "H1", StringComparison.OrdinalIgnoreCase))
+                    {
+                        LastH1DecisionUtc = NormalizeNullableUtc(kvp.Value);
+                    }
+                }
+            }
+            foreach (var frame in _timeframesActive)
+            {
+                if (!_lastDecisionByTimeframe.ContainsKey(frame))
+                {
+                    _lastDecisionByTimeframe[frame] = null;
+                }
+            }
         }
+    }
+
+    public void RecordLoopDecision(string timeframe, DateTime utc, bool incrementCounters = true)
+    {
+        utc = NormalizeUtc(utc);
+        lock (_sync)
+        {
+            if (incrementCounters)
+            {
+                _decisionsTotal++;
+                _loopIterationsTotal++;
+            }
+            _lastDecisionUtc = utc;
+            _loopLastSuccessUtc = utc;
+            if (!_lastDecisionByTimeframe.ContainsKey(timeframe))
+            {
+                _lastDecisionByTimeframe[timeframe] = utc;
+            }
+            else
+            {
+                _lastDecisionByTimeframe[timeframe] = utc;
+            }
+            if (!_timeframesActive.Any(tf => string.Equals(tf, timeframe, StringComparison.OrdinalIgnoreCase)))
+            {
+                _timeframesActive = _timeframesActive.Concat(new[] { timeframe }).ToArray();
+            }
+            if (string.Equals(timeframe, "H1", StringComparison.OrdinalIgnoreCase))
+            {
+                LastH1DecisionUtc = utc;
+            }
+        }
+    }
+
+    public void SetLastDecision(DateTime utc)
+    {
+        RecordLoopDecision("H1", utc, incrementCounters: false);
     }
 
     public void UpdateLag(double milliseconds)
@@ -101,11 +213,7 @@ public sealed class EngineHostState
 
     public void RecordStreamHeartbeat(DateTime utcTimestamp)
     {
-        if (utcTimestamp.Kind != DateTimeKind.Utc)
-        {
-            utcTimestamp = DateTime.SpecifyKind(utcTimestamp, DateTimeKind.Utc);
-        }
-
+        utcTimestamp = NormalizeUtc(utcTimestamp);
         lock (_sync)
         {
             _lastStreamHeartbeatUtc = utcTimestamp;
@@ -132,6 +240,18 @@ public sealed class EngineHostState
         }
     }
 
+    public (long DecisionsTotal, long LoopIterationsTotal, DateTime? LastDecisionUtc, IReadOnlyDictionary<string, DateTime?> DecisionsByTimeframe) GetLoopSnapshotData()
+    {
+        lock (_sync)
+        {
+            return (
+                _decisionsTotal,
+                _loopIterationsTotal,
+                _lastDecisionUtc,
+                new Dictionary<string, DateTime?>(_lastDecisionByTimeframe, StringComparer.OrdinalIgnoreCase));
+        }
+    }
+
     public EngineMetricsSnapshot CreateMetricsSnapshot()
     {
         lock (_sync)
@@ -151,6 +271,7 @@ public sealed class EngineHostState
                 adapter = Adapter,
                 connected = Connected,
                 last_h1_decision_utc = LastH1DecisionUtc,
+                last_decision_utc = _lastDecisionUtc,
                 bar_lag_ms = BarLagMilliseconds,
                 pending_orders = PendingOrders,
                 feature_flags = _featureFlags.ToArray(),
@@ -162,7 +283,13 @@ public sealed class EngineHostState
                 risk_events_total = metrics.RiskEventsTotal,
                 alerts_total = metrics.AlertsTotal,
                 stream_connected = metrics.StreamConnected,
-                stream_heartbeat_age_seconds = metrics.StreamHeartbeatAgeSeconds
+                stream_heartbeat_age_seconds = metrics.StreamHeartbeatAgeSeconds,
+                timeframes_active = _timeframesActive,
+                last_decision_by_timeframe = new Dictionary<string, DateTime?>(_lastDecisionByTimeframe, StringComparer.OrdinalIgnoreCase),
+                loop_iterations_total = metrics.LoopIterationsTotal,
+                decisions_total = metrics.DecisionsTotal,
+                loop_last_success_utc = _loopLastSuccessUtc,
+                loop_start_utc = _loopStartUtc
             };
         }
     }
@@ -173,6 +300,8 @@ public sealed class EngineHostState
         var streamHeartbeatUtc = _lastStreamHeartbeatUtc ?? LastHeartbeatUtc;
         var streamHeartbeatAge = Math.Max(0d, (utcNow - streamHeartbeatUtc).TotalSeconds);
         var streamConnected = _streamConnected ? 1 : 0;
+        var loopUptimeSeconds = _loopStartUtc.HasValue ? Math.Max(0d, (utcNow - _loopStartUtc.Value).TotalSeconds) : 0d;
+        var loopLastSuccessUnix = _loopLastSuccessUtc.HasValue ? new DateTimeOffset(_loopLastSuccessUtc.Value).ToUnixTimeSeconds() : 0d;
         return new EngineMetricsSnapshot(
             heartbeatAge,
             BarLagMilliseconds,
@@ -182,6 +311,24 @@ public sealed class EngineHostState
             _riskEventsTotal,
             _alertsTotal,
             streamConnected,
-            streamHeartbeatAge);
+            streamHeartbeatAge,
+            loopUptimeSeconds,
+            _loopIterationsTotal,
+            _decisionsTotal,
+            loopLastSuccessUnix);
+    }
+
+    private static DateTime? NormalizeNullableUtc(DateTime? utc)
+    {
+        if (!utc.HasValue) return null;
+        var value = utc.Value;
+        return value.Kind == DateTimeKind.Utc ? value : DateTime.SpecifyKind(value, DateTimeKind.Utc);
+    }
+
+    private static DateTime NormalizeUtc(DateTime utc)
+    {
+        return utc.Kind == DateTimeKind.Utc ? utc : DateTime.SpecifyKind(utc, DateTimeKind.Utc);
     }
 }
+
+

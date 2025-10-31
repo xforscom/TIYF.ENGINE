@@ -130,6 +130,10 @@ jobs:
           $alertsTotal = if ($health.PSObject.Properties.Name -contains 'alerts_total') { [int64]$health.alerts_total } else { 0 }
           $streamConnected = if ($health.PSObject.Properties.Name -contains 'stream_connected') { [int]$health.stream_connected } else { 0 }
           $streamHeartbeatAge = if ($health.PSObject.Properties.Name -contains 'stream_heartbeat_age_seconds') { [double]$health.stream_heartbeat_age_seconds } else { 0 }
+          $lastDecisionUtc = if ($health.PSObject.Properties.Name -contains 'last_decision_utc') { [string]$health.last_decision_utc } else { '' }
+          $timeframesActive = if ($health.PSObject.Properties.Name -contains 'timeframes_active') { ($health.timeframes_active | ForEach-Object { $_.ToString() }) -join ',' } else { '' }
+          $decisionsTotal = if ($health.PSObject.Properties.Name -contains 'decisions_total') { [int64]$health.decisions_total } else { 0 }
+          $loopIterationsTotal = if ($health.PSObject.Properties.Name -contains 'loop_iterations_total') { [int64]$health.loop_iterations_total } else { 0 }
 
           if (-not $connected) {
             throw "Expected connected=true but found connected=$connected"
@@ -146,6 +150,10 @@ jobs:
           "DAILY_MONITOR_ALERTS_TOTAL=$alertsTotal" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_STREAM_CONNECTED=$streamConnected" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_STREAM_HEARTBEAT_AGE=$streamHeartbeatAge" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DAILY_MONITOR_LAST_DECISION=$lastDecisionUtc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DAILY_MONITOR_TIMEFRAMES=$timeframesActive" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DAILY_MONITOR_DECISIONS_TOTAL=$decisionsTotal" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DAILY_MONITOR_LOOP_ITERATIONS=$loopIterationsTotal" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Upload health artifact
         if: always()
@@ -170,10 +178,14 @@ jobs:
           $alertsTotal = $env:DAILY_MONITOR_ALERTS_TOTAL
           $streamConnected = $env:DAILY_MONITOR_STREAM_CONNECTED
           $streamHeartbeatAge = [double]::Parse(($env:DAILY_MONITOR_STREAM_HEARTBEAT_AGE ?? '0'), [System.Globalization.CultureInfo]::InvariantCulture)
+          $lastDecision = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_LAST_DECISION)) { 'none' } else { $env:DAILY_MONITOR_LAST_DECISION }
+          $timeframes = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_TIMEFRAMES)) { 'n/a' } else { $env:DAILY_MONITOR_TIMEFRAMES }
+          $decisionsTotal = $env:DAILY_MONITOR_DECISIONS_TOTAL
+          $loopIterations = $env:DAILY_MONITOR_LOOP_ITERATIONS
           $heartbeatFormatted = ('{0:0.0}' -f $heartbeatAge)
           $streamHeartbeatFormatted = ('{0:0.0}' -f $streamHeartbeatAge)
           $barLagString = $barLag.ToString([System.Globalization.CultureInfo]::InvariantCulture)
-          $line = "daily-monitor: adapter={0} connected={1} heartbeat_age={2}s stream_connected={3} stream_heartbeat_age={4}s bar_lag_ms={5} open_positions={6} active_orders={7} risk_events_total={8} alerts_total={9}" -f $adapter, $connected, $heartbeatFormatted, $streamConnected, $streamHeartbeatFormatted, $barLagString, $openPositions, $activeOrders, $riskEvents, $alertsTotal
+          $line = "daily-monitor: adapter={0} connected={1} heartbeat_age={2}s stream_connected={3} stream_heartbeat_age={4}s bar_lag_ms={5} open_positions={6} active_orders={7} risk_events_total={8} alerts_total={9} last_decision_utc={10} timeframes_active={11} decisions_total={12} loop_iterations_total={13}" -f $adapter, $connected, $heartbeatFormatted, $streamConnected, $streamHeartbeatFormatted, $barLagString, $openPositions, $activeOrders, $riskEvents, $alertsTotal, $lastDecision, $timeframes, $decisionsTotal, $loopIterations
           Write-Host $line
           Set-Content -Path (Join-Path 'scratch' 'summary.txt') -Value $line -Encoding UTF8
           Add-Content -Encoding UTF8 -Path $env:GITHUB_STEP_SUMMARY -Value "## daily-monitor verdict"

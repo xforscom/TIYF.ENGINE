@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Linq;
 using System.Text.Json;
 using TiYf.Engine.Host;
 
@@ -10,11 +12,16 @@ public class MetricsFormattingTests
     {
         var state = new EngineHostState("oanda-demo", Array.Empty<string>());
         state.MarkConnected(true);
+        var loopStart = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var decisionTime = loopStart.AddHours(1);
+        state.SetLoopStart(loopStart);
+        state.SetTimeframes(new[] { "H1", "H4" });
         state.UpdateLag(12.5);
         state.UpdatePendingOrders(1);
         state.SetMetrics(openPositions: 2, activeOrders: 1, riskEventsTotal: 3, alertsTotal: 4);
         state.RecordStreamHeartbeat(DateTime.UtcNow);
         state.UpdateStreamConnection(true);
+        state.RecordLoopDecision("H1", decisionTime);
 
         var snapshot = state.CreateMetricsSnapshot();
         var metricsText = EngineMetricsFormatter.Format(snapshot);
@@ -25,6 +32,10 @@ public class MetricsFormattingTests
         Assert.Contains("engine_alerts_total 4", metricsText);
         Assert.Contains("engine_stream_connected 1", metricsText);
         Assert.Contains("engine_stream_heartbeat_age_seconds", metricsText);
+        Assert.Contains("engine_loop_uptime_seconds", metricsText);
+        Assert.Contains("engine_loop_iterations_total 1", metricsText);
+        Assert.Contains("engine_decisions_total 1", metricsText);
+        Assert.Contains("engine_loop_last_success_ts", metricsText);
     }
 
     [Fact]
@@ -32,9 +43,14 @@ public class MetricsFormattingTests
     {
         var state = new EngineHostState("stub", new[] { "ff_a" });
         state.MarkConnected(true);
+        var loopStart = new DateTime(2024, 2, 2, 6, 0, 0, DateTimeKind.Utc);
+        var decisionTime = loopStart.AddHours(4);
+        state.SetLoopStart(loopStart);
+        state.SetTimeframes(new[] { "H1", "H4" });
         state.SetMetrics(openPositions: 1, activeOrders: 0, riskEventsTotal: 5, alertsTotal: 6);
         state.RecordStreamHeartbeat(DateTime.UtcNow);
         state.UpdateStreamConnection(true);
+        state.RecordLoopDecision("H4", decisionTime);
         var payload = state.CreateHealthPayload();
         var json = JsonSerializer.Serialize(payload);
         using var document = JsonDocument.Parse(json);
@@ -45,5 +61,15 @@ public class MetricsFormattingTests
         Assert.Equal(6, root.GetProperty("alerts_total").GetInt64());
         Assert.Equal(1, root.GetProperty("stream_connected").GetInt32());
         Assert.True(root.TryGetProperty("stream_heartbeat_age_seconds", out _));
+        var decisionString = root.GetProperty("last_decision_utc").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(decisionString));
+        var parsedDecision = DateTime.Parse(
+            decisionString,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
+        Assert.Equal(DateTime.SpecifyKind(decisionTime, DateTimeKind.Utc), parsedDecision);
+        var timeframes = root.GetProperty("timeframes_active").EnumerateArray().Select(e => e.GetString()).ToArray();
+        Assert.Contains("H1", timeframes);
+        Assert.Contains("H4", timeframes);
     }
 }
