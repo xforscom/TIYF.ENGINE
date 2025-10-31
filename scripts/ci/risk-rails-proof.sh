@@ -14,7 +14,7 @@ ARTIFACT_FULL="$(realpath -m "$ARTIFACT_DIR")"
 mkdir -p "$ARTIFACT_FULL"
 
 CONFIG_DIR="$(dirname "$CONFIG_PATH")"
-JOURNAL_REL="$(jq -r '.JournalRoot // \"journals\"' "$CONFIG_PATH")"
+JOURNAL_REL="$(jq -r '.JournalRoot // "journals"' "$CONFIG_PATH")"
 if [[ "$JOURNAL_REL" = /* ]]; then
   JOURNALS_DIR="$JOURNAL_REL"
 else
