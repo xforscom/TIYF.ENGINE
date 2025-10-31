@@ -34,6 +34,9 @@ if jq -e '.risk.news_blackout?.source_path?' "$SOURCE_CONFIG" >/dev/null; then
       NEWS_PATH="$NEWS_REL"
     else
       NEWS_PATH="$(realpath -m "$CONFIG_DIR/$NEWS_REL")"
+      if [[ ! -f "$NEWS_PATH" ]]; then
+        NEWS_PATH="$(realpath -m "$NEWS_REL")"
+      fi
     fi
     if [[ ! -f "$NEWS_PATH" ]]; then
       echo "News blackout stub not found at $NEWS_PATH" >&2
