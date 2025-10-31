@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Linq;
 using System.Text.Json;
 using TiYf.Engine.Host;
@@ -60,7 +61,13 @@ public class MetricsFormattingTests
         Assert.Equal(6, root.GetProperty("alerts_total").GetInt64());
         Assert.Equal(1, root.GetProperty("stream_connected").GetInt32());
         Assert.True(root.TryGetProperty("stream_heartbeat_age_seconds", out _));
-        Assert.Equal(decisionTime.ToString("O"), root.GetProperty("last_decision_utc").GetString());
+        var decisionString = root.GetProperty("last_decision_utc").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(decisionString));
+        var parsedDecision = DateTime.Parse(
+            decisionString,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
+        Assert.Equal(DateTime.SpecifyKind(decisionTime, DateTimeKind.Utc), parsedDecision);
         var timeframes = root.GetProperty("timeframes_active").EnumerateArray().Select(e => e.GetString()).ToArray();
         Assert.Contains("H1", timeframes);
         Assert.Contains("H4", timeframes);

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Globalization;
 using System.Linq;
 using System.Text.Json;
 using TiYf.Engine.Core;
@@ -135,7 +136,13 @@ public sealed class LoopSnapshotPersistenceTests : IDisposable
         var json = JsonSerializer.Serialize(payload);
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
-        Assert.Equal(nextDecision.ToString("O"), root.GetProperty("last_decision_utc").GetString());
+        var lastDecisionString = root.GetProperty("last_decision_utc").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(lastDecisionString));
+        var parsedDecision = DateTime.Parse(
+            lastDecisionString,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
+        Assert.Equal(DateTime.SpecifyKind(nextDecision, DateTimeKind.Utc), parsedDecision);
         Assert.Equal(2, root.GetProperty("decisions_total").GetInt64());
     }
 
