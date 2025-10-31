@@ -27,8 +27,8 @@
   "universe": ["EURUSD"],
   "risk": {
     "per_trade_risk_pct": 0.01,
-    "per_position_risk_cap_pct": 1000,
-    "basket_risk_cap_pct": 1000,
+    "per_position_risk_cap_pct": 100000,
+    "basket_risk_cap_pct": 100000,
     "real_leverage_cap": 2.0,
     "block_on_breach": true,
     "emit_evaluations": true,
