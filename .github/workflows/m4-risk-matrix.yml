@@ -56,7 +56,6 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/ci/risk-rails-proof.sh proof/news.json artifacts/news
-          cp proof/news-stub.json artifacts/news/news-stub.json
 
       - name: Build summary
         run: |
