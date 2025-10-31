@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Text.Json;
 using TiYf.Engine.Core.Infrastructure;
 
@@ -59,6 +60,20 @@ public sealed record AlertEvent(
     string ConfigHash
 );
 
+public sealed record SessionWindowConfig(TimeSpan StartUtc, TimeSpan EndUtc);
+
+public enum DailyCapAction
+{
+    Block,
+    HalfSize
+}
+
+public sealed record DailyCapConfig(decimal? LossThreshold, decimal? GainThreshold, DailyCapAction Action);
+
+public sealed record GlobalDrawdownConfig(decimal MaxDrawdown);
+
+public sealed record NewsBlackoutConfig(bool Enabled, int MinutesBefore, int MinutesAfter, string? SourcePath);
+
 public interface IRiskEnforcer
 {
     EnforcementResult Enforce(Proposal p, RiskContext ctx);
@@ -82,6 +97,11 @@ public sealed class RiskConfig
     // Test/diagnostic hook: per-symbol map of evaluation ordinal -> force drawdown on that evaluation (1-based).
     // Example: { "EURUSD": 1 } => on first EURUSD risk eval, equity is dropped to exceed MaxRunDrawdownCCY.
     public Dictionary<string, int>? ForceDrawdownAfterEvals { get; init; } = null;
+    public SessionWindowConfig? SessionWindow { get; init; }
+    public DailyCapConfig? DailyCap { get; init; }
+    public GlobalDrawdownConfig? GlobalDrawdown { get; init; }
+    public NewsBlackoutConfig? NewsBlackout { get; init; }
+    public string? RiskConfigHash { get; init; }
 }
 
 public static class AlertTypes

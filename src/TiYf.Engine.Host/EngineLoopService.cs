@@ -198,6 +198,9 @@ internal sealed class EngineLoopService : BackgroundService
         var riskFormulas = new RiskFormulas();
         var basketAggregator = new BasketRiskAggregator();
         var riskConfig = ResolveRiskConfig(rawDoc);
+        var riskConfigHash = riskConfig?.RiskConfigHash ?? string.Empty;
+        _state.SetRiskConfigHash(riskConfigHash);
+        var newsEvents = LoadNewsEvents(riskConfig?.NewsBlackout);
         var riskMode = ResolveRiskMode(rawDoc);
         var dataVersion = ComputeDataVersion(rawDoc, _configDirectory);
 
@@ -239,7 +242,11 @@ internal sealed class EngineLoopService : BackgroundService
             tradesWriter: _tradesWriter,
             dataVersion: dataVersion,
             sourceAdapter: _state.Adapter,
-            riskMode: riskMode);
+            riskMode: riskMode,
+            riskConfigHash: riskConfigHash,
+            newsEvents: newsEvents,
+            timeframeLabels: _timeframeLabelByTicks,
+            riskGateCallback: (gate, throttled) => _state.RegisterRiskGateEvent(gate, throttled));
 
         _logger.LogInformation("Streaming runtime initialized run_id={RunId} journal={Journal}", runId, journalWriter.RunDirectory);
         _state.SetLastLog($"stream:run_id={runId}");
@@ -575,12 +582,47 @@ internal sealed class EngineLoopService : BackgroundService
         {
             Interlocked.Increment(ref _alerts);
             _state.IncrementAlertCounter();
+            if (TryMapRiskGate(eventType, out var gate, out var throttled))
+            {
+                _state.RegisterRiskGateEvent(gate, throttled);
+            }
         }
         if (eventType.StartsWith("INFO_RISK_", StringComparison.Ordinal))
         {
             Interlocked.Increment(ref _riskEvents);
         }
         UpdateHostMetrics();
+    }
+
+    private static bool TryMapRiskGate(string eventType, out string gate, out bool throttled)
+    {
+        throttled = false;
+        gate = string.Empty;
+        switch (eventType)
+        {
+            case "ALERT_BLOCK_SESSION_WINDOW":
+                gate = "session_window";
+                return true;
+            case "ALERT_BLOCK_DAILY_LOSS_CAP":
+                gate = "daily_loss_cap";
+                return true;
+            case "ALERT_BLOCK_GLOBAL_DRAWDOWN":
+            case "ALERT_BLOCK_DRAWDOWN":
+                gate = "global_drawdown";
+                return true;
+            case "ALERT_BLOCK_NEWS_BLACKOUT":
+                gate = "news_blackout";
+                return true;
+            case "ALERT_BLOCK_DAILY_GAIN_CAP":
+                gate = "daily_gain_cap";
+                return true;
+            case "ALERT_THROTTLE_DAILY_GAIN_CAP":
+                gate = "daily_gain_cap";
+                throttled = true;
+                return true;
+            default:
+                return false;
+        }
     }
 
     private void UpdateHostMetrics()
@@ -860,6 +902,45 @@ internal sealed class EngineLoopService : BackgroundService
         }
 
         return $"{duration.TotalSeconds:0}s";
+    }
+
+    private IReadOnlyList<NewsEvent> LoadNewsEvents(NewsBlackoutConfig? config)
+    {
+        if (config is null || !config.Enabled)
+        {
+            return Array.Empty<NewsEvent>();
+        }
+
+        var path = config.SourcePath;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            path = "/opt/tiyf/news-stub/today.json";
+        }
+
+        try
+        {
+            if (!File.Exists(path))
+            {
+                _logger.LogWarning("News blackout enabled but schedule file missing path={Path}", path);
+                return Array.Empty<NewsEvent>();
+            }
+
+            var json = File.ReadAllText(path);
+            var events = JsonSerializer.Deserialize<List<NewsEvent>>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+            if (events is null || events.Count == 0)
+            {
+                return Array.Empty<NewsEvent>();
+            }
+            return events;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load news blackout schedule from {Path}", path);
+            return Array.Empty<NewsEvent>();
+        }
     }
 }
 

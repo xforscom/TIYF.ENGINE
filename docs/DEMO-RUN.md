@@ -57,6 +57,10 @@ All jobs target the self-hosted runner labelled `[self-hosted, Linux, X64, tiyf-
   "last_h1_decision_utc": "2025-01-20T13:20:00Z",
   "last_decision_utc": "2025-01-20T13:20:00Z",
   "timeframes_active": ["H1", "H4"],
+  "last_decision_by_timeframe": {
+    "H1": "2025-01-20T13:20:00Z",
+    "H4": "2025-01-20T09:20:00Z"
+  },
   "bar_lag_ms": 12.5,
   "pending_orders": 0,
   "feature_flags": ["dataQa=active", "riskProbe=enabled"],
@@ -72,6 +76,16 @@ All jobs target the self-hosted runner labelled `[self-hosted, Linux, X64, tiyf-
   "active_orders": 0,
   "risk_events_total": 5,
   "alerts_total": 0,
+  "risk_config_hash": "A1F9C2D4",
+  "risk_blocks_total": 2,
+  "risk_throttles_total": 1,
+  "risk_blocks_by_gate": {
+    "session_window": 1,
+    "daily_loss_cap": 1
+  },
+  "risk_throttles_by_gate": {
+    "daily_gain_cap": 1
+  },
   "last_log": "Connected to OANDA (practice)"
 }
 ```
@@ -131,10 +145,8 @@ sudo systemctl start tiyf-engine-demo.service
 | `weekly-digest` | Sundays 09:00 UTC (cron) + manual dispatch | Aggregates the last five successful `demo-daily-oanda` runs on `main`, extracts `events_sha`/`trades_sha`, and posts a digest to Discord. | Archives `weekly-digest.txt`, logs the webhook status code, and includes the digest table in the run summary without exposing the webhook URL. |
 ## Host Telemetry
 - The engine host exposes two loopback-only endpoints: http://127.0.0.1:8080/health (JSON) and http://127.0.0.1:8080/metrics (Prometheus text). Both respond even when trading is idle, falling back to zero/unknown values when data is unavailable.
-- /health now includes heartbeat_age_seconds, open_positions, active_orders, risk_events_total, alerts_total, last_decision_utc, timeframes_active, decisions_total, and loop_iterations_total alongside the existing adapter status. Daily monitor runs quote these fields in the summary: daily-monitor: adapter=<name> connected=<bool> heartbeat_age=<xs> stream_connected=<n> stream_heartbeat_age=<xs> bar_lag_ms=<ms> open_positions=<n> active_orders=<n> risk_events_total=<n> alerts_total=<n> last_decision_utc=<iso> timeframes_active=<csv> decisions_total=<n> loop_iterations_total=<n>.
-- /metrics publishes the same values as gauges/counters (engine_heartbeat_age_seconds, engine_bar_lag_ms, engine_pending_orders, engine_open_positions, engine_active_orders, engine_risk_events_total, engine_alerts_total, engine_stream_connected, engine_stream_heartbeat_age_seconds, engine_loop_uptime_seconds, engine_loop_iterations_total, engine_decisions_total, engine_loop_last_success_ts) so Prometheus-compatible scrapers can ingest them without extra formatting.
-
-
+- /health now includes heartbeat_age_seconds, open_positions, active_orders, risk_events_total, alerts_total, last_decision_utc, timeframes_active, decisions_total, loop_iterations_total, `risk_config_hash`, and per-gate block/throttle counters alongside the existing adapter status. Daily monitor runs quote these fields in the summary: daily-monitor: adapter=<name> connected=<bool> heartbeat_age=<xs> stream_connected=<n> stream_heartbeat_age=<xs> bar_lag_ms=<ms> open_positions=<n> active_orders=<n> risk_events_total=<n> alerts_total=<n> last_decision_utc=<iso> timeframes_active=<csv> decisions_total=<n> loop_iterations_total=<n> risk_config_hash=<hash> risk_blocks_total=<n> risk_throttles_total=<n>.
+- /metrics publishes the same values as gauges/counters (engine_heartbeat_age_seconds, engine_bar_lag_ms, engine_pending_orders, engine_open_positions, engine_active_orders, engine_risk_events_total, engine_alerts_total, engine_stream_connected, engine_stream_heartbeat_age_seconds, engine_loop_uptime_seconds, engine_loop_iterations_total, engine_decisions_total, engine_loop_last_success_ts) and now exposes `engine_risk_blocks_total{gate="…"}` / `engine_risk_throttles_total{gate="…"}` so Prometheus-compatible scrapers can ingest the rail counters without extra formatting.
 
 
 

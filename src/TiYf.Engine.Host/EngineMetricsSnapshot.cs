@@ -13,5 +13,9 @@ public readonly record struct EngineMetricsSnapshot(
     double LoopUptimeSeconds,
     long LoopIterationsTotal,
     long DecisionsTotal,
-    double LoopLastSuccessUnixSeconds);
+    double LoopLastSuccessUnixSeconds,
+    long RiskBlocksTotal,
+    long RiskThrottlesTotal,
+    IReadOnlyDictionary<string, long> RiskBlocksByGate,
+    IReadOnlyDictionary<string, long> RiskThrottlesByGate);
 
