@@ -1,0 +1,97 @@
+name: M4 Risk Proof
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/m4-risk-rails
+
+jobs:
+  risk-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore and build probe
+        run: |
+          dotnet restore TiYf.Engine.sln
+          dotnet build tools/RiskRailsProbe/RiskRailsProbe.csproj -c Release --no-restore
+
+      - name: Run session gate proof
+        run: |
+          mkdir -p artifacts/session
+          dotnet run --project tools/RiskRailsProbe/RiskRailsProbe.csproj -c Release --no-build \
+            --ts "2025-11-01T10:00:00Z" \
+            --inst EURUSD \
+            --session "07:00:00-08:00:00" \
+            --pnl-today 0 \
+            --equity-peak 100000 \
+            --equity-now 100000 \
+            --out "artifacts/session/events.csv"
+
+      - name: Run daily cap proof
+        run: |
+          mkdir -p artifacts/dailycap
+          dotnet run --project tools/RiskRailsProbe/RiskRailsProbe.csproj -c Release --no-build \
+            --ts "2025-11-01T10:00:00Z" \
+            --inst EURUSD \
+            --daily-loss 0 \
+            --action block \
+            --pnl-today 0 \
+            --equity-peak 100000 \
+            --equity-now 100000 \
+            --out "artifacts/dailycap/events.csv"
+
+      - name: Run global drawdown proof
+        run: |
+          mkdir -p artifacts/drawdown
+          dotnet run --project tools/RiskRailsProbe/RiskRailsProbe.csproj -c Release --no-build \
+            --ts "2025-11-01T10:00:00Z" \
+            --inst EURUSD \
+            --dd -1 \
+            --equity-peak 100000 \
+            --equity-now 99998 \
+            --out "artifacts/drawdown/events.csv"
+
+      - name: Run news blackout proof
+        run: |
+          mkdir -p artifacts/news
+          dotnet run --project tools/RiskRailsProbe/RiskRailsProbe.csproj -c Release --no-build \
+            --ts "2025-11-01T10:00:00Z" \
+            --inst EURUSD \
+            --news-file "proof/news-stub.json" \
+            --news-before 30 \
+            --news-after 30 \
+            --out "artifacts/news/events.csv"
+
+      - name: Build summary
+        run: |
+          set -euo pipefail
+          > artifacts/summary.txt
+          for gate in session dailycap drawdown news; do
+            alert=$(grep -m1 -E 'ALERT_(BLOCK|THROTTLE)_' artifacts/$gate/events.csv || true)
+            if [[ -z "$alert" ]]; then
+              echo "$gate: NOT FOUND" >> artifacts/summary.txt
+            else
+              echo "$gate: $alert" >> artifacts/summary.txt
+            fi
+          done
+          cat artifacts/summary.txt
+          if grep -q "NOT FOUND" artifacts/summary.txt; then
+            echo "One or more gates did not fire"
+            exit 2
+          fi
+
+      - name: Upload proof artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: m4-risk-proof
+          path: artifacts
