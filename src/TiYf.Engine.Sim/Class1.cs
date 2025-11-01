@@ -387,12 +387,12 @@ public sealed class EngineLoop
                                             _positions.OnFill(fill, _schemaVersion, _configHash ?? string.Empty, _sourceAdapter, ExtractDataVersion());
                                         }
                                         LogOrderSendOk(req.DecisionId, req.Symbol, result.BrokerOrderId);
-        }
-    }
+                                    }
+                                }
 
-}
+                            }
 
-}
+                        }
 
                         // Emit APPLIED event if scaling occurred
                         if (lastOriginalUnits.HasValue && lastAdjustedUnits.HasValue && lastAppliedSymbol is not null && lastAppliedTs.HasValue && _sentimentConfig is { Mode: var modeApplied } && modeApplied.Equals("active", StringComparison.OrdinalIgnoreCase))
