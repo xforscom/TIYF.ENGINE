@@ -61,7 +61,7 @@ jobs:
       - name: Build summary
         run: |
           set -euo pipefail
-          > artifacts/summary.txt
+          : > artifacts/summary.txt
           for gate in session dailycap drawdown news; do
             alert=$(grep -m1 -E 'ALERT_(BLOCK|THROTTLE)_' artifacts/$gate/events.csv || true)
             if [[ -z "$alert" ]]; then

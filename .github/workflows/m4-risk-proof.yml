@@ -8,6 +8,9 @@ on:
 
 jobs:
   risk-proof:
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -20,14 +23,23 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Restore and build probe
+      - name: Prepare artifacts
+        shell: bash
         run: |
+          set -euo pipefail
+          mkdir -p artifacts/session artifacts/dailycap artifacts/drawdown artifacts/news
+
+      - name: Restore and build probe
+        shell: bash
+        run: |
+          set -euo pipefail
           dotnet restore TiYf.Engine.sln
           dotnet build tools/RiskRailsProbe/RiskRailsProbe.csproj -c Release --no-restore
 
       - name: Run session gate proof
+        shell: bash
         run: |
-          mkdir -p artifacts/session
+          set -euo pipefail
           dotnet run --project tools/RiskRailsProbe/RiskRailsProbe.csproj -c Release --no-build \
             --ts "2025-11-01T10:00:00Z" \
             --inst EURUSD \
@@ -38,8 +50,9 @@ jobs:
             --out "artifacts/session/events.csv"
 
       - name: Run daily cap proof
+        shell: bash
         run: |
-          mkdir -p artifacts/dailycap
+          set -euo pipefail
           dotnet run --project tools/RiskRailsProbe/RiskRailsProbe.csproj -c Release --no-build \
             --ts "2025-11-01T10:00:00Z" \
             --inst EURUSD \
@@ -51,8 +64,9 @@ jobs:
             --out "artifacts/dailycap/events.csv"
 
       - name: Run global drawdown proof
+        shell: bash
         run: |
-          mkdir -p artifacts/drawdown
+          set -euo pipefail
           dotnet run --project tools/RiskRailsProbe/RiskRailsProbe.csproj -c Release --no-build \
             --ts "2025-11-01T10:00:00Z" \
             --inst EURUSD \
@@ -62,8 +76,9 @@ jobs:
             --out "artifacts/drawdown/events.csv"
 
       - name: Run news blackout proof
+        shell: bash
         run: |
-          mkdir -p artifacts/news
+          set -euo pipefail
           dotnet run --project tools/RiskRailsProbe/RiskRailsProbe.csproj -c Release --no-build \
             --ts "2025-11-01T10:00:00Z" \
             --inst EURUSD \
@@ -73,11 +88,17 @@ jobs:
             --out "artifacts/news/events.csv"
 
       - name: Build summary
+        shell: bash
         run: |
           set -euo pipefail
-          > artifacts/summary.txt
+          : > artifacts/summary.txt
           for gate in session dailycap drawdown news; do
-            alert=$(grep -m1 -E 'ALERT_(BLOCK|THROTTLE)_' artifacts/$gate/events.csv || true)
+            file="artifacts/$gate/events.csv"
+            if [[ -s "$file" ]]; then
+              alert=$(grep -m1 -E 'ALERT_(BLOCK|THROTTLE)_' "$file" || true)
+            else
+              alert=""
+            fi
             if [[ -z "$alert" ]]; then
               echo "$gate: NOT FOUND" >> artifacts/summary.txt
             else
