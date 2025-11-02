@@ -1,0 +1,10 @@
+{
+  "SchemaVersion": "1.3.0",
+  "EngineInstanceId": "seed",
+  "Source": "replay",
+  "Bars": [],
+  "DecisionsTotal": 0,
+  "LoopIterationsTotal": 0,
+  "LastDecisionUtc": null,
+  "DecisionsByTimeframe": {}
+}

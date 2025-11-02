@@ -22,6 +22,11 @@ public sealed class EngineHostState
     private DateTime? _lastDecisionUtc;
     private DateTime? _loopLastSuccessUtc;
     private DateTime? _loopStartUtc;
+    private string _riskConfigHash = string.Empty;
+    private long _riskBlocksTotal;
+    private long _riskThrottlesTotal;
+    private readonly Dictionary<string, long> _riskBlocksByGate = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, long> _riskThrottlesByGate = new(StringComparer.OrdinalIgnoreCase);
 
     public EngineHostState(string adapter, IEnumerable<string>? featureFlags)
     {
@@ -152,14 +157,7 @@ public sealed class EngineHostState
             }
             _lastDecisionUtc = utc;
             _loopLastSuccessUtc = utc;
-            if (!_lastDecisionByTimeframe.ContainsKey(timeframe))
-            {
-                _lastDecisionByTimeframe[timeframe] = utc;
-            }
-            else
-            {
-                _lastDecisionByTimeframe[timeframe] = utc;
-            }
+            _lastDecisionByTimeframe[timeframe] = utc;
             if (!_timeframesActive.Any(tf => string.Equals(tf, timeframe, StringComparison.OrdinalIgnoreCase)))
             {
                 _timeframesActive = _timeframesActive.Concat(new[] { timeframe }).ToArray();
@@ -252,6 +250,37 @@ public sealed class EngineHostState
         }
     }
 
+    public void SetRiskConfigHash(string hash)
+    {
+        lock (_sync)
+        {
+            _riskConfigHash = hash ?? string.Empty;
+        }
+    }
+
+    public void RegisterRiskGateEvent(string gate, bool throttled)
+    {
+        lock (_sync)
+        {
+            if (throttled)
+            {
+                _riskThrottlesTotal++;
+                if (!string.IsNullOrWhiteSpace(gate))
+                {
+                    _riskThrottlesByGate[gate] = _riskThrottlesByGate.TryGetValue(gate, out var existing) ? existing + 1 : 1;
+                }
+            }
+            else
+            {
+                _riskBlocksTotal++;
+                if (!string.IsNullOrWhiteSpace(gate))
+                {
+                    _riskBlocksByGate[gate] = _riskBlocksByGate.TryGetValue(gate, out var existing) ? existing + 1 : 1;
+                }
+            }
+        }
+    }
+
     public EngineMetricsSnapshot CreateMetricsSnapshot()
     {
         lock (_sync)
@@ -289,7 +318,12 @@ public sealed class EngineHostState
                 loop_iterations_total = metrics.LoopIterationsTotal,
                 decisions_total = metrics.DecisionsTotal,
                 loop_last_success_utc = _loopLastSuccessUtc,
-                loop_start_utc = _loopStartUtc
+                loop_start_utc = _loopStartUtc,
+                risk_config_hash = _riskConfigHash,
+                risk_blocks_total = _riskBlocksTotal,
+                risk_throttles_total = _riskThrottlesTotal,
+                risk_blocks_by_gate = new Dictionary<string, long>(_riskBlocksByGate, StringComparer.OrdinalIgnoreCase),
+                risk_throttles_by_gate = new Dictionary<string, long>(_riskThrottlesByGate, StringComparer.OrdinalIgnoreCase)
             };
         }
     }
@@ -315,7 +349,11 @@ public sealed class EngineHostState
             loopUptimeSeconds,
             _loopIterationsTotal,
             _decisionsTotal,
-            loopLastSuccessUnix);
+            loopLastSuccessUnix,
+            _riskBlocksTotal,
+            _riskThrottlesTotal,
+            new Dictionary<string, long>(_riskBlocksByGate, StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, long>(_riskThrottlesByGate, StringComparer.OrdinalIgnoreCase));
     }
 
     private static DateTime? NormalizeNullableUtc(DateTime? utc)

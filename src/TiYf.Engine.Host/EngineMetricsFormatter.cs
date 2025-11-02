@@ -21,6 +21,16 @@ internal static class EngineMetricsFormatter
         AppendMetric(builder, "engine_loop_iterations_total", snapshot.LoopIterationsTotal);
         AppendMetric(builder, "engine_decisions_total", snapshot.DecisionsTotal);
         AppendMetric(builder, "engine_loop_last_success_ts", snapshot.LoopLastSuccessUnixSeconds);
+        AppendMetric(builder, "engine_risk_blocks_total", snapshot.RiskBlocksTotal);
+        foreach (var kvp in snapshot.RiskBlocksByGate)
+        {
+            AppendMetric(builder, "engine_risk_blocks_total", kvp.Value, "gate", kvp.Key);
+        }
+        AppendMetric(builder, "engine_risk_throttles_total", snapshot.RiskThrottlesTotal);
+        foreach (var kvp in snapshot.RiskThrottlesByGate)
+        {
+            AppendMetric(builder, "engine_risk_throttles_total", kvp.Value, "gate", kvp.Key);
+        }
         return builder.ToString();
     }
 
@@ -42,4 +52,16 @@ internal static class EngineMetricsFormatter
 
     private static void AppendMetric(StringBuilder builder, string name, int value)
         => AppendMetric(builder, name, (long)value);
+
+    private static void AppendMetric(StringBuilder builder, string name, long value, string labelName, string labelValue)
+    {
+        builder.Append(name)
+            .Append('{')
+            .Append(labelName)
+            .Append("=\"")
+            .Append(labelValue.Replace("\"", "\\\""))
+            .Append("\"} ")
+            .Append(value)
+            .Append('\n');
+    }
 }

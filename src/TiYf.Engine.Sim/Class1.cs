@@ -1,4 +1,9 @@
-﻿using System.Text.Json;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using TiYf.Engine.Core;
 using TiYf.Engine.Sidecar;
 
@@ -96,6 +101,9 @@ public sealed class EngineLoop
     private readonly Dictionary<string, Queue<decimal>> _sentimentWindows = new(StringComparer.Ordinal);
     private DateTime? _lastStrategyMinute; // to avoid emitting strategy actions multiple times per minute when multiple instrument ticks share the same minute
     private readonly bool _riskProbeEnabled = true; // feature flag
+    private readonly IReadOnlyDictionary<long, string> _timeframeLabels;
+    private readonly string _riskConfigHash;
+    private readonly RiskRailRuntime? _riskRails;
 
     private string? ExtractDataVersion() => _dataVersion;
 
@@ -105,10 +113,16 @@ public sealed class EngineLoop
         Console.WriteLine($"OrderSend ok decision={decisionId} brokerOrderId={id} symbol={symbol}");
     }
 
-    public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action<Bar>? onBarEmitted = null, Action<int, int>? onPositionMetrics = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, string sourceAdapter = "stub", long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true, SentimentGuardConfig? sentimentConfig = null, string? penaltyConfig = null, bool forcePenalty = false, bool ciPenaltyScaffold = false, string riskMode = "off")
+    public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action<Bar>? onBarEmitted = null, Action<int, int>? onPositionMetrics = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, string sourceAdapter = "stub", long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true, SentimentGuardConfig? sentimentConfig = null, string? penaltyConfig = null, bool forcePenalty = false, bool ciPenaltyScaffold = false, string riskMode = "off", string? riskConfigHash = null, IReadOnlyList<NewsEvent>? newsEvents = null, IReadOnlyDictionary<long, string>? timeframeLabels = null, Action<string, bool>? riskGateCallback = null)
     {
         _clock = clock; _builders = builders; _barKeyTracker = tracker; _journal = journal; _ticks = ticks; _barEventType = barEventType; _seq = (journal is FileJournalWriter fj ? fj.NextSequence : 1UL) - 1UL; _onBarEmitted = onBarEmitted; _onPositionMetrics = onPositionMetrics; _riskFormulas = riskFormulas; _basketAggregator = basketAggregator; _configHash = configHash; _schemaVersion = schemaVersion; _riskEnforcer = riskEnforcer; _riskConfig = riskConfig; _equityOverride = equityOverride; _deterministicStrategy = deterministicStrategy; _execution = execution; _positions = positions; _tradesWriter = tradesWriter; _dataVersion = dataVersion; _sourceAdapter = string.IsNullOrWhiteSpace(sourceAdapter) ? "stub" : sourceAdapter; _riskProbeEnabled = riskProbeEnabled; _sentimentConfig = sentimentConfig; _penaltyMode = penaltyConfig ?? "off"; _forcePenalty = forcePenalty; _ciPenaltyScaffold = ciPenaltyScaffold; _riskMode = string.IsNullOrWhiteSpace(riskMode) ? "off" : riskMode.ToLowerInvariant();
         _sizeUnitsFx = sizeUnitsFx; _sizeUnitsXau = sizeUnitsXau;
+        _riskConfigHash = riskConfigHash ?? string.Empty;
+        _timeframeLabels = timeframeLabels ?? new Dictionary<long, string>();
+        var startingEquity = equityOverride ?? 100_000m;
+        _riskRails = riskConfig is not null
+            ? new RiskRailRuntime(riskConfig, _riskConfigHash, newsEvents ?? Array.Empty<NewsEvent>(), riskGateCallback, startingEquity)
+            : null;
 #if DEBUG
         if (_riskMode == "off" && riskConfig is not null && (riskConfig.EmitEvaluations || (riskConfig.MaxNetExposureBySymbol != null || riskConfig.MaxRunDrawdownCCY != null)))
         {
@@ -121,21 +135,22 @@ public sealed class EngineLoop
     private bool _penaltyEmitted = false; // ensure single forced emission
                                           // Risk tracking (net exposure by symbol & run drawdown). Simplified placeholders until full logic filled in.
     private readonly Dictionary<string, decimal> _netExposureBySymbol = new(StringComparer.Ordinal);
-    private decimal _peakEquity = 0m; // to compute run drawdown in account CCY
-    private decimal _minEquity = 0m;
-    private decimal _lastEquity = 0m;
     private bool _riskBlockCurrentBar = false; // reset per bar
     private int _riskEvalCount = 0; // counts INFO_RISK_EVAL emissions for test hooks
     private readonly Dictionary<string, int> _riskEvalCountBySymbol = new(StringComparer.Ordinal);
 
     private void ForceDrawdown(string symbol, decimal limit)
     {
-        // Deterministically set peak and current equity so run_drawdown = limit + 1
-        _peakEquity = 100_000m;
-        _lastEquity = _peakEquity - (limit + 1m);
-        if (_lastEquity < 0m) _lastEquity = 0m;
+        _riskRails?.ForceDrawdown(limit);
 #if DEBUG
-        Console.WriteLine($"DEBUG: ForceDrawdown(symbol={symbol}, limit={limit}, value={_peakEquity - _lastEquity})");
+        if (_riskRails is not null)
+        {
+            Console.WriteLine($"DEBUG: ForceDrawdown(symbol={symbol}, limit={limit}, value={Math.Abs(_riskRails.CurrentDrawdown)})");
+        }
+        else
+        {
+            Console.WriteLine($"DEBUG: ForceDrawdown(symbol={symbol}, limit={limit})");
+        }
 #endif
     }
 
@@ -207,6 +222,8 @@ public sealed class EngineLoop
                         }
                     }
 
+                    _riskRails?.UpdateBar(bar, _positions);
+
                     // === Risk evaluation & alerts (always before strategy scheduling) ===
                     _riskBlockCurrentBar = false; // reset
                     List<DeterministicScriptStrategy.ScheduledAction>? pendingActions = null;
@@ -235,54 +252,54 @@ public sealed class EngineLoop
                             }
                         }
                         _netExposureBySymbol[bar.InstrumentId.Value] = netExposure;
-                        _lastEquity = _equityOverride ?? 100_000m;
-                        if (_peakEquity == 0m) _peakEquity = _lastEquity;
-                        if (_lastEquity > _peakEquity) _peakEquity = _lastEquity;
-                        if (_minEquity == 0m || _lastEquity < _minEquity) _minEquity = _lastEquity;
-                        // Forced drawdown test hook: perform equity drop BEFORE computing runDrawdown so alert can trigger in same eval
-                        // Per-symbol deterministic force-drawdown hook
-                        if (_riskConfig?.ForceDrawdownAfterEvals != null && _riskConfig.MaxRunDrawdownCCY.HasValue)
+                        var maxRunDrawdown = _riskConfig?.MaxRunDrawdownCCY;
+                        if (_riskConfig?.ForceDrawdownAfterEvals is { } forceMap && maxRunDrawdown.HasValue)
                         {
-                            var forceMap = _riskConfig.ForceDrawdownAfterEvals;
                             var symbol = bar.InstrumentId.Value;
                             if (!_riskEvalCountBySymbol.TryGetValue(symbol, out var perSymCount)) perSymCount = 0;
                             if (forceMap.TryGetValue(symbol, out var triggerN) && perSymCount + 1 == triggerN)
-                                ForceDrawdown(symbol, _riskConfig.MaxRunDrawdownCCY.Value);
+                            {
+                                ForceDrawdown(symbol, maxRunDrawdown.Value);
+                            }
                         }
-                        decimal runDrawdown = _peakEquity - _lastEquity;
+                        decimal runDrawdown = _riskRails is not null ? Math.Abs(_riskRails.CurrentDrawdown) : 0m;
 #if DEBUG
                         if (_riskMode != "off") Console.WriteLine($"DEBUG:RISK_EVAL symbol={bar.InstrumentId.Value} run_dd={runDrawdown} cap={_riskConfig?.MaxRunDrawdownCCY} evalCount={_riskEvalCount} perSym={(_riskEvalCountBySymbol.TryGetValue(bar.InstrumentId.Value, out var c) ? c : 0)}");
 #endif
                         if (_riskConfig?.EmitEvaluations != false)
                         {
-                            var evalPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { symbol = bar.InstrumentId.Value, ts = bar.EndUtc, net_exposure = netExposure, run_drawdown = runDrawdown });
+                            var evalPayload = JsonSerializer.SerializeToElement(new { symbol = bar.InstrumentId.Value, ts = bar.EndUtc, net_exposure = netExposure, run_drawdown = runDrawdown });
                             await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "INFO_RISK_EVAL_V1", _sourceAdapter, evalPayload), ct);
                             _riskEvalCount++;
                             var sym = bar.InstrumentId.Value; _riskEvalCountBySymbol[sym] = _riskEvalCountBySymbol.TryGetValue(sym, out var ec) ? ec + 1 : 1;
                         }
-                        decimal lim = 0m; bool exposureBreach = false;
+                        decimal lim = 0m;
+                        bool exposureBreach = false;
                         if (_riskConfig?.MaxNetExposureBySymbol != null && _riskConfig.MaxNetExposureBySymbol.TryGetValue(bar.InstrumentId.Value, out var cap))
                         {
                             lim = cap;
                             // Treat breach as >= cap (not strictly >) so deterministic zero-cap promotion tests trigger an alert when projected exposure is zero or positive and cap=0.
                             exposureBreach = Math.Abs(netExposure) >= cap;
 #if DEBUG
-#if DEBUG
-                            // Debug exposure diagnostics (development only)
                             if (cap == 0) Console.WriteLine($"DEBUG:EXPOSURE_CHECK symbol={bar.InstrumentId.Value} net={netExposure} cap={cap} breach={exposureBreach} pending={(pendingActions?.Count ?? 0)} evalSeq={_seq + 1}");
 #endif
-#endif
                         }
-                        bool drawdownBreach = _riskConfig?.MaxRunDrawdownCCY.HasValue == true && runDrawdown > _riskConfig.MaxRunDrawdownCCY.Value;
+                        bool drawdownBreach = false;
+                        if (maxRunDrawdown.HasValue)
+                        {
+                            var limit = Math.Abs(maxRunDrawdown.Value);
+                            drawdownBreach = runDrawdown > limit;
+                        }
                         if (exposureBreach)
                         {
-                            var alertPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { symbol = bar.InstrumentId.Value, ts = bar.EndUtc, limit = lim, value = netExposure, reason = "net_exposure_cap" });
+                            var alertPayload = JsonSerializer.SerializeToElement(new { symbol = bar.InstrumentId.Value, ts = bar.EndUtc, limit = lim, value = netExposure, reason = "net_exposure_cap", config_hash = _riskConfigHash });
                             await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "ALERT_BLOCK_NET_EXPOSURE", _sourceAdapter, alertPayload), ct);
                             if (_riskMode == "active" && (_riskConfig?.BlockOnBreach ?? false)) _riskBlockCurrentBar = true;
                         }
-                        if (drawdownBreach)
+                        if (drawdownBreach && maxRunDrawdown.HasValue)
                         {
-                            var alertPayload = System.Text.Json.JsonSerializer.SerializeToElement(new { ts = bar.EndUtc, limit_ccy = _riskConfig!.MaxRunDrawdownCCY, value_ccy = runDrawdown, reason = "drawdown_guard" });
+                            var limitValue = Math.Abs(maxRunDrawdown.Value);
+                            var alertPayload = JsonSerializer.SerializeToElement(new { ts = bar.EndUtc, limit_ccy = limitValue, value_ccy = runDrawdown, reason = "drawdown_guard", config_hash = _riskConfigHash });
                             await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "ALERT_BLOCK_DRAWDOWN", _sourceAdapter, alertPayload), ct);
                             if (_riskMode == "active" && (_riskConfig?.BlockOnBreach ?? false)) _riskBlockCurrentBar = true;
                         }
@@ -338,6 +355,25 @@ public sealed class EngineLoop
                                         finalUnits = scaled;
                                         lastOriginalUnits = baseUnits; lastAdjustedUnits = finalUnits;
                                     }
+                                    RiskRailOutcome? riskOutcome = null;
+                                    if (_riskMode != "off" && firstLeg && _riskRails is not null)
+                                    {
+                                        var timeframeLabel = ResolveTimeframeLabel(interval);
+                                        riskOutcome = _riskRails.EvaluateNewEntry(act.Symbol, timeframeLabel, tickMinute, finalUnits);
+                                        foreach (var alert in riskOutcome.Alerts)
+                                        {
+                                            await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, alert.EventType, _sourceAdapter, alert.Payload), ct);
+                                        }
+                                        if (_riskMode == "active")
+                                        {
+                                            if (!riskOutcome.Allowed)
+                                            {
+                                                _riskBlockCurrentBar = true;
+                                                continue;
+                                            }
+                                            finalUnits = riskOutcome.Units;
+                                        }
+                                    }
                                     _openUnits[act.DecisionId] = finalUnits;
                                     var req = new OrderRequest(act.DecisionId, act.Symbol, side, finalUnits, tickMinute);
                                     var result = await _execution.ExecuteMarketAsync(req, ct);
@@ -350,7 +386,9 @@ public sealed class EngineLoop
                                         LogOrderSendOk(req.DecisionId, req.Symbol, result.BrokerOrderId);
                                     }
                                 }
+
                             }
+
                         }
 
                         // Emit APPLIED event if scaling occurred
@@ -452,5 +490,23 @@ public sealed class EngineLoop
                 }
             }
         }
+    }
+
+    private string ResolveTimeframeLabel(BarInterval interval)
+    {
+        if (_timeframeLabels.TryGetValue(interval.Duration.Ticks, out var label) && !string.IsNullOrWhiteSpace(label))
+        {
+            return label;
+        }
+        var duration = interval.Duration;
+        if (duration.TotalHours >= 1 && Math.Abs(duration.TotalHours - Math.Round(duration.TotalHours)) < 1e-6)
+        {
+            return $"H{(int)Math.Round(duration.TotalHours)}";
+        }
+        if (duration.TotalMinutes >= 1 && Math.Abs(duration.TotalMinutes - Math.Round(duration.TotalMinutes)) < 1e-6)
+        {
+            return $"M{(int)Math.Round(duration.TotalMinutes)}";
+        }
+        return $"{duration.TotalMinutes:0}m";
     }
 }

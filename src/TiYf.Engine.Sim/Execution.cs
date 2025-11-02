@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Linq;
 using TiYf.Engine.Core;
 
 namespace TiYf.Engine.Sim;
@@ -90,6 +91,14 @@ public sealed class PositionTracker
 
     public IReadOnlyList<CompletedTrade> Completed => _completed;
     public int OpenCount => _open.Count;
+
+    public IReadOnlyCollection<(string Symbol, TradeSide Side, decimal EntryPrice, long Units, DateTime OpenTimestamp)> SnapshotOpenPositions()
+    {
+        if (_open.Count == 0) return Array.Empty<(string, TradeSide, decimal, long, DateTime)>();
+        return _open.Values
+            .Select(p => (p.Symbol, p.Side, p.EntryPrice, p.Units, p.OpenTs))
+            .ToArray();
+    }
 
     public void OnFill(ExecutionFill fill, string schemaVersion, string configHash, string sourceAdapter, string? dataVersion)
     {
