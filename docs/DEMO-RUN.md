@@ -148,6 +148,13 @@ sudo systemctl start tiyf-engine-demo.service
 - /health now includes heartbeat_age_seconds, open_positions, active_orders, risk_events_total, alerts_total, last_decision_utc, timeframes_active, decisions_total, loop_iterations_total, `risk_config_hash`, and per-gate block/throttle counters alongside the existing adapter status. Daily monitor runs quote these fields in the summary: daily-monitor: adapter=<name> connected=<bool> heartbeat_age=<xs> stream_connected=<n> stream_heartbeat_age=<xs> bar_lag_ms=<ms> open_positions=<n> active_orders=<n> risk_events_total=<n> alerts_total=<n> last_decision_utc=<iso> timeframes_active=<csv> decisions_total=<n> loop_iterations_total=<n> risk_config_hash=<hash> risk_blocks_total=<n> risk_throttles_total=<n>.
 - /metrics publishes the same values as gauges/counters (engine_heartbeat_age_seconds, engine_bar_lag_ms, engine_pending_orders, engine_open_positions, engine_active_orders, engine_risk_events_total, engine_alerts_total, engine_stream_connected, engine_stream_heartbeat_age_seconds, engine_loop_uptime_seconds, engine_loop_iterations_total, engine_decisions_total, engine_loop_last_success_ts) and now exposes `engine_risk_blocks_total{gate="…"}` / `engine_risk_throttles_total{gate="…"}` so Prometheus-compatible scrapers can ingest the rail counters without extra formatting.
 
+## M4 Proof (Risk Rails)
+
+- `/health` records `risk_config_hash`, aggregate block/throttle counts, and per-gate tallies. `/metrics` mirrors them via `engine_risk_blocks_total{gate="…"}` and `engine_risk_throttles_total{gate="…"}` so the Prometheus scrape has parity with the JSON.
+- Daily monitor archives `daily-monitor-health/health.json`. Example (2025-11-02T15:56Z):  
+  `daily-monitor: adapter=oanda-demo connected=True heartbeat_age=12.0s stream_connected=0 stream_heartbeat_age=0.5s bar_lag_ms=31056670.7774 open_positions=0 active_orders=0 risk_events_total=52 alerts_total=158 last_decision_utc=10/31/2025 20:00:00 timeframes_active=H1,H4 decisions_total=100 loop_iterations_total=100`
+- `m4-risk-proof.yml` builds the deterministic `RiskRailsProbe` and asserts four alerts every run: `ALERT_BLOCK_SESSION_WINDOW`, `ALERT_BLOCK_DAILY_LOSS_CAP`, `ALERT_BLOCK_GLOBAL_DRAWDOWN`, `ALERT_BLOCK_NEWS_BLACKOUT`. The workflow uploads the corresponding `events.csv`/`trades.csv` so rail regressions are caught without replaying DemoFeed.
+- Operators may dispatch the probe manually on feature branches when validating risk-config edits; production validation relies on the scheduled daily monitor plus ad-hoc probe runs.
 
 
 

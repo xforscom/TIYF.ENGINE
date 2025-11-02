@@ -128,6 +128,9 @@ jobs:
           $activeOrders = if ($health.PSObject.Properties.Name -contains 'active_orders') { [int]$health.active_orders } else { 0 }
           $riskEventsTotal = if ($health.PSObject.Properties.Name -contains 'risk_events_total') { [int64]$health.risk_events_total } else { 0 }
           $alertsTotal = if ($health.PSObject.Properties.Name -contains 'alerts_total') { [int64]$health.alerts_total } else { 0 }
+          $riskConfigHash = if ($health.PSObject.Properties.Name -contains 'risk_config_hash') { [string]$health.risk_config_hash } else { '' }
+          $riskBlocksTotal = if ($health.PSObject.Properties.Name -contains 'risk_blocks_total') { [int64]$health.risk_blocks_total } else { 0 }
+          $riskThrottlesTotal = if ($health.PSObject.Properties.Name -contains 'risk_throttles_total') { [int64]$health.risk_throttles_total } else { 0 }
           $streamConnected = if ($health.PSObject.Properties.Name -contains 'stream_connected') { [int]$health.stream_connected } else { 0 }
           $streamHeartbeatAge = if ($health.PSObject.Properties.Name -contains 'stream_heartbeat_age_seconds') { [double]$health.stream_heartbeat_age_seconds } else { 0 }
           $lastDecisionUtc = if ($health.PSObject.Properties.Name -contains 'last_decision_utc') { [string]$health.last_decision_utc } else { '' }
@@ -148,6 +151,9 @@ jobs:
           "DAILY_MONITOR_ACTIVE_ORDERS=$activeOrders" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_RISK_EVENTS_TOTAL=$riskEventsTotal" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_ALERTS_TOTAL=$alertsTotal" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DAILY_MONITOR_RISK_CONFIG_HASH=$riskConfigHash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DAILY_MONITOR_RISK_BLOCKS_TOTAL=$riskBlocksTotal" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DAILY_MONITOR_RISK_THROTTLES_TOTAL=$riskThrottlesTotal" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_STREAM_CONNECTED=$streamConnected" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_STREAM_HEARTBEAT_AGE=$streamHeartbeatAge" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_LAST_DECISION=$lastDecisionUtc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -182,10 +188,13 @@ jobs:
           $timeframes = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_TIMEFRAMES)) { 'n/a' } else { $env:DAILY_MONITOR_TIMEFRAMES }
           $decisionsTotal = $env:DAILY_MONITOR_DECISIONS_TOTAL
           $loopIterations = $env:DAILY_MONITOR_LOOP_ITERATIONS
+          $riskConfigHash = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_RISK_CONFIG_HASH)) { 'n/a' } else { $env:DAILY_MONITOR_RISK_CONFIG_HASH }
+          $riskBlocksTotal = $env:DAILY_MONITOR_RISK_BLOCKS_TOTAL
+          $riskThrottlesTotal = $env:DAILY_MONITOR_RISK_THROTTLES_TOTAL
           $heartbeatFormatted = ('{0:0.0}' -f $heartbeatAge)
           $streamHeartbeatFormatted = ('{0:0.0}' -f $streamHeartbeatAge)
           $barLagString = $barLag.ToString([System.Globalization.CultureInfo]::InvariantCulture)
-          $line = "daily-monitor: adapter={0} connected={1} heartbeat_age={2}s stream_connected={3} stream_heartbeat_age={4}s bar_lag_ms={5} open_positions={6} active_orders={7} risk_events_total={8} alerts_total={9} last_decision_utc={10} timeframes_active={11} decisions_total={12} loop_iterations_total={13}" -f $adapter, $connected, $heartbeatFormatted, $streamConnected, $streamHeartbeatFormatted, $barLagString, $openPositions, $activeOrders, $riskEvents, $alertsTotal, $lastDecision, $timeframes, $decisionsTotal, $loopIterations
+          $line = "daily-monitor: adapter={0} connected={1} heartbeat_age={2}s stream_connected={3} stream_heartbeat_age={4}s bar_lag_ms={5} open_positions={6} active_orders={7} risk_events_total={8} alerts_total={9} last_decision_utc={10} timeframes_active={11} decisions_total={12} loop_iterations_total={13} risk_config_hash={14} risk_blocks_total={15} risk_throttles_total={16}" -f $adapter, $connected, $heartbeatFormatted, $streamConnected, $streamHeartbeatFormatted, $barLagString, $openPositions, $activeOrders, $riskEvents, $alertsTotal, $lastDecision, $timeframes, $decisionsTotal, $loopIterations, $riskConfigHash, $riskBlocksTotal, $riskThrottlesTotal
           Write-Host $line
           Set-Content -Path (Join-Path 'scratch' 'summary.txt') -Value $line -Encoding UTF8
           Add-Content -Encoding UTF8 -Path $env:GITHUB_STEP_SUMMARY -Value "## daily-monitor verdict"
