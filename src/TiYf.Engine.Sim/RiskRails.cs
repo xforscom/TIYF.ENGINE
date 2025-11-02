@@ -99,8 +99,8 @@ internal sealed class RiskRailRuntime
                 instrument,
                 timeframe,
                 ts,
-                start_utc = session.StartUtc.ToString(@"HH\:mm\:ss", CultureInfo.InvariantCulture),
-                end_utc = session.EndUtc.ToString(@"HH\:mm\:ss", CultureInfo.InvariantCulture),
+                start_utc = session.StartUtc.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture),
+                end_utc = session.EndUtc.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture),
                 config_hash = _configHash
             };
             alerts.Add(CreateAlert("ALERT_BLOCK_SESSION_WINDOW", payload, throttled: false));

@@ -155,7 +155,7 @@ public static class RiskConfigParser
 
     private static TimeSpan ParseTimeOfDay(string raw)
     {
-        var formats = new[] { @"HH\:mm", @"HH\:mm\:ss" };
+        var formats = new[] { @"hh\:mm", @"hh\:mm\:ss" };
         if (TimeSpan.TryParseExact(raw, formats, CultureInfo.InvariantCulture, out var ts))
         {
             return ts;

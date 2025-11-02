@@ -319,6 +319,8 @@ internal static class Program
                 opts.Units = Math.Max(1, units);
             }
 
+            string? sessionStart = null;
+            string? sessionEnd = null;
             if (map.TryGetValue("session", out var sessionRaw) && !string.IsNullOrWhiteSpace(sessionRaw))
             {
                 var parts = sessionRaw.Split('-', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -326,7 +328,28 @@ internal static class Program
                 {
                     throw new ArgumentOptionsException("Session window must be formatted as HH:mm[:ss]-HH:mm[:ss].");
                 }
-                opts.SessionWindow = (NormalizeTime(parts[0]), NormalizeTime(parts[1]));
+                sessionStart = parts[0];
+                sessionEnd = parts[1];
+            }
+            else
+            {
+                if (map.TryGetValue("session-start", out var startRaw) && !string.IsNullOrWhiteSpace(startRaw))
+                {
+                    sessionStart = startRaw;
+                }
+                if (map.TryGetValue("session-end", out var endRaw) && !string.IsNullOrWhiteSpace(endRaw))
+                {
+                    sessionEnd = endRaw;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(sessionStart) || !string.IsNullOrWhiteSpace(sessionEnd))
+            {
+                if (string.IsNullOrWhiteSpace(sessionStart) || string.IsNullOrWhiteSpace(sessionEnd))
+                {
+                    throw new ArgumentOptionsException("Session window requires both start and end times.");
+                }
+                opts.SessionWindow = (NormalizeTime(sessionStart!), NormalizeTime(sessionEnd!));
             }
 
             if (map.TryGetValue("daily-loss", out var lossRaw) && decimal.TryParse(lossRaw, NumberStyles.Float, CultureInfo.InvariantCulture, out var loss))
@@ -396,10 +419,10 @@ internal static class Program
 
         private static string NormalizeTime(string input)
         {
-            var formats = new[] { @"HH\:mm", @"HH\:mm\:ss" };
+            var formats = new[] { @"hh\:mm", @"hh\:mm\:ss" };
             if (TimeSpan.TryParseExact(input, formats, CultureInfo.InvariantCulture, out var ts))
             {
-                return ts.ToString(@"HH\:mm\:ss", CultureInfo.InvariantCulture);
+                return ts.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture);
             }
             throw new ArgumentOptionsException($"Invalid time format '{input}'. Use HH:mm or HH:mm:ss.");
         }
