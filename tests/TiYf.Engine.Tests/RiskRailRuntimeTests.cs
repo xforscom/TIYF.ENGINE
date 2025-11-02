@@ -29,7 +29,7 @@ public class RiskRailRuntimeTests
 
         Assert.False(outcome.Allowed);
         Assert.Contains(outcome.Alerts, a => a.EventType == "ALERT_BLOCK_SESSION_WINDOW");
-        Assert.Contains(gates, g => g.Gate == "session_window" && g.Throttled == false);
+        Assert.Contains(gates, g => g.Gate == "session_window" && !g.Throttled);
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public class RiskRailRuntimeTests
 
         Assert.False(outcome.Allowed);
         Assert.Contains(outcome.Alerts, a => a.EventType == "ALERT_BLOCK_DAILY_LOSS_CAP");
-        Assert.Contains(gates, g => g.Gate == "daily_loss_cap" && g.Throttled == false);
+        Assert.Contains(gates, g => g.Gate == "daily_loss_cap" && !g.Throttled);
     }
 
     [Fact]
@@ -105,7 +105,7 @@ public class RiskRailRuntimeTests
 
         Assert.False(outcome.Allowed);
         Assert.Contains(outcome.Alerts, a => a.EventType == "ALERT_BLOCK_GLOBAL_DRAWDOWN");
-        Assert.Contains(gates, g => g.Gate == "global_drawdown" && g.Throttled == false);
+        Assert.Contains(gates, g => g.Gate == "global_drawdown" && !g.Throttled);
     }
 
     [Fact]
@@ -127,6 +127,6 @@ public class RiskRailRuntimeTests
 
         Assert.False(outcome.Allowed);
         Assert.Contains(outcome.Alerts, a => a.EventType == "ALERT_BLOCK_NEWS_BLACKOUT");
-        Assert.Contains(gates, g => g.Gate == "news_blackout" && g.Throttled == false);
+        Assert.Contains(gates, g => g.Gate == "news_blackout" && !g.Throttled);
     }
 }

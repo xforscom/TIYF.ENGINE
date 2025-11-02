@@ -16,12 +16,13 @@ public sealed record NewsEvent(DateTime Utc, string Impact, List<string> Tags)
 
     private static (string Base, string Quote) InstrumentToCurrencies(string instrument)
     {
-        if (string.IsNullOrWhiteSpace(instrument) || instrument.Length < 6)
+        var trimmed = instrument?.Trim() ?? string.Empty;
+        var upper = trimmed.ToUpperInvariant();
+        if (upper.Length < 6)
         {
-            return (instrument.ToUpperInvariant(), string.Empty);
+            return (upper, string.Empty);
         }
 
-        var trimmed = instrument.Trim().ToUpperInvariant();
-        return (trimmed.Substring(0, 3), trimmed.Substring(trimmed.Length - 3, 3));
+        return (upper.Substring(0, 3), upper.Substring(upper.Length - 3, 3));
     }
 }

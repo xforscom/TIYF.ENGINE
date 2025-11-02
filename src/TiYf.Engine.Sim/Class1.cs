@@ -252,17 +252,14 @@ public sealed class EngineLoop
                             }
                         }
                         _netExposureBySymbol[bar.InstrumentId.Value] = netExposure;
-                        if (_riskConfig?.ForceDrawdownAfterEvals != null && _riskConfig.MaxRunDrawdownCCY.HasValue)
+                        var maxRunDrawdown = _riskConfig?.MaxRunDrawdownCCY;
+                        if (_riskConfig?.ForceDrawdownAfterEvals is { } forceMap && maxRunDrawdown.HasValue)
                         {
-                            var forceMap = _riskConfig.ForceDrawdownAfterEvals;
-                            if (forceMap is not null)
+                            var symbol = bar.InstrumentId.Value;
+                            if (!_riskEvalCountBySymbol.TryGetValue(symbol, out var perSymCount)) perSymCount = 0;
+                            if (forceMap.TryGetValue(symbol, out var triggerN) && perSymCount + 1 == triggerN)
                             {
-                                var symbol = bar.InstrumentId.Value;
-                                if (!_riskEvalCountBySymbol.TryGetValue(symbol, out var perSymCount)) perSymCount = 0;
-                                if (forceMap.TryGetValue(symbol, out var triggerN) && perSymCount + 1 == triggerN)
-                                {
-                                    ForceDrawdown(symbol, _riskConfig.MaxRunDrawdownCCY.Value);
-                                }
+                                ForceDrawdown(symbol, maxRunDrawdown.Value);
                             }
                         }
                         decimal runDrawdown = _riskRails is not null ? Math.Abs(_riskRails.CurrentDrawdown) : 0m;
@@ -288,9 +285,9 @@ public sealed class EngineLoop
 #endif
                         }
                         bool drawdownBreach = false;
-                        if (_riskConfig?.MaxRunDrawdownCCY.HasValue == true)
+                        if (maxRunDrawdown.HasValue)
                         {
-                            var limit = Math.Abs(_riskConfig.MaxRunDrawdownCCY.Value);
+                            var limit = Math.Abs(maxRunDrawdown.Value);
                             drawdownBreach = runDrawdown > limit;
                         }
                         if (exposureBreach)
@@ -299,9 +296,9 @@ public sealed class EngineLoop
                             await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "ALERT_BLOCK_NET_EXPOSURE", _sourceAdapter, alertPayload), ct);
                             if (_riskMode == "active" && (_riskConfig?.BlockOnBreach ?? false)) _riskBlockCurrentBar = true;
                         }
-                        if (drawdownBreach)
+                        if (drawdownBreach && maxRunDrawdown.HasValue)
                         {
-                            var limitValue = Math.Abs(_riskConfig!.MaxRunDrawdownCCY!.Value);
+                            var limitValue = Math.Abs(maxRunDrawdown.Value);
                             var alertPayload = JsonSerializer.SerializeToElement(new { ts = bar.EndUtc, limit_ccy = limitValue, value_ccy = runDrawdown, reason = "drawdown_guard", config_hash = _riskConfigHash });
                             await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "ALERT_BLOCK_DRAWDOWN", _sourceAdapter, alertPayload), ct);
                             if (_riskMode == "active" && (_riskConfig?.BlockOnBreach ?? false)) _riskBlockCurrentBar = true;

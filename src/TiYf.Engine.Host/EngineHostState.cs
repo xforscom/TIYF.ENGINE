@@ -157,14 +157,7 @@ public sealed class EngineHostState
             }
             _lastDecisionUtc = utc;
             _loopLastSuccessUtc = utc;
-            if (!_lastDecisionByTimeframe.ContainsKey(timeframe))
-            {
-                _lastDecisionByTimeframe[timeframe] = utc;
-            }
-            else
-            {
-                _lastDecisionByTimeframe[timeframe] = utc;
-            }
+            _lastDecisionByTimeframe[timeframe] = utc;
             if (!_timeframesActive.Any(tf => string.Equals(tf, timeframe, StringComparison.OrdinalIgnoreCase)))
             {
                 _timeframesActive = _timeframesActive.Concat(new[] { timeframe }).ToArray();

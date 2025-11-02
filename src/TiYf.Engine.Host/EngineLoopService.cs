@@ -936,7 +936,17 @@ internal sealed class EngineLoopService : BackgroundService
             }
             return events;
         }
-        catch (Exception ex)
+        catch (IOException ex)
+        {
+            _logger.LogWarning(ex, "Failed to load news blackout schedule from {Path}", path);
+            return Array.Empty<NewsEvent>();
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "Failed to load news blackout schedule from {Path}", path);
+            return Array.Empty<NewsEvent>();
+        }
+        catch (JsonException ex)
         {
             _logger.LogWarning(ex, "Failed to load news blackout schedule from {Path}", path);
             return Array.Empty<NewsEvent>();

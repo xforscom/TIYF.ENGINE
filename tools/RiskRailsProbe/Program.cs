@@ -396,10 +396,10 @@ internal static class Program
 
         private static string NormalizeTime(string input)
         {
-            var formats = new[] { @"hh\:mm", @"hh\:mm\:ss" };
+            var formats = new[] { @"HH\:mm", @"HH\:mm\:ss" };
             if (TimeSpan.TryParseExact(input, formats, CultureInfo.InvariantCulture, out var ts))
             {
-                return ts.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture);
+                return ts.ToString(@"HH\:mm\:ss", CultureInfo.InvariantCulture);
             }
             throw new ArgumentOptionsException($"Invalid time format '{input}'. Use HH:mm or HH:mm:ss.");
         }

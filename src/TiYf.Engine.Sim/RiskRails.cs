@@ -99,8 +99,8 @@ internal sealed class RiskRailRuntime
                 instrument,
                 timeframe,
                 ts,
-                start_utc = session.StartUtc.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture),
-                end_utc = session.EndUtc.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture),
+                start_utc = session.StartUtc.ToString(@"HH\:mm\:ss", CultureInfo.InvariantCulture),
+                end_utc = session.EndUtc.ToString(@"HH\:mm\:ss", CultureInfo.InvariantCulture),
                 config_hash = _configHash
             };
             alerts.Add(CreateAlert("ALERT_BLOCK_SESSION_WINDOW", payload, throttled: false));
@@ -225,15 +225,9 @@ internal sealed class RiskRailRuntime
         var start = config.StartUtc;
         var end = config.EndUtc;
         if (start == end) return false; // treat as open window
-        bool inWindow;
-        if (start < end)
-        {
-            inWindow = time >= start && time < end;
-        }
-        else
-        {
-            inWindow = time >= start || time < end;
-        }
+        var inWindow = start < end
+            ? time >= start && time < end
+            : time >= start || time < end;
         return !inWindow;
     }
 
@@ -278,7 +272,7 @@ internal sealed class RiskRailRuntime
             var pnl = (lastPrice - pos.EntryPrice) * dir * pos.Units;
             total += pnl;
         }
-        return decimal.Round(total, 6, MidpointRounding.AwayFromZero);
+        return decimal.Round(total, 2, MidpointRounding.AwayFromZero);
     }
 
     private static decimal ComputeDailyRealizedPnl(PositionTracker? positions, DateTime dayAnchor)
