@@ -185,29 +185,29 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-            $adapter = $env:DAILY_MONITOR_ADAPTER
-            $connected = $env:DAILY_MONITOR_CONNECTED
-            $heartbeat = $env:DAILY_MONITOR_HEARTBEAT
-            $heartbeatIso = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_HEARTBEAT_ISO)) { 'n/a' } else { $env:DAILY_MONITOR_HEARTBEAT_ISO }
-            $heartbeatAge = [double]::Parse(($env:DAILY_MONITOR_HEARTBEAT_AGE ?? '0'), [System.Globalization.CultureInfo]::InvariantCulture)
-            $barLag = [double]::Parse(($env:DAILY_MONITOR_BAR_LAG_MS ?? '0'), [System.Globalization.CultureInfo]::InvariantCulture)
-            $openPositions = $env:DAILY_MONITOR_OPEN_POSITIONS
-            $activeOrders = $env:DAILY_MONITOR_ACTIVE_ORDERS
-            $riskEvents = $env:DAILY_MONITOR_RISK_EVENTS_TOTAL
-            $alertsTotal = $env:DAILY_MONITOR_ALERTS_TOTAL
-            $streamConnected = $env:DAILY_MONITOR_STREAM_CONNECTED
-            $streamHeartbeatAge = [double]::Parse(($env:DAILY_MONITOR_STREAM_HEARTBEAT_AGE ?? '0'), [System.Globalization.CultureInfo]::InvariantCulture)
-            $lastDecisionIso = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_LAST_DECISION_ISO)) { 'none' } else { $env:DAILY_MONITOR_LAST_DECISION_ISO }
-            $timeframes = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_TIMEFRAMES)) { 'n/a' } else { $env:DAILY_MONITOR_TIMEFRAMES }
-            $decisionsTotal = $env:DAILY_MONITOR_DECISIONS_TOTAL
-            $loopIterations = $env:DAILY_MONITOR_LOOP_ITERATIONS
-            $riskConfigHash = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_RISK_CONFIG_HASH)) { 'n/a' } else { $env:DAILY_MONITOR_RISK_CONFIG_HASH }
-            $riskBlocksTotal = $env:DAILY_MONITOR_RISK_BLOCKS_TOTAL
-            $riskThrottlesTotal = $env:DAILY_MONITOR_RISK_THROTTLES_TOTAL
+          $adapter = $env:DAILY_MONITOR_ADAPTER
+          $connected = $env:DAILY_MONITOR_CONNECTED
+          $heartbeat = $env:DAILY_MONITOR_HEARTBEAT
+          $heartbeatIso = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_HEARTBEAT_ISO)) { 'n/a' } else { $env:DAILY_MONITOR_HEARTBEAT_ISO }
+          $heartbeatAge = [double]::Parse(($env:DAILY_MONITOR_HEARTBEAT_AGE ?? '0'), [System.Globalization.CultureInfo]::InvariantCulture)
+          $barLag = [double]::Parse(($env:DAILY_MONITOR_BAR_LAG_MS ?? '0'), [System.Globalization.CultureInfo]::InvariantCulture)
+          $openPositions = $env:DAILY_MONITOR_OPEN_POSITIONS
+          $activeOrders = $env:DAILY_MONITOR_ACTIVE_ORDERS
+          $riskEvents = $env:DAILY_MONITOR_RISK_EVENTS_TOTAL
+          $alertsTotal = $env:DAILY_MONITOR_ALERTS_TOTAL
+          $streamConnected = $env:DAILY_MONITOR_STREAM_CONNECTED
+          $streamHeartbeatAge = [double]::Parse(($env:DAILY_MONITOR_STREAM_HEARTBEAT_AGE ?? '0'), [System.Globalization.CultureInfo]::InvariantCulture)
+          $lastDecisionIso = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_LAST_DECISION_ISO)) { 'none' } else { $env:DAILY_MONITOR_LAST_DECISION_ISO }
+          $timeframes = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_TIMEFRAMES)) { 'n/a' } else { $env:DAILY_MONITOR_TIMEFRAMES }
+          $decisionsTotal = $env:DAILY_MONITOR_DECISIONS_TOTAL
+          $loopIterations = $env:DAILY_MONITOR_LOOP_ITERATIONS
+          $riskConfigHash = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_RISK_CONFIG_HASH)) { 'n/a' } else { $env:DAILY_MONITOR_RISK_CONFIG_HASH }
+          $riskBlocksTotal = $env:DAILY_MONITOR_RISK_BLOCKS_TOTAL
+          $riskThrottlesTotal = $env:DAILY_MONITOR_RISK_THROTTLES_TOTAL
           $heartbeatFormatted = ('{0:0.0}' -f $heartbeatAge)
           $streamHeartbeatFormatted = ('{0:0.0}' -f $streamHeartbeatAge)
           $barLagString = $barLag.ToString([System.Globalization.CultureInfo]::InvariantCulture)
-            $line = "daily-monitor: adapter={0} connected={1} last_heartbeat_utc={2} heartbeat_age={3}s stream_connected={4} stream_heartbeat_age={5}s bar_lag_ms={6} open_positions={7} active_orders={8} risk_events_total={9} alerts_total={10} last_decision_utc={11} timeframes_active={12} decisions_total={13} loop_iterations_total={14} risk_config_hash={15} risk_blocks_total={16} risk_throttles_total={17}" -f $adapter, $connected, $heartbeatIso, $heartbeatFormatted, $streamConnected, $streamHeartbeatFormatted, $barLagString, $openPositions, $activeOrders, $riskEvents, $alertsTotal, $lastDecisionIso, $timeframes, $decisionsTotal, $loopIterations, $riskConfigHash, $riskBlocksTotal, $riskThrottlesTotal
+          $line = "daily-monitor: adapter={0} connected={1} last_heartbeat_utc={2} heartbeat_age={3}s stream_connected={4} stream_heartbeat_age={5}s bar_lag_ms={6} open_positions={7} active_orders={8} risk_events_total={9} alerts_total={10} last_decision_utc={11} timeframes_active={12} decisions_total={13} loop_iterations_total={14} risk_config_hash={15} risk_blocks_total={16} risk_throttles_total={17}" -f $adapter, $connected, $heartbeatIso, $heartbeatFormatted, $streamConnected, $streamHeartbeatFormatted, $barLagString, $openPositions, $activeOrders, $riskEvents, $alertsTotal, $lastDecisionIso, $timeframes, $decisionsTotal, $loopIterations, $riskConfigHash, $riskBlocksTotal, $riskThrottlesTotal
           Write-Host $line
           Set-Content -Path (Join-Path 'scratch' 'summary.txt') -Value $line -Encoding UTF8
           Add-Content -Encoding UTF8 -Path $env:GITHUB_STEP_SUMMARY -Value "## daily-monitor verdict"
