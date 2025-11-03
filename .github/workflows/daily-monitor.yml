@@ -122,6 +122,11 @@ jobs:
           $adapter = $health.adapter
           $connected = [bool]$health.connected
           $heartbeat = $health.last_heartbeat_utc
+          $heartbeatIso = if ($health.PSObject.Properties.Name -contains 'last_heartbeat_utc' -and $null -ne $health.last_heartbeat_utc) {
+            ([DateTime]$health.last_heartbeat_utc).ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
+          } else {
+            ''
+          }
           $heartbeatAge = if ($health.PSObject.Properties.Name -contains 'heartbeat_age_seconds') { [double]$health.heartbeat_age_seconds } else { 0 }
           $barLag = if ($health.PSObject.Properties.Name -contains 'bar_lag_ms') { [double]$health.bar_lag_ms } else { 0 }
           $openPositions = if ($health.PSObject.Properties.Name -contains 'open_positions') { [int]$health.open_positions } else { 0 }
@@ -134,6 +139,11 @@ jobs:
           $streamConnected = if ($health.PSObject.Properties.Name -contains 'stream_connected') { [int]$health.stream_connected } else { 0 }
           $streamHeartbeatAge = if ($health.PSObject.Properties.Name -contains 'stream_heartbeat_age_seconds') { [double]$health.stream_heartbeat_age_seconds } else { 0 }
           $lastDecisionUtc = if ($health.PSObject.Properties.Name -contains 'last_decision_utc' -and $null -ne $health.last_decision_utc) { [string]$health.last_decision_utc } else { '' }
+          $lastDecisionIso = if ($health.PSObject.Properties.Name -contains 'last_decision_utc' -and $null -ne $health.last_decision_utc) {
+            ([DateTime]$health.last_decision_utc).ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
+          } else {
+            ''
+          }
           $timeframesActive = if ($health.PSObject.Properties.Name -contains 'timeframes_active') { ($health.timeframes_active | ForEach-Object { $_.ToString() }) -join ',' } else { '' }
           $decisionsTotal = if ($health.PSObject.Properties.Name -contains 'decisions_total') { [int64]$health.decisions_total } else { 0 }
           $loopIterationsTotal = if ($health.PSObject.Properties.Name -contains 'loop_iterations_total') { [int64]$health.loop_iterations_total } else { 0 }
@@ -145,6 +155,7 @@ jobs:
           "DAILY_MONITOR_ADAPTER=$adapter" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_CONNECTED=$connected" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_HEARTBEAT=$heartbeat" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DAILY_MONITOR_HEARTBEAT_ISO=$heartbeatIso" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_HEARTBEAT_AGE=$heartbeatAge" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_BAR_LAG_MS=$barLag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_OPEN_POSITIONS=$openPositions" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -157,6 +168,7 @@ jobs:
           "DAILY_MONITOR_STREAM_CONNECTED=$streamConnected" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_STREAM_HEARTBEAT_AGE=$streamHeartbeatAge" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_LAST_DECISION=$lastDecisionUtc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DAILY_MONITOR_LAST_DECISION_ISO=$lastDecisionIso" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_TIMEFRAMES=$timeframesActive" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_DECISIONS_TOTAL=$decisionsTotal" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_LOOP_ITERATIONS=$loopIterationsTotal" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -175,16 +187,17 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $adapter = $env:DAILY_MONITOR_ADAPTER
           $connected = $env:DAILY_MONITOR_CONNECTED
-          $heartbeat = $env:DAILY_MONITOR_HEARTBEAT
-          $heartbeatAge = [double]::Parse(($env:DAILY_MONITOR_HEARTBEAT_AGE ?? '0'), [System.Globalization.CultureInfo]::InvariantCulture)
-          $barLag = [double]::Parse(($env:DAILY_MONITOR_BAR_LAG_MS ?? '0'), [System.Globalization.CultureInfo]::InvariantCulture)
-          $openPositions = $env:DAILY_MONITOR_OPEN_POSITIONS
-          $activeOrders = $env:DAILY_MONITOR_ACTIVE_ORDERS
-          $riskEvents = $env:DAILY_MONITOR_RISK_EVENTS_TOTAL
-          $alertsTotal = $env:DAILY_MONITOR_ALERTS_TOTAL
-          $streamConnected = $env:DAILY_MONITOR_STREAM_CONNECTED
-          $streamHeartbeatAge = [double]::Parse(($env:DAILY_MONITOR_STREAM_HEARTBEAT_AGE ?? '0'), [System.Globalization.CultureInfo]::InvariantCulture)
-          $lastDecision = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_LAST_DECISION)) { 'none' } else { $env:DAILY_MONITOR_LAST_DECISION }
+            $heartbeat = $env:DAILY_MONITOR_HEARTBEAT
+            $heartbeatIso = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_HEARTBEAT_ISO)) { 'n/a' } else { $env:DAILY_MONITOR_HEARTBEAT_ISO }
+            $heartbeatAge = [double]::Parse(($env:DAILY_MONITOR_HEARTBEAT_AGE ?? '0'), [System.Globalization.CultureInfo]::InvariantCulture)
+            $barLag = [double]::Parse(($env:DAILY_MONITOR_BAR_LAG_MS ?? '0'), [System.Globalization.CultureInfo]::InvariantCulture)
+            $openPositions = $env:DAILY_MONITOR_OPEN_POSITIONS
+            $activeOrders = $env:DAILY_MONITOR_ACTIVE_ORDERS
+            $riskEvents = $env:DAILY_MONITOR_RISK_EVENTS_TOTAL
+            $alertsTotal = $env:DAILY_MONITOR_ALERTS_TOTAL
+            $streamConnected = $env:DAILY_MONITOR_STREAM_CONNECTED
+            $streamHeartbeatAge = [double]::Parse(($env:DAILY_MONITOR_STREAM_HEARTBEAT_AGE ?? '0'), [System.Globalization.CultureInfo]::InvariantCulture)
+            $lastDecisionIso = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_LAST_DECISION_ISO)) { 'none' } else { $env:DAILY_MONITOR_LAST_DECISION_ISO }
           $timeframes = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_TIMEFRAMES)) { 'n/a' } else { $env:DAILY_MONITOR_TIMEFRAMES }
           $decisionsTotal = $env:DAILY_MONITOR_DECISIONS_TOTAL
           $loopIterations = $env:DAILY_MONITOR_LOOP_ITERATIONS
@@ -194,7 +207,7 @@ jobs:
           $heartbeatFormatted = ('{0:0.0}' -f $heartbeatAge)
           $streamHeartbeatFormatted = ('{0:0.0}' -f $streamHeartbeatAge)
           $barLagString = $barLag.ToString([System.Globalization.CultureInfo]::InvariantCulture)
-          $line = "daily-monitor: adapter={0} connected={1} heartbeat_age={2}s stream_connected={3} stream_heartbeat_age={4}s bar_lag_ms={5} open_positions={6} active_orders={7} risk_events_total={8} alerts_total={9} last_decision_utc={10} timeframes_active={11} decisions_total={12} loop_iterations_total={13} risk_config_hash={14} risk_blocks_total={15} risk_throttles_total={16}" -f $adapter, $connected, $heartbeatFormatted, $streamConnected, $streamHeartbeatFormatted, $barLagString, $openPositions, $activeOrders, $riskEvents, $alertsTotal, $lastDecision, $timeframes, $decisionsTotal, $loopIterations, $riskConfigHash, $riskBlocksTotal, $riskThrottlesTotal
+            $line = "daily-monitor: adapter={0} connected={1} last_heartbeat_utc={2} heartbeat_age={3}s stream_connected={4} stream_heartbeat_age={5}s bar_lag_ms={6} open_positions={7} active_orders={8} risk_events_total={9} alerts_total={10} last_decision_utc={11} timeframes_active={12} decisions_total={13} loop_iterations_total={14} risk_config_hash={15} risk_blocks_total={16} risk_throttles_total={17}" -f $adapter, $connected, $heartbeatIso, $heartbeatFormatted, $streamConnected, $streamHeartbeatFormatted, $barLagString, $openPositions, $activeOrders, $riskEvents, $alertsTotal, $lastDecisionIso, $timeframes, $decisionsTotal, $loopIterations, $riskConfigHash, $riskBlocksTotal, $riskThrottlesTotal
           Write-Host $line
           Set-Content -Path (Join-Path 'scratch' 'summary.txt') -Value $line -Encoding UTF8
           Add-Content -Encoding UTF8 -Path $env:GITHUB_STEP_SUMMARY -Value "## daily-monitor verdict"
