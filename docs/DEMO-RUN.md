@@ -152,10 +152,8 @@ sudo systemctl start tiyf-engine-demo.service
 
 - `/health` records `risk_config_hash`, aggregate block/throttle counts, and per-gate tallies. `/metrics` mirrors them via `engine_risk_blocks_total{gate="…"}` and `engine_risk_throttles_total{gate="…"}` so the Prometheus scrape has parity with the JSON.
 - Daily monitor archives `daily-monitor-health/health.json`. Example (2025-11-02T15:56Z):  
-  `daily-monitor: adapter=oanda-demo connected=True heartbeat_age=12.0s stream_connected=0 stream_heartbeat_age=0.5s bar_lag_ms=31056670.7774 open_positions=0 active_orders=0 risk_events_total=52 alerts_total=158 last_decision_utc=10/31/2025 20:00:00 timeframes_active=H1,H4 decisions_total=100 loop_iterations_total=100`
+`daily-monitor: adapter=oanda-demo connected=True heartbeat_age=12.0s stream_connected=0 stream_heartbeat_age=0.5s bar_lag_ms=31056670.7774 open_positions=0 active_orders=0 risk_events_total=52 alerts_total=158 last_decision_utc=2025-10-31T20:00:00Z timeframes_active=H1,H4 decisions_total=100 loop_iterations_total=100 risk_config_hash=abc123def456 risk_blocks_total=4 risk_throttles_total=2`
 - `m4-risk-proof.yml` builds the deterministic `RiskRailsProbe` and asserts four alerts every run: `ALERT_BLOCK_SESSION_WINDOW`, `ALERT_BLOCK_DAILY_LOSS_CAP`, `ALERT_BLOCK_GLOBAL_DRAWDOWN`, `ALERT_BLOCK_NEWS_BLACKOUT`. The workflow uploads the corresponding `events.csv`/`trades.csv` so rail regressions are caught without replaying DemoFeed.
 - Operators may dispatch the probe manually on feature branches when validating risk-config edits; production validation relies on the scheduled daily monitor plus ad-hoc probe runs.
-
-
 
 
