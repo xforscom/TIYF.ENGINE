@@ -185,8 +185,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $adapter = $env:DAILY_MONITOR_ADAPTER
-          $connected = $env:DAILY_MONITOR_CONNECTED
+            $adapter = $env:DAILY_MONITOR_ADAPTER
+            $connected = $env:DAILY_MONITOR_CONNECTED
             $heartbeat = $env:DAILY_MONITOR_HEARTBEAT
             $heartbeatIso = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_HEARTBEAT_ISO)) { 'n/a' } else { $env:DAILY_MONITOR_HEARTBEAT_ISO }
             $heartbeatAge = [double]::Parse(($env:DAILY_MONITOR_HEARTBEAT_AGE ?? '0'), [System.Globalization.CultureInfo]::InvariantCulture)
@@ -198,12 +198,12 @@ jobs:
             $streamConnected = $env:DAILY_MONITOR_STREAM_CONNECTED
             $streamHeartbeatAge = [double]::Parse(($env:DAILY_MONITOR_STREAM_HEARTBEAT_AGE ?? '0'), [System.Globalization.CultureInfo]::InvariantCulture)
             $lastDecisionIso = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_LAST_DECISION_ISO)) { 'none' } else { $env:DAILY_MONITOR_LAST_DECISION_ISO }
-          $timeframes = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_TIMEFRAMES)) { 'n/a' } else { $env:DAILY_MONITOR_TIMEFRAMES }
-          $decisionsTotal = $env:DAILY_MONITOR_DECISIONS_TOTAL
-          $loopIterations = $env:DAILY_MONITOR_LOOP_ITERATIONS
-          $riskConfigHash = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_RISK_CONFIG_HASH)) { 'n/a' } else { $env:DAILY_MONITOR_RISK_CONFIG_HASH }
-          $riskBlocksTotal = $env:DAILY_MONITOR_RISK_BLOCKS_TOTAL
-          $riskThrottlesTotal = $env:DAILY_MONITOR_RISK_THROTTLES_TOTAL
+            $timeframes = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_TIMEFRAMES)) { 'n/a' } else { $env:DAILY_MONITOR_TIMEFRAMES }
+            $decisionsTotal = $env:DAILY_MONITOR_DECISIONS_TOTAL
+            $loopIterations = $env:DAILY_MONITOR_LOOP_ITERATIONS
+            $riskConfigHash = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_RISK_CONFIG_HASH)) { 'n/a' } else { $env:DAILY_MONITOR_RISK_CONFIG_HASH }
+            $riskBlocksTotal = $env:DAILY_MONITOR_RISK_BLOCKS_TOTAL
+            $riskThrottlesTotal = $env:DAILY_MONITOR_RISK_THROTTLES_TOTAL
           $heartbeatFormatted = ('{0:0.0}' -f $heartbeatAge)
           $streamHeartbeatFormatted = ('{0:0.0}' -f $streamHeartbeatAge)
           $barLagString = $barLag.ToString([System.Globalization.CultureInfo]::InvariantCulture)
