@@ -133,7 +133,7 @@ jobs:
           $riskThrottlesTotal = if ($health.PSObject.Properties.Name -contains 'risk_throttles_total') { [int64]$health.risk_throttles_total } else { 0 }
           $streamConnected = if ($health.PSObject.Properties.Name -contains 'stream_connected') { [int]$health.stream_connected } else { 0 }
           $streamHeartbeatAge = if ($health.PSObject.Properties.Name -contains 'stream_heartbeat_age_seconds') { [double]$health.stream_heartbeat_age_seconds } else { 0 }
-          $lastDecisionUtc = if ($health.PSObject.Properties.Name -contains 'last_decision_utc') { [string]$health.last_decision_utc } else { '' }
+          $lastDecisionUtc = if ($health.PSObject.Properties.Name -contains 'last_decision_utc' -and $null -ne $health.last_decision_utc) { [string]$health.last_decision_utc } else { '' }
           $timeframesActive = if ($health.PSObject.Properties.Name -contains 'timeframes_active') { ($health.timeframes_active | ForEach-Object { $_.ToString() }) -join ',' } else { '' }
           $decisionsTotal = if ($health.PSObject.Properties.Name -contains 'decisions_total') { [int64]$health.decisions_total } else { 0 }
           $loopIterationsTotal = if ($health.PSObject.Properties.Name -contains 'loop_iterations_total') { [int64]$health.loop_iterations_total } else { 0 }
