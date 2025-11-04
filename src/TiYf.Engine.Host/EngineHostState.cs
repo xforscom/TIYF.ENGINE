@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using TiYf.Engine.Core;
+using TiYf.Engine.Core.Text;
 
 namespace TiYf.Engine.Host;
 
@@ -216,7 +217,7 @@ public sealed class EngineHostState
 
             _gvrsRaw = (double)snapshot.Raw;
             _gvrsEwma = (double)snapshot.Ewma;
-            _gvrsBucket = NormalizeBucket(snapshot.Bucket);
+            _gvrsBucket = BucketNormalizer.Normalize(snapshot.Bucket);
         }
     }
 
@@ -396,17 +397,6 @@ public sealed class EngineHostState
         return utc.Kind == DateTimeKind.Utc ? utc : DateTime.SpecifyKind(utc, DateTimeKind.Utc);
     }
 
-    private static string? NormalizeBucket(string? bucket)
-    {
-        if (string.IsNullOrWhiteSpace(bucket)) return null;
-        return bucket.Trim().ToLowerInvariant() switch
-        {
-            "calm" => "Calm",
-            "moderate" => "Moderate",
-            "volatile" => "Volatile",
-            _ => null
-        };
-    }
 }
 
 

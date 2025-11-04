@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using TiYf.Engine.Core;
+using TiYf.Engine.Core.Text;
 using TiYf.Engine.Sidecar;
 
 namespace TiYf.Engine.Sim;
@@ -192,7 +193,7 @@ public sealed class EngineLoop
         var node = JsonNode.Parse(payload.GetRawText()) as JsonObject ?? new JsonObject();
         node["gvrs_raw"] = decimal.ToDouble(_marketContextService.CurrentRaw);
         node["gvrs_ewma"] = decimal.ToDouble(_marketContextService.CurrentEwma);
-        var bucket = NormalizeBucket(_marketContextService.CurrentBucket);
+        var bucket = BucketNormalizer.Normalize(_marketContextService.CurrentBucket);
         if (bucket is not null)
         {
             node["gvrs_bucket"] = bucket;
@@ -200,18 +201,6 @@ public sealed class EngineLoop
 
         var json = node.ToJsonString(new JsonSerializerOptions { WriteIndented = false });
         return JsonSerializer.Deserialize<JsonElement>(json);
-    }
-
-    private static string? NormalizeBucket(string? bucket)
-    {
-        if (string.IsNullOrWhiteSpace(bucket)) return null;
-        return bucket.Trim().ToLowerInvariant() switch
-        {
-            "calm" => "Calm",
-            "moderate" => "Moderate",
-            "volatile" => "Volatile",
-            _ => null
-        };
     }
 
     private void ForceDrawdown(string symbol, decimal limit)
