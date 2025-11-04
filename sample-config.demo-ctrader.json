@@ -36,6 +36,15 @@
   ],
   "risk": {
     "perTradeRiskPct": 0.05,
-    "realLeverageCap": 2.0
+    "realLeverageCap": 2.0,
+    "global_volatility_gate": {
+      "enabled_mode": "shadow",
+      "entry_threshold": 0.0,
+      "ewma_alpha": 0.3,
+      "components": [
+        { "name": "fx_atr_percentile", "weight": 0.6 },
+        { "name": "risk_proxy_z", "weight": 0.4 }
+      ]
+    }
   }
 }
