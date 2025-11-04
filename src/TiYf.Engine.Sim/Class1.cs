@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using TiYf.Engine.Core;
@@ -104,6 +105,9 @@ public sealed class EngineLoop
     private readonly IReadOnlyDictionary<long, string> _timeframeLabels;
     private readonly string _riskConfigHash;
     private readonly RiskRailRuntime? _riskRails;
+    private readonly MarketContextService? _marketContextService;
+    private readonly GvrsShadowAlertManager? _gvrsAlertManager;
+    private readonly Action<MarketContextService.GvrsSnapshot>? _onGvrsSnapshot;
 
     private string? ExtractDataVersion() => _dataVersion;
 
@@ -113,11 +117,22 @@ public sealed class EngineLoop
         Console.WriteLine($"OrderSend ok decision={decisionId} brokerOrderId={id} symbol={symbol}");
     }
 
-    public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action<Bar>? onBarEmitted = null, Action<int, int>? onPositionMetrics = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, string sourceAdapter = "stub", long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true, SentimentGuardConfig? sentimentConfig = null, string? penaltyConfig = null, bool forcePenalty = false, bool ciPenaltyScaffold = false, string riskMode = "off", string? riskConfigHash = null, IReadOnlyList<NewsEvent>? newsEvents = null, IReadOnlyDictionary<long, string>? timeframeLabels = null, Action<string, bool>? riskGateCallback = null)
+public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action<Bar>? onBarEmitted = null, Action<int, int>? onPositionMetrics = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, string sourceAdapter = "stub", long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true, SentimentGuardConfig? sentimentConfig = null, string? penaltyConfig = null, bool forcePenalty = false, bool ciPenaltyScaffold = false, string riskMode = "off", string? riskConfigHash = null, IReadOnlyList<NewsEvent>? newsEvents = null, IReadOnlyDictionary<long, string>? timeframeLabels = null, Action<string, bool>? riskGateCallback = null, Action<MarketContextService.GvrsSnapshot>? gvrsSnapshotCallback = null)
     {
         _clock = clock; _builders = builders; _barKeyTracker = tracker; _journal = journal; _ticks = ticks; _barEventType = barEventType; _seq = (journal is FileJournalWriter fj ? fj.NextSequence : 1UL) - 1UL; _onBarEmitted = onBarEmitted; _onPositionMetrics = onPositionMetrics; _riskFormulas = riskFormulas; _basketAggregator = basketAggregator; _configHash = configHash; _schemaVersion = schemaVersion; _riskEnforcer = riskEnforcer; _riskConfig = riskConfig; _equityOverride = equityOverride; _deterministicStrategy = deterministicStrategy; _execution = execution; _positions = positions; _tradesWriter = tradesWriter; _dataVersion = dataVersion; _sourceAdapter = string.IsNullOrWhiteSpace(sourceAdapter) ? "stub" : sourceAdapter; _riskProbeEnabled = riskProbeEnabled; _sentimentConfig = sentimentConfig; _penaltyMode = penaltyConfig ?? "off"; _forcePenalty = forcePenalty; _ciPenaltyScaffold = ciPenaltyScaffold; _riskMode = string.IsNullOrWhiteSpace(riskMode) ? "off" : riskMode.ToLowerInvariant();
         _sizeUnitsFx = sizeUnitsFx; _sizeUnitsXau = sizeUnitsXau;
         _riskConfigHash = riskConfigHash ?? string.Empty;
+        var gvrsConfig = riskConfig?.GlobalVolatilityGate ?? GlobalVolatilityGateConfig.Disabled;
+        if (gvrsConfig.IsEnabled)
+        {
+            _marketContextService = new MarketContextService(gvrsConfig);
+            _gvrsAlertManager = new GvrsShadowAlertManager();
+        }
+        _onGvrsSnapshot = gvrsSnapshotCallback;
+        if (_marketContextService is null)
+        {
+            _onGvrsSnapshot?.Invoke(new MarketContextService.GvrsSnapshot(0m, 0m, "unknown", gvrsConfig.EnabledMode, false));
+        }
         _timeframeLabels = timeframeLabels ?? new Dictionary<long, string>();
         var startingEquity = equityOverride ?? 100_000m;
         _riskRails = riskConfig is not null
@@ -138,6 +153,66 @@ public sealed class EngineLoop
     private bool _riskBlockCurrentBar = false; // reset per bar
     private int _riskEvalCount = 0; // counts INFO_RISK_EVAL emissions for test hooks
     private readonly Dictionary<string, int> _riskEvalCountBySymbol = new(StringComparer.Ordinal);
+
+    private async Task TryEmitGvrsShadowAlert(GlobalVolatilityGateConfig config, string decisionId, string symbol, string timeframe, DateTime decisionUtc, CancellationToken ct)
+    {
+        if (_marketContextService is null || _gvrsAlertManager is null)
+        {
+            return;
+        }
+
+        var evaluation = _marketContextService.Evaluate(config);
+        if (!_gvrsAlertManager.TryRegister(decisionId, evaluation.ShouldAlert))
+        {
+            return;
+        }
+
+        var payload = JsonSerializer.SerializeToElement(new
+        {
+            instrument = symbol,
+            timeframe,
+            ts = decisionUtc,
+            gvrs_raw = evaluation.Raw,
+            gvrs_ewma = evaluation.Ewma,
+            gvrs_bucket = evaluation.Bucket,
+            entry_threshold = config.EntryThreshold,
+            mode = evaluation.Mode
+        });
+
+        await _journal.AppendAsync(new JournalEvent(++_seq, decisionUtc, "ALERT_SHADOW_GVRS_GATE", _sourceAdapter, payload), ct);
+    }
+
+    private JsonElement EnrichWithGvrs(JsonElement payload)
+    {
+        if (_marketContextService is null || !_marketContextService.HasValue)
+        {
+            return payload;
+        }
+
+        var node = JsonNode.Parse(payload.GetRawText()) as JsonObject ?? new JsonObject();
+        node["gvrs_raw"] = decimal.ToDouble(_marketContextService.CurrentRaw);
+        node["gvrs_ewma"] = decimal.ToDouble(_marketContextService.CurrentEwma);
+        var bucket = NormalizeBucket(_marketContextService.CurrentBucket);
+        if (bucket is not null)
+        {
+            node["gvrs_bucket"] = bucket;
+        }
+
+        var json = node.ToJsonString(new JsonSerializerOptions { WriteIndented = false });
+        return JsonSerializer.Deserialize<JsonElement>(json);
+    }
+
+    private static string? NormalizeBucket(string? bucket)
+    {
+        if (string.IsNullOrWhiteSpace(bucket)) return null;
+        return bucket.Trim().ToLowerInvariant() switch
+        {
+            "calm" => "Calm",
+            "moderate" => "Moderate",
+            "volatile" => "Volatile",
+            _ => null
+        };
+    }
 
     private void ForceDrawdown(string symbol, decimal limit)
     {
@@ -222,6 +297,11 @@ public sealed class EngineLoop
                         }
                     }
 
+                    _marketContextService?.OnBar(bar, interval);
+                    if (_marketContextService is { HasValue: true } svc)
+                    {
+                        _onGvrsSnapshot?.Invoke(svc.Snapshot);
+                    }
                     _riskRails?.UpdateBar(bar, _positions);
 
                     // === Risk evaluation & alerts (always before strategy scheduling) ===
@@ -269,6 +349,7 @@ public sealed class EngineLoop
                         if (_riskConfig?.EmitEvaluations != false)
                         {
                             var evalPayload = JsonSerializer.SerializeToElement(new { symbol = bar.InstrumentId.Value, ts = bar.EndUtc, net_exposure = netExposure, run_drawdown = runDrawdown });
+                            evalPayload = EnrichWithGvrs(evalPayload);
                             await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "INFO_RISK_EVAL_V1", _sourceAdapter, evalPayload), ct);
                             _riskEvalCount++;
                             var sym = bar.InstrumentId.Value; _riskEvalCountBySymbol[sym] = _riskEvalCountBySymbol.TryGetValue(sym, out var ec) ? ec + 1 : 1;
@@ -293,6 +374,7 @@ public sealed class EngineLoop
                         if (exposureBreach)
                         {
                             var alertPayload = JsonSerializer.SerializeToElement(new { symbol = bar.InstrumentId.Value, ts = bar.EndUtc, limit = lim, value = netExposure, reason = "net_exposure_cap", config_hash = _riskConfigHash });
+                            alertPayload = EnrichWithGvrs(alertPayload);
                             await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "ALERT_BLOCK_NET_EXPOSURE", _sourceAdapter, alertPayload), ct);
                             if (_riskMode == "active" && (_riskConfig?.BlockOnBreach ?? false)) _riskBlockCurrentBar = true;
                         }
@@ -300,6 +382,7 @@ public sealed class EngineLoop
                         {
                             var limitValue = Math.Abs(maxRunDrawdown.Value);
                             var alertPayload = JsonSerializer.SerializeToElement(new { ts = bar.EndUtc, limit_ccy = limitValue, value_ccy = runDrawdown, reason = "drawdown_guard", config_hash = _riskConfigHash });
+                            alertPayload = EnrichWithGvrs(alertPayload);
                             await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "ALERT_BLOCK_DRAWDOWN", _sourceAdapter, alertPayload), ct);
                             if (_riskMode == "active" && (_riskConfig?.BlockOnBreach ?? false)) _riskBlockCurrentBar = true;
                         }
@@ -331,6 +414,7 @@ public sealed class EngineLoop
                                         if (result.Fill is { } fill)
                                         {
                                             _positions.OnFill(fill, _schemaVersion, _configHash ?? string.Empty, _sourceAdapter, ExtractDataVersion());
+                                            _gvrsAlertManager?.Clear(act.DecisionId);
                                             if (_tradesWriter is not null)
                                             {
                                                 foreach (var completed in _positions.Completed.Where(c => c.DecisionId == act.DecisionId))
@@ -362,8 +446,11 @@ public sealed class EngineLoop
                                         riskOutcome = _riskRails.EvaluateNewEntry(act.Symbol, timeframeLabel, tickMinute, finalUnits);
                                         foreach (var alert in riskOutcome.Alerts)
                                         {
-                                            await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, alert.EventType, _sourceAdapter, alert.Payload), ct);
+                                            var payload = EnrichWithGvrs(alert.Payload);
+                                            await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, alert.EventType, _sourceAdapter, payload), ct);
                                         }
+                                        var gvrsConfig = _riskConfig?.GlobalVolatilityGate ?? GlobalVolatilityGateConfig.Disabled;
+                                        await TryEmitGvrsShadowAlert(gvrsConfig, act.DecisionId, act.Symbol, timeframeLabel, tickMinute, ct);
                                         if (_riskMode == "active")
                                         {
                                             if (!riskOutcome.Allowed)
@@ -382,6 +469,7 @@ public sealed class EngineLoop
                                         if (result.Fill is { } fill)
                                         {
                                             _positions.OnFill(fill, _schemaVersion, _configHash ?? string.Empty, _sourceAdapter, ExtractDataVersion());
+                                            _gvrsAlertManager?.Clear(act.DecisionId);
                                         }
                                         LogOrderSendOk(req.DecisionId, req.Symbol, result.BrokerOrderId);
                                     }
@@ -447,6 +535,7 @@ public sealed class EngineLoop
                             ConfigHash = _configHash ?? string.Empty
                         };
                         var probeJson = JsonSerializer.SerializeToElement(riskProbe);
+                        probeJson = EnrichWithGvrs(probeJson);
                         await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "RISK_PROBE_V1", _sourceAdapter, probeJson), ct);
 
                         // Enforcement (if enforcer configured)
@@ -481,6 +570,7 @@ public sealed class EngineLoop
                                     alert.SchemaVersion,
                                     alert.ConfigHash
                                 });
+                                alertPayload = EnrichWithGvrs(alertPayload);
                                 await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, alert.EventType, _sourceAdapter, alertPayload), ct);
                             }
                         }

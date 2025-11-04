@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using TiYf.Engine.Core;
 
 namespace TiYf.Engine.Host;
 
@@ -27,6 +28,9 @@ public sealed class EngineHostState
     private long _riskThrottlesTotal;
     private readonly Dictionary<string, long> _riskBlocksByGate = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, long> _riskThrottlesByGate = new(StringComparer.OrdinalIgnoreCase);
+    private double? _gvrsRaw;
+    private double? _gvrsEwma;
+    private string? _gvrsBucket;
 
     public EngineHostState(string adapter, IEnumerable<string>? featureFlags)
     {
@@ -198,6 +202,24 @@ public sealed class EngineHostState
         }
     }
 
+    public void SetGvrsSnapshot(in MarketContextService.GvrsSnapshot snapshot)
+    {
+        lock (_sync)
+        {
+            if (!snapshot.HasValue)
+            {
+                _gvrsRaw = null;
+                _gvrsEwma = null;
+                _gvrsBucket = null;
+                return;
+            }
+
+            _gvrsRaw = (double)snapshot.Raw;
+            _gvrsEwma = (double)snapshot.Ewma;
+            _gvrsBucket = NormalizeBucket(snapshot.Bucket);
+        }
+    }
+
     public void SetMetrics(int openPositions, int activeOrders, long riskEventsTotal, long alertsTotal)
     {
         lock (_sync)
@@ -323,7 +345,10 @@ public sealed class EngineHostState
                 risk_blocks_total = _riskBlocksTotal,
                 risk_throttles_total = _riskThrottlesTotal,
                 risk_blocks_by_gate = new Dictionary<string, long>(_riskBlocksByGate, StringComparer.OrdinalIgnoreCase),
-                risk_throttles_by_gate = new Dictionary<string, long>(_riskThrottlesByGate, StringComparer.OrdinalIgnoreCase)
+                risk_throttles_by_gate = new Dictionary<string, long>(_riskThrottlesByGate, StringComparer.OrdinalIgnoreCase),
+                gvrs_raw = metrics.GvrsRaw,
+                gvrs_ewma = metrics.GvrsEwma,
+                gvrs_bucket = metrics.GvrsBucket
             };
         }
     }
@@ -353,7 +378,10 @@ public sealed class EngineHostState
             _riskBlocksTotal,
             _riskThrottlesTotal,
             new Dictionary<string, long>(_riskBlocksByGate, StringComparer.OrdinalIgnoreCase),
-            new Dictionary<string, long>(_riskThrottlesByGate, StringComparer.OrdinalIgnoreCase));
+            new Dictionary<string, long>(_riskThrottlesByGate, StringComparer.OrdinalIgnoreCase),
+            _gvrsRaw,
+            _gvrsEwma,
+            _gvrsBucket);
     }
 
     private static DateTime? NormalizeNullableUtc(DateTime? utc)
@@ -366,6 +394,18 @@ public sealed class EngineHostState
     private static DateTime NormalizeUtc(DateTime utc)
     {
         return utc.Kind == DateTimeKind.Utc ? utc : DateTime.SpecifyKind(utc, DateTimeKind.Utc);
+    }
+
+    private static string? NormalizeBucket(string? bucket)
+    {
+        if (string.IsNullOrWhiteSpace(bucket)) return null;
+        return bucket.Trim().ToLowerInvariant() switch
+        {
+            "calm" => "Calm",
+            "moderate" => "Moderate",
+            "volatile" => "Volatile",
+            _ => null
+        };
     }
 }
 

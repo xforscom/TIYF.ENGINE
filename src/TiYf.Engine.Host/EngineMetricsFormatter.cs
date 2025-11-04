@@ -3,7 +3,7 @@ using System.Text;
 
 namespace TiYf.Engine.Host;
 
-internal static class EngineMetricsFormatter
+public static class EngineMetricsFormatter
 {
     public static string Format(EngineMetricsSnapshot snapshot)
     {
@@ -30,6 +30,18 @@ internal static class EngineMetricsFormatter
         foreach (var kvp in snapshot.RiskThrottlesByGate)
         {
             AppendMetric(builder, "engine_risk_throttles_total", kvp.Value, "gate", kvp.Key);
+        }
+        if (snapshot.GvrsRaw.HasValue)
+        {
+            AppendMetric(builder, "engine_gvrs_raw", snapshot.GvrsRaw.Value);
+        }
+        if (snapshot.GvrsEwma.HasValue)
+        {
+            AppendMetric(builder, "engine_gvrs_ewma", snapshot.GvrsEwma.Value);
+        }
+        if (!string.IsNullOrWhiteSpace(snapshot.GvrsBucket))
+        {
+            AppendMetric(builder, "engine_gvrs_bucket", 1d, "bucket", snapshot.GvrsBucket!);
         }
         return builder.ToString();
     }
@@ -62,6 +74,18 @@ internal static class EngineMetricsFormatter
             .Append(labelValue.Replace("\"", "\\\""))
             .Append("\"} ")
             .Append(value)
+            .Append('\n');
+    }
+
+    private static void AppendMetric(StringBuilder builder, string name, double value, string labelName, string labelValue)
+    {
+        builder.Append(name)
+            .Append('{')
+            .Append(labelName)
+            .Append("=\"")
+            .Append(labelValue.Replace("\"", "\\\""))
+            .Append("\"} ")
+            .AppendFormat(CultureInfo.InvariantCulture, "{0}", value)
             .Append('\n');
     }
 }

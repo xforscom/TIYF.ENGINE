@@ -101,6 +101,7 @@ public sealed class RiskConfig
     public DailyCapConfig? DailyCap { get; init; }
     public GlobalDrawdownConfig? GlobalDrawdown { get; init; }
     public NewsBlackoutConfig? NewsBlackout { get; init; }
+    public GlobalVolatilityGateConfig GlobalVolatilityGate { get; init; } = GlobalVolatilityGateConfig.Disabled;
     public string? RiskConfigHash { get; init; }
 }
 
