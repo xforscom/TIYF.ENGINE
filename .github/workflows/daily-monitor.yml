@@ -147,6 +147,11 @@ jobs:
           $timeframesActive = if ($health.PSObject.Properties.Name -contains 'timeframes_active') { ($health.timeframes_active | ForEach-Object { $_.ToString() }) -join ',' } else { '' }
           $decisionsTotal = if ($health.PSObject.Properties.Name -contains 'decisions_total') { [int64]$health.decisions_total } else { 0 }
           $loopIterationsTotal = if ($health.PSObject.Properties.Name -contains 'loop_iterations_total') { [int64]$health.loop_iterations_total } else { 0 }
+          $gvrsRaw = if ($health.PSObject.Properties.Name -contains 'gvrs_raw' -and $null -ne $health.gvrs_raw) { [double]$health.gvrs_raw } else { [double]::NaN }
+          $gvrsEwma = if ($health.PSObject.Properties.Name -contains 'gvrs_ewma' -and $null -ne $health.gvrs_ewma) { [double]$health.gvrs_ewma } else { [double]::NaN }
+          $gvrsBucket = if ($health.PSObject.Properties.Name -contains 'gvrs_bucket' -and $null -ne $health.gvrs_bucket) { [string]$health.gvrs_bucket } else { '' }
+          $gvrsRawString = if ([double]::IsNaN($gvrsRaw)) { '' } else { $gvrsRaw.ToString([System.Globalization.CultureInfo]::InvariantCulture) }
+          $gvrsEwmaString = if ([double]::IsNaN($gvrsEwma)) { '' } else { $gvrsEwma.ToString([System.Globalization.CultureInfo]::InvariantCulture) }
 
           if (-not $connected) {
             throw "Expected connected=true but found connected=$connected"
@@ -172,6 +177,9 @@ jobs:
           "DAILY_MONITOR_TIMEFRAMES=$timeframesActive" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_DECISIONS_TOTAL=$decisionsTotal" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_LOOP_ITERATIONS=$loopIterationsTotal" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DAILY_MONITOR_GVRS_RAW=$gvrsRawString" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DAILY_MONITOR_GVRS_EWMA=$gvrsEwmaString" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DAILY_MONITOR_GVRS_BUCKET=$gvrsBucket" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Upload health artifact
         if: always()
@@ -204,10 +212,17 @@ jobs:
           $riskConfigHash = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_RISK_CONFIG_HASH)) { 'n/a' } else { $env:DAILY_MONITOR_RISK_CONFIG_HASH }
           $riskBlocksTotal = $env:DAILY_MONITOR_RISK_BLOCKS_TOTAL
           $riskThrottlesTotal = $env:DAILY_MONITOR_RISK_THROTTLES_TOTAL
+          $gvrsRawEnv = $env:DAILY_MONITOR_GVRS_RAW
+          $gvrsEwmaEnv = $env:DAILY_MONITOR_GVRS_EWMA
+          $gvrsRawValue = if ([string]::IsNullOrWhiteSpace($gvrsRawEnv)) { [double]::NaN } else { [double]::Parse($gvrsRawEnv, [System.Globalization.CultureInfo]::InvariantCulture) }
+          $gvrsEwmaValue = if ([string]::IsNullOrWhiteSpace($gvrsEwmaEnv)) { [double]::NaN } else { [double]::Parse($gvrsEwmaEnv, [System.Globalization.CultureInfo]::InvariantCulture) }
+          $gvrsRawFormatted = if ([double]::IsNaN($gvrsRawValue)) { 'n/a' } else { ('{0:0.000}' -f $gvrsRawValue) }
+          $gvrsEwmaFormatted = if ([double]::IsNaN($gvrsEwmaValue)) { 'n/a' } else { ('{0:0.000}' -f $gvrsEwmaValue) }
+          $gvrsBucket = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_GVRS_BUCKET)) { 'unknown' } else { $env:DAILY_MONITOR_GVRS_BUCKET }
           $heartbeatFormatted = ('{0:0.0}' -f $heartbeatAge)
           $streamHeartbeatFormatted = ('{0:0.0}' -f $streamHeartbeatAge)
           $barLagString = $barLag.ToString([System.Globalization.CultureInfo]::InvariantCulture)
-          $line = "daily-monitor: adapter={0} connected={1} last_heartbeat_utc={2} heartbeat_age={3}s stream_connected={4} stream_heartbeat_age={5}s bar_lag_ms={6} open_positions={7} active_orders={8} risk_events_total={9} alerts_total={10} last_decision_utc={11} timeframes_active={12} decisions_total={13} loop_iterations_total={14} risk_config_hash={15} risk_blocks_total={16} risk_throttles_total={17}" -f $adapter, $connected, $heartbeatIso, $heartbeatFormatted, $streamConnected, $streamHeartbeatFormatted, $barLagString, $openPositions, $activeOrders, $riskEvents, $alertsTotal, $lastDecisionIso, $timeframes, $decisionsTotal, $loopIterations, $riskConfigHash, $riskBlocksTotal, $riskThrottlesTotal
+          $line = "daily-monitor: adapter={0} connected={1} last_heartbeat_utc={2} heartbeat_age={3}s stream_connected={4} stream_heartbeat_age={5}s bar_lag_ms={6} open_positions={7} active_orders={8} risk_events_total={9} alerts_total={10} last_decision_utc={11} timeframes_active={12} decisions_total={13} loop_iterations_total={14} risk_config_hash={15} risk_blocks_total={16} risk_throttles_total={17} gvrs_raw={18} gvrs_ewma={19} gvrs_bucket={20}" -f $adapter, $connected, $heartbeatIso, $heartbeatFormatted, $streamConnected, $streamHeartbeatFormatted, $barLagString, $openPositions, $activeOrders, $riskEvents, $alertsTotal, $lastDecisionIso, $timeframes, $decisionsTotal, $loopIterations, $riskConfigHash, $riskBlocksTotal, $riskThrottlesTotal, $gvrsRawFormatted, $gvrsEwmaFormatted, $gvrsBucket
           Write-Host $line
           Set-Content -Path (Join-Path 'scratch' 'summary.txt') -Value $line -Encoding UTF8
           Add-Content -Encoding UTF8 -Path $env:GITHUB_STEP_SUMMARY -Value "## daily-monitor verdict"

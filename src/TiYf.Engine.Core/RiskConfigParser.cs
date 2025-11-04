@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Globalization;
 using System.Text.Json;
 
@@ -31,6 +32,7 @@ public static class RiskConfigParser
         decimal? legacyDrawdown = TryNumber(riskEl, "max_run_drawdown_ccy", out var dd) ? dd : null;
         var maxRunDrawdown = globalDrawdown?.MaxDrawdown ?? legacyDrawdown;
         var newsBlackout = ParseNewsBlackout(riskEl);
+        var globalVolatilityGate = ParseGlobalVolatilityGate(riskEl);
         return new RiskConfig
         {
             RealLeverageCap = Num("real_leverage_cap", 20m),
@@ -49,6 +51,7 @@ public static class RiskConfigParser
             DailyCap = dailyCap,
             GlobalDrawdown = globalDrawdown ?? (legacyDrawdown.HasValue ? new GlobalDrawdownConfig(legacyDrawdown.Value) : null),
             NewsBlackout = newsBlackout,
+            GlobalVolatilityGate = globalVolatilityGate,
             RiskConfigHash = TryCanonicalHash(riskEl)
         };
     }
@@ -76,6 +79,12 @@ public static class RiskConfigParser
         if (TryProperty(parent, snake, out var el) && el.ValueKind == JsonValueKind.Object) { obj = el; return true; }
         if (TryProperty(parent, SnakeToCamel(snake), out var camel) && camel.ValueKind == JsonValueKind.Object) { obj = camel; return true; }
         obj = default; return false;
+    }
+    private static bool TryArray(JsonElement parent, string snake, out JsonElement array)
+    {
+        if (TryProperty(parent, snake, out var el) && el.ValueKind == JsonValueKind.Array) { array = el; return true; }
+        if (TryProperty(parent, SnakeToCamel(snake), out var camel) && camel.ValueKind == JsonValueKind.Array) { array = camel; return true; }
+        array = default; return false;
     }
     private static bool TryInt(JsonElement parent, string snake, out int value)
     {
@@ -153,6 +162,43 @@ public static class RiskConfigParser
         return new NewsBlackoutConfig(enabled, minutesBefore, minutesAfter, sourcePath);
     }
 
+    private static GlobalVolatilityGateConfig ParseGlobalVolatilityGate(JsonElement parent)
+    {
+        if (!TryObject(parent, "global_volatility_gate", out var obj))
+        {
+            return GlobalVolatilityGateConfig.Disabled;
+        }
+
+        var mode = TryString(obj, "enabled_mode", out var modeRaw) && !string.IsNullOrWhiteSpace(modeRaw)
+            ? modeRaw.Trim()
+            : "disabled";
+        var entryThreshold = TryNumber(obj, "entry_threshold", out var threshold) ? threshold : 0m;
+        var ewmaAlpha = TryNumber(obj, "ewma_alpha", out var alpha) ? ClampAlpha(alpha) : 0.3m;
+
+        var components = new List<GlobalVolatilityComponentConfig>();
+        if (TryArray(obj, "components", out var arr))
+        {
+            foreach (var item in arr.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object) continue;
+                if (!TryString(item, "name", out var nameRaw) || string.IsNullOrWhiteSpace(nameRaw)) continue;
+                var weight = TryNumber(item, "weight", out var weightVal) ? weightVal : 0m;
+                components.Add(new GlobalVolatilityComponentConfig(nameRaw.Trim(), weight));
+            }
+        }
+
+        if (components.Count == 0)
+        {
+            components.AddRange(GlobalVolatilityGateConfig.Disabled.EffectiveComponents);
+        }
+
+        return new GlobalVolatilityGateConfig(
+            mode,
+            entryThreshold,
+            ewmaAlpha,
+            components);
+    }
+
     private static TimeSpan ParseTimeOfDay(string raw)
     {
         var formats = new[] { @"hh\:mm", @"hh\:mm\:ss" };
@@ -161,6 +207,13 @@ public static class RiskConfigParser
             return ts;
         }
         throw new FormatException($"Invalid time of day '{raw}'. Expected HH:mm or HH:mm:ss.");
+    }
+
+    private static decimal ClampAlpha(decimal alpha)
+    {
+        if (alpha < 0.01m) return 0.01m;
+        if (alpha > 1m) return 1m;
+        return alpha;
     }
 
     private static DailyCapAction ParseDailyCapAction(string raw)

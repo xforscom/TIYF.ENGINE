@@ -17,5 +17,7 @@ public readonly record struct EngineMetricsSnapshot(
     long RiskBlocksTotal,
     long RiskThrottlesTotal,
     IReadOnlyDictionary<string, long> RiskBlocksByGate,
-    IReadOnlyDictionary<string, long> RiskThrottlesByGate);
-
+    IReadOnlyDictionary<string, long> RiskThrottlesByGate,
+    double? GvrsRaw,
+    double? GvrsEwma,
+    string? GvrsBucket);

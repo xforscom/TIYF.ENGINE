@@ -1,4 +1,4 @@
-﻿# Demo Run Operations
+# Demo Run Operations
 
 ## Purpose
 - Allow operators to switch between the stub broker and the cTrader demo adapter without modifying workflow logic.
@@ -38,7 +38,7 @@ All jobs target the self-hosted runner labelled `[self-hosted, Linux, X64, tiyf-
 
 ## Observability and Artifacts
 
-- Log files begin with banner lines such as `Adapter = â€¦`, `adapter_id=â€¦`, `broker=â€¦`, `account_id=â€¦`, `Universe = â€¦`, and `Config = â€¦`. DemoFeed also emits `BROKER_MODE=<adapter> (stub=ON|OFF) accountId=â€¦` before any execution output. For cTrader runs the workflow searches `demo-ctrader.log` for `Connected to cTrader endpoint`, and for OANDA runs it searches `demo-oanda.log` for `Connected to OANDA endpoint`; any `OrderSend` lines whose `brokerOrderId` retains the `STUB-` prefix are rejected.
+- Log files begin with banner lines such as `Adapter = …`, `adapter_id=…`, `broker=…`, `account_id=…`, `Universe = …`, and `Config = …`. DemoFeed also emits `BROKER_MODE=<adapter> (stub=ON|OFF) accountId=…` before any execution output. For cTrader runs the workflow searches `demo-ctrader.log` for `Connected to cTrader endpoint`, and for OANDA runs it searches `demo-oanda.log` for `Connected to OANDA endpoint`; any `OrderSend` lines whose `brokerOrderId` retains the `STUB-` prefix are rejected.
 - Artifacts upload under `vps-demo-artifacts-adapter-<adapter>` and contain `events.csv`, `trades.csv`, strict/parity JSON, the DemoFeed log (`demo-ctrader.log`, `demo-oanda.log`, or `demo-stub.log`), and `preflight.sanity.txt` when generated. Placeholder files are written when a source artifact is absent so consumers see a consistent layout.
 - Event payloads now include a `src_adapter` JSON field, and the trades journal encodes `src_adapter=<adapter>` in the `data_version` column so provenance survives downstream ingestion.
 - `checks.csv` at the workspace root records UTC timestamp, strict/parity exit codes, `broker_dangling`, SHA hashes, and runner identity. The same data is summarised in the `RESULT_LINE` stored in the step summary.
@@ -94,7 +94,7 @@ All jobs target the self-hosted runner labelled `[self-hosted, Linux, X64, tiyf-
 
 - `deploy-demo-host` (`workflow_dispatch`) publishes the host with inputs `environment`, optional `releaseTag`, and `dryRun` (defaults to `true`). Dry runs run `rsync --dry-run` and execute the remote script in simulation mode; real runs flip `/opt/tiyf/current` and restart the unit.
 - Release artefacts land in `/opt/tiyf/releases/<release-id>/` with `systemd/tiyf-engine-demo.service`, `scripts/remote-deploy.sh`, and binaries produced by `dotnet publish -c Release`.
-- The systemd unit copies the service file into `/etc/systemd/system/`, performs `systemctl daemon-reload`, flips the symlink, restarts the service, and polls `/health` (5×, 5s back-off) on successful deployments.
+- The systemd unit copies the service file into `/etc/systemd/system/`, performs `systemctl daemon-reload`, flips the symlink, restarts the service, and polls `/health` (5�, 5s back-off) on successful deployments.
 - Service management quick reference:
 
 ```bash
@@ -146,14 +146,14 @@ sudo systemctl start tiyf-engine-demo.service
 ## Host Telemetry
 - The engine host exposes two loopback-only endpoints: http://127.0.0.1:8080/health (JSON) and http://127.0.0.1:8080/metrics (Prometheus text). Both respond even when trading is idle, falling back to zero/unknown values when data is unavailable.
 - /health now includes heartbeat_age_seconds, open_positions, active_orders, risk_events_total, alerts_total, last_decision_utc, timeframes_active, decisions_total, loop_iterations_total, `risk_config_hash`, and per-gate block/throttle counters alongside the existing adapter status. Daily monitor runs quote these fields in the summary: daily-monitor: adapter=<name> connected=<bool> heartbeat_age=<xs> stream_connected=<n> stream_heartbeat_age=<xs> bar_lag_ms=<ms> open_positions=<n> active_orders=<n> risk_events_total=<n> alerts_total=<n> last_decision_utc=<iso> timeframes_active=<csv> decisions_total=<n> loop_iterations_total=<n> risk_config_hash=<hash> risk_blocks_total=<n> risk_throttles_total=<n>.
-- /metrics publishes the same values as gauges/counters (engine_heartbeat_age_seconds, engine_bar_lag_ms, engine_pending_orders, engine_open_positions, engine_active_orders, engine_risk_events_total, engine_alerts_total, engine_stream_connected, engine_stream_heartbeat_age_seconds, engine_loop_uptime_seconds, engine_loop_iterations_total, engine_decisions_total, engine_loop_last_success_ts) and now exposes `engine_risk_blocks_total{gate="…"}` / `engine_risk_throttles_total{gate="…"}` so Prometheus-compatible scrapers can ingest the rail counters without extra formatting.
+- /metrics publishes the same values as gauges/counters (engine_heartbeat_age_seconds, engine_bar_lag_ms, engine_pending_orders, engine_open_positions, engine_active_orders, engine_risk_events_total, engine_alerts_total, engine_stream_connected, engine_stream_heartbeat_age_seconds, engine_loop_uptime_seconds, engine_loop_iterations_total, engine_decisions_total, engine_loop_last_success_ts) and now exposes `engine_risk_blocks_total{gate="�"}` / `engine_risk_throttles_total{gate="�"}` so Prometheus-compatible scrapers can ingest the rail counters without extra formatting.
 
 ## M4 Proof (Risk Rails)
 
-- `/health` records `risk_config_hash`, aggregate block/throttle counts, and per-gate tallies. `/metrics` mirrors them via `engine_risk_blocks_total{gate="…"}` and `engine_risk_throttles_total{gate="…"}` so the Prometheus scrape has parity with the JSON.
+- `/health` records `risk_config_hash`, aggregate block/throttle counts, and per-gate tallies. `/metrics` mirrors them via `engine_risk_blocks_total{gate="�"}` and `engine_risk_throttles_total{gate="�"}` so the Prometheus scrape has parity with the JSON.
 - Daily monitor archives `daily-monitor-health/health.json`. Example (2025-11-02T15:56Z):  
-`daily-monitor: adapter=oanda-demo connected=True heartbeat_age=12.0s stream_connected=0 stream_heartbeat_age=0.5s bar_lag_ms=31056670.7774 open_positions=0 active_orders=0 risk_events_total=52 alerts_total=158 last_decision_utc=2025-10-31T20:00:00Z timeframes_active=H1,H4 decisions_total=100 loop_iterations_total=100 risk_config_hash=abc123def456 risk_blocks_total=4 risk_throttles_total=2`
+`daily-monitor: adapter=oanda-demo connected=True heartbeat_age=12.0s stream_connected=0 stream_heartbeat_age=0.5s bar_lag_ms=31056670.7774 open_positions=0 active_orders=0 risk_events_total=52 alerts_total=158 last_decision_utc=2025-10-31T20:00:00Z timeframes_active=H1,H4 decisions_total=100 loop_iterations_total=100 risk_config_hash=abc123def456 risk_blocks_total=4 risk_throttles_total=2 gvrs_raw=0.1234 gvrs_ewma=0.1178 gvrs_bucket=Calm`
+- GVRS (global volatility regime score) now surfaces alongside the risk counters; it runs in shadow mode, so it emits telemetry and alerts but does not block or resize orders yet.
 - `m4-risk-proof.yml` builds the deterministic `RiskRailsProbe` and asserts four alerts every run: `ALERT_BLOCK_SESSION_WINDOW`, `ALERT_BLOCK_DAILY_LOSS_CAP`, `ALERT_BLOCK_GLOBAL_DRAWDOWN`, `ALERT_BLOCK_NEWS_BLACKOUT`. The workflow uploads the corresponding `events.csv`/`trades.csv` so rail regressions are caught without replaying DemoFeed.
 - Operators may dispatch the probe manually on feature branches when validating risk-config edits; production validation relies on the scheduled daily monitor plus ad-hoc probe runs.
-
 

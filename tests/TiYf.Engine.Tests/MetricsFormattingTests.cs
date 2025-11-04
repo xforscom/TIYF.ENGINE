@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Linq;
 using System.Text.Json;
+using TiYf.Engine.Core;
 using TiYf.Engine.Host;
 
 namespace TiYf.Engine.Tests;
@@ -22,6 +23,7 @@ public class MetricsFormattingTests
         state.RecordStreamHeartbeat(DateTime.UtcNow);
         state.UpdateStreamConnection(true);
         state.RecordLoopDecision("H1", decisionTime);
+        state.SetGvrsSnapshot(new MarketContextService.GvrsSnapshot(0.25m, 0.20m, "calm", "shadow", true));
 
         var snapshot = state.CreateMetricsSnapshot();
         var metricsText = EngineMetricsFormatter.Format(snapshot);
@@ -36,6 +38,9 @@ public class MetricsFormattingTests
         Assert.Contains("engine_loop_iterations_total 1", metricsText);
         Assert.Contains("engine_decisions_total 1", metricsText);
         Assert.Contains("engine_loop_last_success_ts", metricsText);
+        Assert.Contains("engine_gvrs_raw", metricsText);
+        Assert.Contains("engine_gvrs_ewma", metricsText);
+        Assert.Contains("engine_gvrs_bucket{bucket=\"Calm\"} 1", metricsText);
     }
 
     [Fact]
@@ -51,6 +56,7 @@ public class MetricsFormattingTests
         state.RecordStreamHeartbeat(DateTime.UtcNow);
         state.UpdateStreamConnection(true);
         state.RecordLoopDecision("H4", decisionTime);
+        state.SetGvrsSnapshot(new MarketContextService.GvrsSnapshot(0.15m, 0.10m, "moderate", "shadow", true));
         var payload = state.CreateHealthPayload();
         var json = JsonSerializer.Serialize(payload);
         using var document = JsonDocument.Parse(json);
@@ -71,5 +77,9 @@ public class MetricsFormattingTests
         var timeframes = root.GetProperty("timeframes_active").EnumerateArray().Select(e => e.GetString()).ToArray();
         Assert.Contains("H1", timeframes);
         Assert.Contains("H4", timeframes);
+        Assert.True(root.TryGetProperty("gvrs_raw", out var gvrsRaw));
+        Assert.Equal(0.15, gvrsRaw.GetDouble(), 3);
+        Assert.Equal(0.10, root.GetProperty("gvrs_ewma").GetDouble(), 3);
+        Assert.Equal("Moderate", root.GetProperty("gvrs_bucket").GetString());
     }
 }

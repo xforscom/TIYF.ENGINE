@@ -246,7 +246,8 @@ internal sealed class EngineLoopService : BackgroundService
             riskConfigHash: riskConfigHash,
             newsEvents: newsEvents,
             timeframeLabels: _timeframeLabelByTicks,
-            riskGateCallback: (gate, throttled) => _state.RegisterRiskGateEvent(gate, throttled));
+            riskGateCallback: (gate, throttled) => _state.RegisterRiskGateEvent(gate, throttled),
+            gvrsSnapshotCallback: snapshot => _state.SetGvrsSnapshot(snapshot));
 
         _logger.LogInformation("Streaming runtime initialized run_id={RunId} journal={Journal}", runId, journalWriter.RunDirectory);
         _state.SetLastLog($"stream:run_id={runId}");
@@ -953,7 +954,6 @@ internal sealed class EngineLoopService : BackgroundService
         }
     }
 }
-
 
 
 

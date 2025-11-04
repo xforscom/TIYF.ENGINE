@@ -1,0 +1,71 @@
+name: M5 GVRS Proof
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/gvrs-shadow-gate
+
+jobs:
+  gvrs-proof:
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore solution
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet restore TiYf.Engine.sln
+
+      - name: Build GVRS probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet build tools/GvrsProbe/GvrsProbe.csproj -c Release --no-restore
+
+      - name: Run GVRS proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf artifacts
+          mkdir -p artifacts
+          dotnet run --project tools/GvrsProbe/GvrsProbe.csproj -c Release --no-build -- --out artifacts
+          ls -R artifacts
+
+      - name: Verify GVRS artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s artifacts/events.csv
+          test -s artifacts/health.json
+          test -s artifacts/metrics.txt
+          test -s artifacts/summary.txt
+          grep -q 'ALERT_SHADOW_GVRS_GATE' artifacts/events.csv
+          grep -q 'engine_gvrs_raw' artifacts/metrics.txt
+          grep -q 'engine_gvrs_bucket{bucket=' artifacts/metrics.txt
+          summary_line="$(cat artifacts/summary.txt)"
+          echo "summary: $summary_line"
+          raw=$(echo "$summary_line" | sed -n 's/.*gvrs_raw=\([^ ]*\).*/\1/p')
+          ewma=$(echo "$summary_line" | sed -n 's/.*gvrs_ewma=\([^ ]*\).*/\1/p')
+          bucket=$(echo "$summary_line" | sed -n 's/.*bucket=\([^ ]*\).*/\1/p')
+          echo "gvrs_raw=$raw"
+          echo "gvrs_ewma=$ewma"
+          echo "gvrs_bucket=$bucket"
+
+      - name: Upload GVRS proof artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: m5-gvrs-proof
+          path: artifacts
