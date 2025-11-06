@@ -45,6 +45,14 @@
         { "name": "fx_atr_percentile", "weight": 0.6 },
         { "name": "risk_proxy_z", "weight": 0.4 }
       ]
+    },
+    "promotion": {
+      "enabled": true,
+      "shadow_candidates": ["strategyA", "strategyB"],
+      "probation_days": 30,
+      "min_trades": 50,
+      "promotion_threshold": 0.6,
+      "demotion_threshold": 0.4
     }
   }
 }

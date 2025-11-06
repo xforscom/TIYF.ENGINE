@@ -48,6 +48,10 @@ public static class EngineMetricsFormatter
         {
             AppendMetric(builder, "engine_slippage_model", 1, "model", snapshot.SlippageModel);
         }
+        if (!string.IsNullOrWhiteSpace(snapshot.PromotionConfigHash))
+        {
+            AppendMetric(builder, "engine_promotion_config_hash", 1, "hash", snapshot.PromotionConfigHash);
+        }
         if (snapshot.GvrsRaw.HasValue)
         {
             AppendMetric(builder, "engine_gvrs_raw", snapshot.GvrsRaw.Value);

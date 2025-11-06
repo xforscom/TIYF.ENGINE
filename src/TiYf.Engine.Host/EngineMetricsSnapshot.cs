@@ -25,4 +25,5 @@ public readonly record struct EngineMetricsSnapshot(
     string SlippageModel,
     double? GvrsRaw,
     double? GvrsEwma,
-    string? GvrsBucket);
+    string? GvrsBucket,
+    string PromotionConfigHash);

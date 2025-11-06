@@ -22,5 +22,9 @@ public class RiskConfigParserTests
         Assert.Equal(rcSnake.EnableScaleToFit, rcCamel.EnableScaleToFit);
         Assert.Equal(rcSnake.EnforcementEnabled, rcCamel.EnforcementEnabled);
         Assert.Equal(rcSnake.LotStep, rcCamel.LotStep);
+        Assert.False(rcSnake.Promotion.Enabled);
+        Assert.False(rcCamel.Promotion.Enabled);
+        Assert.Empty(rcSnake.Promotion.ShadowCandidates);
+        Assert.Equal(rcSnake.Promotion.ConfigHash, rcCamel.Promotion.ConfigHash);
     }
 }
