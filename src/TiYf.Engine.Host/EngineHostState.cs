@@ -26,6 +26,7 @@ public sealed class EngineHostState
     private DateTime? _loopLastSuccessUtc;
     private DateTime? _loopStartUtc;
     private string _riskConfigHash = string.Empty;
+    private string _promotionConfigHash = string.Empty;
     private long _riskBlocksTotal;
     private long _riskThrottlesTotal;
     private readonly Dictionary<string, long> _riskBlocksByGate = new(StringComparer.OrdinalIgnoreCase);
@@ -330,6 +331,14 @@ public sealed class EngineHostState
         }
     }
 
+    public void SetPromotionConfigHash(string hash)
+    {
+        lock (_sync)
+        {
+            _promotionConfigHash = hash ?? string.Empty;
+        }
+    }
+
     public void RegisterRiskGateEvent(string gate, bool throttled)
     {
         lock (_sync)
@@ -392,6 +401,7 @@ public sealed class EngineHostState
                 loop_last_success_utc = _loopLastSuccessUtc,
                 loop_start_utc = _loopStartUtc,
                 risk_config_hash = _riskConfigHash,
+                promotion_config_hash = _promotionConfigHash,
                 risk_blocks_total = _riskBlocksTotal,
                 risk_throttles_total = _riskThrottlesTotal,
                 risk_blocks_by_gate = new Dictionary<string, long>(_riskBlocksByGate, StringComparer.OrdinalIgnoreCase),
@@ -441,7 +451,8 @@ public sealed class EngineHostState
             _slippageModel,
             _gvrsRaw,
             _gvrsEwma,
-            _gvrsBucket);
+            _gvrsBucket,
+            _promotionConfigHash);
     }
 
     private static DateTime? NormalizeNullableUtc(DateTime? utc)
