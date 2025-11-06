@@ -322,20 +322,7 @@ public static class RiskConfigParser
         };
     }
 
-    private static string ComputeDefaultPromotionHash()
-    {
-        const string defaultJson = "{\"enabled\":false,\"shadow_candidates\":[],\"probation_days\":30,\"min_trades\":50,\"promotion_threshold\":0.6,\"demotion_threshold\":0.4}";
-        try
-        {
-            using var doc = JsonDocument.Parse(defaultJson);
-            var canonical = JsonCanonicalizer.Canonicalize(doc.RootElement);
-            return ConfigHash.Compute(canonical);
-        }
-        catch
-        {
-            return string.Empty;
-        }
-    }
+    private static string ComputeDefaultPromotionHash() => string.Empty;
 
     private static string? TryCanonicalHash(JsonElement riskEl)
     {
