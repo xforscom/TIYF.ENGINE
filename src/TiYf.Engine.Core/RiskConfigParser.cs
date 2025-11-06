@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Globalization;
 using System.Text.Json;
 
@@ -83,13 +82,16 @@ public static class RiskConfigParser
 
             if (TryArray(promotionEl, "shadow_candidates", out var candidatesEl))
             {
-                shadowCandidates = candidatesEl.EnumerateArray()
-                    .Where(c => c.ValueKind == JsonValueKind.String)
-                    .Select(c => c.GetString())
-                    .Where(raw => !string.IsNullOrWhiteSpace(raw))
-                    .Select(raw => raw!.Trim())
-                    .Where(raw => raw.Length > 0)
-                    .ToArray();
+                var list = new List<string>();
+                foreach (var candidate in candidatesEl.EnumerateArray())
+                {
+                    if (candidate.ValueKind != JsonValueKind.String) continue;
+                    var raw = candidate.GetString();
+                    if (string.IsNullOrWhiteSpace(raw)) continue;
+                    var trimmed = raw.Trim();
+                    if (trimmed.Length > 0) list.Add(trimmed);
+                }
+                shadowCandidates = list.Count > 0 ? list.ToArray() : Array.Empty<string>();
             }
 
             probationDays = TryInt(promotionEl, "probation_days", out var probation) ? Math.Max(0, probation) : defaultProbationDays;
