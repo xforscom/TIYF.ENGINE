@@ -18,6 +18,14 @@
   ],
   "risk": {
     "perTradeRiskPct": 0.05,
-    "realLeverageCap": 2.0
+    "realLeverageCap": 2.0,
+    "promotion": {
+      "enabled": true,
+      "shadow_candidates": ["strategyA", "strategyB"],
+      "probation_days": 30,
+      "min_trades": 50,
+      "promotion_threshold": 0.6,
+      "demotion_threshold": 0.4
+    }
   }
 }
