@@ -24,6 +24,10 @@ public class MetricsFormattingTests
         state.UpdateStreamConnection(true);
         state.RecordLoopDecision("H1", decisionTime);
         state.SetGvrsSnapshot(new MarketContextService.GvrsSnapshot(0.25m, 0.20m, "calm", "shadow", true));
+        state.RegisterOrderAccepted("EURUSD", 250);
+        state.RegisterOrderRejected();
+        state.UpdateIdempotencyMetrics(2, 1, 3);
+        state.SetSlippageModel("zero");
 
         var snapshot = state.CreateMetricsSnapshot();
         var metricsText = EngineMetricsFormatter.Format(snapshot);
@@ -41,6 +45,13 @@ public class MetricsFormattingTests
         Assert.Contains("engine_gvrs_raw", metricsText);
         Assert.Contains("engine_gvrs_ewma", metricsText);
         Assert.Contains("engine_gvrs_bucket{bucket=\"Calm\"} 1", metricsText);
+        Assert.Contains("engine_order_rejects_total 1", metricsText);
+        Assert.Contains("engine_last_order_size_units{instrument=\"EURUSD\"} 250", metricsText);
+        Assert.Contains("engine_idempotency_cache_size 3", metricsText);
+        Assert.Contains("engine_idempotency_cache_size{kind=\"order\"} 2", metricsText);
+        Assert.Contains("engine_idempotency_cache_size{kind=\"cancel\"} 1", metricsText);
+        Assert.Contains("engine_idempotency_evictions_total 3", metricsText);
+        Assert.Contains("engine_slippage_model{model=\"zero\"} 1", metricsText);
     }
 
     [Fact]
@@ -57,6 +68,10 @@ public class MetricsFormattingTests
         state.UpdateStreamConnection(true);
         state.RecordLoopDecision("H4", decisionTime);
         state.SetGvrsSnapshot(new MarketContextService.GvrsSnapshot(0.15m, 0.10m, "moderate", "shadow", true));
+        state.RegisterOrderAccepted("GBPUSD", 75);
+        state.RegisterOrderRejected();
+        state.UpdateIdempotencyMetrics(5, 4, 7);
+        state.SetSlippageModel("fixed-test");
         var payload = state.CreateHealthPayload();
         var json = JsonSerializer.Serialize(payload);
         using var document = JsonDocument.Parse(json);
@@ -81,5 +96,13 @@ public class MetricsFormattingTests
         Assert.Equal(0.15, gvrsRaw.GetDouble(), 3);
         Assert.Equal(0.10, root.GetProperty("gvrs_ewma").GetDouble(), 3);
         Assert.Equal("Moderate", root.GetProperty("gvrs_bucket").GetString());
+        Assert.Equal(1, root.GetProperty("order_rejects_total").GetInt64());
+        var lastOrderSizes = root.GetProperty("last_order_size_units");
+        Assert.Equal(7, root.GetProperty("idempotency_evictions_total").GetInt64());
+        var cacheSize = root.GetProperty("idempotency_cache_size");
+        Assert.Equal(5, cacheSize.GetProperty("order").GetInt64());
+        Assert.Equal(4, cacheSize.GetProperty("cancel").GetInt64());
+        Assert.Equal("fixed-test", root.GetProperty("slippage_model").GetString());
+        Assert.Equal(75, lastOrderSizes.GetProperty("GBPUSD").GetInt64());
     }
 }

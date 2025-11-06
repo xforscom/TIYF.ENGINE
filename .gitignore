@@ -507,3 +507,5 @@ TiYf Engine — Industrial-Grade North Star Specification.pdf
 /local_artifacts/
 artifacts/
 *.sha256
+
+.vscode/

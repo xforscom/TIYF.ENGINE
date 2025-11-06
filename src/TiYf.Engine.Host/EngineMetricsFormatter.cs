@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Linq;
 using System.Text;
 
 namespace TiYf.Engine.Host;
@@ -15,6 +16,7 @@ public static class EngineMetricsFormatter
         AppendMetric(builder, "engine_active_orders", snapshot.ActiveOrders);
         AppendMetric(builder, "engine_risk_events_total", snapshot.RiskEventsTotal);
         AppendMetric(builder, "engine_alerts_total", snapshot.AlertsTotal);
+        AppendMetric(builder, "engine_order_rejects_total", snapshot.OrderRejectsTotal);
         AppendMetric(builder, "engine_stream_connected", snapshot.StreamConnected);
         AppendMetric(builder, "engine_stream_heartbeat_age_seconds", snapshot.StreamHeartbeatAgeSeconds);
         AppendMetric(builder, "engine_loop_uptime_seconds", snapshot.LoopUptimeSeconds);
@@ -30,6 +32,21 @@ public static class EngineMetricsFormatter
         foreach (var kvp in snapshot.RiskThrottlesByGate)
         {
             AppendMetric(builder, "engine_risk_throttles_total", kvp.Value, "gate", kvp.Key);
+        }
+        foreach (var kvp in snapshot.LastOrderSizeBySymbol)
+        {
+            AppendMetric(builder, "engine_last_order_size_units", kvp.Value, "instrument", kvp.Key);
+        }
+        var idempotencyTotal = snapshot.IdempotencyCacheSizes.Values.Sum();
+        AppendMetric(builder, "engine_idempotency_cache_size", idempotencyTotal);
+        foreach (var kvp in snapshot.IdempotencyCacheSizes)
+        {
+            AppendMetric(builder, "engine_idempotency_cache_size", kvp.Value, "kind", kvp.Key);
+        }
+        AppendMetric(builder, "engine_idempotency_evictions_total", snapshot.IdempotencyEvictionsTotal);
+        if (!string.IsNullOrWhiteSpace(snapshot.SlippageModel))
+        {
+            AppendMetric(builder, "engine_slippage_model", 1, "model", snapshot.SlippageModel);
         }
         if (snapshot.GvrsRaw.HasValue)
         {
