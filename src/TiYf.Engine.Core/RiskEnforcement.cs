@@ -102,8 +102,10 @@ public sealed class RiskConfig
     public DailyCapConfig? DailyCap { get; init; }
     public GlobalDrawdownConfig? GlobalDrawdown { get; init; }
     public NewsBlackoutConfig? NewsBlackout { get; init; }
+    public PromotionConfig Promotion { get; init; } = PromotionConfig.Default;
     public GlobalVolatilityGateConfig GlobalVolatilityGate { get; init; } = GlobalVolatilityGateConfig.Disabled;
     public string? RiskConfigHash { get; init; }
+    public string PromotionConfigHash => Promotion.ConfigHash;
 }
 
 public static class AlertTypes
