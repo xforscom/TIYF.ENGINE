@@ -31,7 +31,7 @@ jobs:
           echo "$OUTPUT"
           ARTIFACT_PATH=$(echo "$OUTPUT" | grep "Proof artifacts written to" | sed -e "s/.*'//" -e "s/'.*//")
           mkdir -p proof-artifacts
-          cp "$ARTIFACT_PATH"/* proof-artifacts/
+          cp -r "$ARTIFACT_PATH"/* proof-artifacts/
 
       - name: List proof artifacts
         run: ls -R proof-artifacts
