@@ -201,7 +201,7 @@ internal sealed class EngineLoopService : BackgroundService
         var riskConfig = ResolveRiskConfig(rawDoc);
         var riskConfigHash = riskConfig?.RiskConfigHash ?? string.Empty;
         _state.SetRiskConfigHash(riskConfigHash);
-        var promotionConfigHash = riskConfig?.Promotion.ConfigHash ?? string.Empty;
+        var promotionConfigHash = riskConfig?.PromotionConfigHash ?? string.Empty;
         _state.SetPromotionConfigHash(promotionConfigHash);
         var newsEvents = LoadNewsEvents(riskConfig?.NewsBlackout);
         var riskMode = ResolveRiskMode(rawDoc);
