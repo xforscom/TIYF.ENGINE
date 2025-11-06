@@ -35,6 +35,8 @@ Field semantics:
 Missing fields fall back to defaults (disabled, empty candidate list, 30 days,
 50 trades, thresholds 0.6/0.4).
 
+Sample configs ship with `promotion.enabled` set to `true` purely to surface telemetry in Phase 1; no runtime promotion decisions execute yet.
+
 ## Telemetry
 
 - `promotion_config_hash` is emitted via `/health` payloads and
