@@ -295,11 +295,18 @@ public static class RiskConfigParser
         throw new FormatException($"Invalid time of day '{raw}'. Expected HH:mm or HH:mm:ss.");
     }
 
-    private static decimal ClampProbability(decimal value)
+// --- parser-local helpers (promotion) ---
+    private static decimal ClampProbability(decimal p)
     {
-        if (value < 0m) return 0m;
-        if (value > 1m) return 1m;
-        return value;
+        if (p < 0m) return 0m;
+        if (p > 1m) return 1m;
+        return p;
+    }
+
+    private static string ComputeDefaultPromotionHash()
+    {
+        // Keep parity with defaults: empty hash when promotion block is absent.
+        return string.Empty;
     }
 
     private static decimal ClampAlpha(decimal alpha)
@@ -321,8 +328,6 @@ public static class RiskConfigParser
             _ => throw new FormatException($"Unsupported daily cap action '{raw}'. Expected 'block' or 'half_size'.")
         };
     }
-
-    private static string ComputeDefaultPromotionHash() => string.Empty;
 
     private static string? TryCanonicalHash(JsonElement riskEl)
     {
