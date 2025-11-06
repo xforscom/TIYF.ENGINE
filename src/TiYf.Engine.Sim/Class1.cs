@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
@@ -8,6 +10,7 @@ using System.Threading.Tasks;
 using TiYf.Engine.Core;
 using TiYf.Engine.Core.Text;
 using TiYf.Engine.Sidecar;
+using TiYf.Engine.Core.Slippage;
 
 namespace TiYf.Engine.Sim;
 
@@ -22,6 +25,7 @@ public sealed record EngineConfig(
     string AdapterId = "stub",
     string BrokerId = "stub-sim",
     string AccountId = "account-stub",
+    string? SlippageModel = "zero",
     string[]? Instruments = null,
     string[]? Intervals = null
 );
@@ -109,8 +113,364 @@ public sealed class EngineLoop
     private readonly MarketContextService? _marketContextService;
     private readonly GvrsShadowAlertManager? _gvrsAlertManager;
     private readonly Action<MarketContextService.GvrsSnapshot>? _onGvrsSnapshot;
+    private readonly ISlippageModel _slippageModel;
+    private readonly Func<DateTime>? _utcNow;
+    private readonly Dictionary<string, DateTime> _orderIdempotency = new(StringComparer.Ordinal);
+    private readonly Queue<string> _orderIdQueue = new();
+    private readonly Dictionary<string, DateTime> _cancelIdempotency = new(StringComparer.Ordinal);
+    private readonly Queue<string> _cancelIdQueue = new();
+    private const int OrderIdempotencyCapacity = 5000;
+    private const int CancelIdempotencyCapacity = 5000;
+    private readonly TimeSpan _idempotencyTtl = TimeSpan.FromHours(24);
+    private DateTime _lastKillSwitchAlertUtc = DateTime.MinValue;
+    private readonly Action<string, long>? _onOrderAccepted;
+    private readonly Action? _onOrderRejected;
+    private readonly Action<int, int, long>? _onIdempotencyMetrics;
+    private readonly Action<string>? _warnCallback;
+    private long _idempotencyEvictions;
+    private bool _orderEvictionWarned;
+    private bool _cancelEvictionWarned;
 
     private string? ExtractDataVersion() => _dataVersion;
+    private DateTime UtcNow() => _utcNow?.Invoke() ?? DateTime.UtcNow;
+
+    private static string BuildOrderKey(string decisionId, string symbol, string timeframe, DateTime minuteUtc)
+        => $"{decisionId}|{symbol}|{timeframe}|{minuteUtc:O}";
+
+    private bool IsDuplicateOrder(string key, DateTime now)
+    {
+        return _orderIdempotency.TryGetValue(key, out var ts) && now - ts < _idempotencyTtl;
+    }
+
+    private void RegisterOrderKey(string key, DateTime now)
+    {
+        _orderIdempotency[key] = now;
+        _orderIdQueue.Enqueue(key);
+        TrimOrderCache(now);
+        ReportIdempotencyMetrics();
+    }
+
+    private void UnregisterOrderKey(string key)
+    {
+        if (_orderIdempotency.Remove(key))
+        {
+            ReportIdempotencyMetrics();
+        }
+    }
+
+    private bool IsDuplicateCancel(string key, DateTime now)
+    {
+        if (_cancelIdempotency.TryGetValue(key, out var ts) && now - ts < _idempotencyTtl)
+        {
+            return true;
+        }
+
+        _cancelIdempotency[key] = now;
+        _cancelIdQueue.Enqueue(key);
+        TrimCancelCache(now);
+        ReportIdempotencyMetrics();
+        return false;
+    }
+
+    private void TrimOrderCache(DateTime now)
+    {
+        while (_orderIdQueue.Count > OrderIdempotencyCapacity)
+        {
+            var oldKey = _orderIdQueue.Dequeue();
+            if (!_orderIdempotency.TryGetValue(oldKey, out var ts))
+            {
+                continue;
+            }
+
+            if (now - ts < _idempotencyTtl)
+            {
+                _idempotencyEvictions++;
+                if (!_orderEvictionWarned)
+                {
+                    _warnCallback?.Invoke("Order idempotency cache eviction occurred while key was still within TTL (capacity exceeded).");
+                    _orderEvictionWarned = true;
+                }
+            }
+
+            _orderIdempotency.Remove(oldKey);
+        }
+    }
+
+    private void TrimCancelCache(DateTime now)
+    {
+        while (_cancelIdQueue.Count > CancelIdempotencyCapacity)
+        {
+            var oldKey = _cancelIdQueue.Dequeue();
+            if (!_cancelIdempotency.TryGetValue(oldKey, out var ts))
+            {
+                continue;
+            }
+
+            if (now - ts < _idempotencyTtl)
+            {
+                _idempotencyEvictions++;
+                if (!_cancelEvictionWarned)
+                {
+                    _warnCallback?.Invoke("Cancel idempotency cache eviction occurred while key was still within TTL (capacity exceeded).");
+                    _cancelEvictionWarned = true;
+                }
+            }
+
+            _cancelIdempotency.Remove(oldKey);
+        }
+    }
+
+    private void ReportIdempotencyMetrics()
+    {
+        _onIdempotencyMetrics?.Invoke(_orderIdempotency.Count, _cancelIdempotency.Count, _idempotencyEvictions);
+    }
+
+    private bool TryValidateOrderSize(string symbol, long units, out long maxUnits)
+    {
+        maxUnits = 0;
+        var caps = _riskConfig?.MaxUnitsPerSymbol;
+        if (caps is null) return true;
+        if (caps.TryGetValue(symbol, out var max) && units > max)
+        {
+            maxUnits = max;
+            return false;
+        }
+        return true;
+    }
+
+    private static bool KillSwitchFlagged()
+    {
+        var kill = Environment.GetEnvironmentVariable("TIYF_KILLSWITCH");
+        if (!string.IsNullOrWhiteSpace(kill) && (string.Equals(kill, "1", StringComparison.OrdinalIgnoreCase) || string.Equals(kill, "true", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        var path = Environment.GetEnvironmentVariable("TIYF_KILLSWITCH_FILE");
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            path = "/opt/tiyf/kill.switch";
+        }
+
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        try
+        {
+            if (File.Exists(path))
+            {
+                return true;
+            }
+        }
+        catch (IOException)
+        {
+            // ignore IO issues
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // ignore permission issues
+        }
+
+        return false;
+    }
+
+    private enum ExecutionDispatchStatus
+    {
+        Accepted,
+        Duplicate,
+        BlockedKillSwitch,
+        BlockedSizeLimit,
+        Rejected,
+        TransportError
+    }
+
+    private sealed record ExecutionDispatchOutcome(ExecutionDispatchStatus Status, ExecutionResult? Result);
+
+    private static ExecutionFill EnsureFill(OrderRequest order, ExecutionResult result, decimal fallbackPrice)
+    {
+        if (result.Fill is { } fill)
+        {
+            return fill;
+        }
+
+        return new ExecutionFill(order.DecisionId, order.Symbol, order.Side, fallbackPrice, order.Units, order.UtcTs);
+    }
+
+    private async Task EmitKillSwitchAlertAsync(string symbol, string timeframe, DateTime decisionUtc, CancellationToken ct)
+    {
+        var now = UtcNow();
+        if (_lastKillSwitchAlertUtc != DateTime.MinValue && now - _lastKillSwitchAlertUtc < TimeSpan.FromMinutes(1))
+        {
+            return;
+        }
+
+        _lastKillSwitchAlertUtc = now;
+        var payload = JsonSerializer.SerializeToElement(new
+        {
+            symbol,
+            timeframe,
+            ts = decisionUtc,
+            reason = "kill_switch_active"
+        });
+        payload = EnrichWithGvrs(payload);
+        await _journal.AppendAsync(new JournalEvent(++_seq, decisionUtc, "ALERT_KILLSWITCH", _sourceAdapter, payload), ct);
+    }
+
+    private async Task EmitSizeLimitAlertAsync(string symbol, string timeframe, long requestedUnits, long maxUnits, DateTime decisionUtc, decimal priceIntent, decimal priceSlipped, CancellationToken ct)
+    {
+        var payload = JsonSerializer.SerializeToElement(new
+        {
+            symbol,
+            timeframe,
+            ts = decisionUtc,
+            requested_units = requestedUnits,
+            max_units = maxUnits,
+            price_intent = priceIntent,
+            price_slipped = priceSlipped,
+            reason = "size_limit"
+        });
+        payload = EnrichWithGvrs(payload);
+        await _journal.AppendAsync(new JournalEvent(++_seq, decisionUtc, "ALERT_SIZE_LIMIT", _sourceAdapter, payload), ct);
+    }
+
+    private async Task EmitOrderRejectedAsync(OrderRequest order, string timeframe, ExecutionResult result, decimal priceIntent, decimal priceSlipped, CancellationToken ct)
+    {
+        var payload = JsonSerializer.SerializeToElement(new
+        {
+            decision_id = order.DecisionId,
+            symbol = order.Symbol,
+            timeframe,
+            ts = order.UtcTs,
+            side = order.Side.ToString(),
+            units = order.Units,
+            price_intent = priceIntent,
+            price_slipped = priceSlipped,
+            reason = string.IsNullOrWhiteSpace(result.Reason) ? "execution_rejected" : result.Reason,
+            adapter_http_status = result.StatusCode,
+            transient = result.Transient
+        });
+        payload = EnrichWithGvrs(payload);
+        await _journal.AppendAsync(new JournalEvent(++_seq, order.UtcTs, "ALERT_ORDER_REJECTED", _sourceAdapter, payload), ct);
+    }
+
+    private async Task<ExecutionDispatchOutcome> DispatchOrderAsync(OrderRequest order, string timeframe, bool isExit, decimal priceIntent, decimal priceSlipped, CancellationToken ct)
+    {
+        if (_execution is null)
+        {
+            throw new InvalidOperationException("Execution adapter not configured.");
+        }
+
+        var now = UtcNow();
+        var orderKey = BuildOrderKey(order.DecisionId, order.Symbol, timeframe, order.UtcTs);
+        if (IsDuplicateOrder(orderKey, now))
+        {
+            Console.WriteLine($"OrderSend duplicate decision={order.DecisionId} symbol={order.Symbol} timeframe={timeframe}");
+            return new ExecutionDispatchOutcome(ExecutionDispatchStatus.Duplicate, null);
+        }
+
+        if (!isExit && KillSwitchFlagged())
+        {
+            await EmitKillSwitchAlertAsync(order.Symbol, timeframe, order.UtcTs, ct);
+            Console.WriteLine($"OrderSend blocked kill-switch decision={order.DecisionId} symbol={order.Symbol}");
+            _gvrsAlertManager?.Clear(order.DecisionId);
+            return new ExecutionDispatchOutcome(ExecutionDispatchStatus.BlockedKillSwitch, null);
+        }
+
+        if (!isExit && !TryValidateOrderSize(order.Symbol, order.Units, out var maxUnits))
+        {
+            await EmitSizeLimitAlertAsync(order.Symbol, timeframe, order.Units, maxUnits, order.UtcTs, priceIntent, priceSlipped, ct);
+            Console.WriteLine($"OrderSend blocked size-limit decision={order.DecisionId} symbol={order.Symbol} units={order.Units} max={maxUnits}");
+            _gvrsAlertManager?.Clear(order.DecisionId);
+            return new ExecutionDispatchOutcome(ExecutionDispatchStatus.BlockedSizeLimit, null);
+        }
+
+        RegisterOrderKey(orderKey, now);
+
+        var delays = new[]
+        {
+            TimeSpan.Zero,
+            TimeSpan.FromMilliseconds(250),
+            TimeSpan.FromMilliseconds(500),
+            TimeSpan.FromMilliseconds(750)
+        };
+
+        ExecutionResult? lastResult = null;
+        for (var attempt = 0; attempt < delays.Length; attempt++)
+        {
+            if (attempt > 0)
+            {
+                var delay = delays[attempt];
+                if (delay > TimeSpan.Zero)
+                {
+                    try
+                    {
+                        await Task.Delay(delay, ct);
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            try
+            {
+                lastResult = await _execution.ExecuteMarketAsync(order with { PriceIntent = priceSlipped }, ct);
+            }
+            catch (HttpRequestException ex)
+            {
+                Console.WriteLine($"OrderSend transport error attempt={attempt + 1} decision={order.DecisionId} symbol={order.Symbol} message={ex.Message}");
+                lastResult = null;
+                if (attempt == delays.Length - 1)
+                {
+                    UnregisterOrderKey(orderKey);
+                    _onOrderRejected?.Invoke();
+                    _gvrsAlertManager?.Clear(order.DecisionId);
+                    return new ExecutionDispatchOutcome(ExecutionDispatchStatus.TransportError, null);
+                }
+                continue;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"OrderSend unexpected error attempt={attempt + 1} decision={order.DecisionId} symbol={order.Symbol} message={ex.Message}");
+                lastResult = null;
+                UnregisterOrderKey(orderKey);
+                _onOrderRejected?.Invoke();
+                _gvrsAlertManager?.Clear(order.DecisionId);
+                return new ExecutionDispatchOutcome(ExecutionDispatchStatus.TransportError, null);
+            }
+
+            if (lastResult.Accepted)
+            {
+                var acceptedUnits = lastResult.Fill?.Units ?? order.Units;
+                _onOrderAccepted?.Invoke(order.Symbol, acceptedUnits);
+                LogOrderSendOk(order.DecisionId, order.Symbol, lastResult.BrokerOrderId);
+                return new ExecutionDispatchOutcome(ExecutionDispatchStatus.Accepted, lastResult);
+            }
+
+            Console.WriteLine($"OrderSend failure attempt={attempt + 1} decision={order.DecisionId} symbol={order.Symbol} reason={lastResult.Reason}");
+            if (!lastResult.Transient || attempt == delays.Length - 1)
+            {
+                break;
+            }
+        }
+
+        if (lastResult is not null)
+        {
+            UnregisterOrderKey(orderKey);
+            await EmitOrderRejectedAsync(order, timeframe, lastResult, priceIntent, priceSlipped, ct);
+            _onOrderRejected?.Invoke();
+            _gvrsAlertManager?.Clear(order.DecisionId);
+            return new ExecutionDispatchOutcome(ExecutionDispatchStatus.Rejected, lastResult);
+        }
+
+        _gvrsAlertManager?.Clear(order.DecisionId);
+        UnregisterOrderKey(orderKey);
+        _onOrderRejected?.Invoke();
+        return new ExecutionDispatchOutcome(ExecutionDispatchStatus.TransportError, null);
+    }
 
     private static void LogOrderSendOk(string decisionId, string symbol, string? brokerOrderId)
     {
@@ -118,7 +478,7 @@ public sealed class EngineLoop
         Console.WriteLine($"OrderSend ok decision={decisionId} brokerOrderId={id} symbol={symbol}");
     }
 
-    public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action<Bar>? onBarEmitted = null, Action<int, int>? onPositionMetrics = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, string sourceAdapter = "stub", long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true, SentimentGuardConfig? sentimentConfig = null, string? penaltyConfig = null, bool forcePenalty = false, bool ciPenaltyScaffold = false, string riskMode = "off", string? riskConfigHash = null, IReadOnlyList<NewsEvent>? newsEvents = null, IReadOnlyDictionary<long, string>? timeframeLabels = null, Action<string, bool>? riskGateCallback = null, Action<MarketContextService.GvrsSnapshot>? gvrsSnapshotCallback = null)
+    public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action<Bar>? onBarEmitted = null, Action<int, int>? onPositionMetrics = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, string sourceAdapter = "stub", long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true, SentimentGuardConfig? sentimentConfig = null, string? penaltyConfig = null, bool forcePenalty = false, bool ciPenaltyScaffold = false, string riskMode = "off", string? riskConfigHash = null, IReadOnlyList<NewsEvent>? newsEvents = null, IReadOnlyDictionary<long, string>? timeframeLabels = null, Action<string, bool>? riskGateCallback = null, Action<MarketContextService.GvrsSnapshot>? gvrsSnapshotCallback = null, ISlippageModel? slippageModel = null, Func<DateTime>? utcNow = null, Action<string, long>? orderAcceptedCallback = null, Action? orderRejectedCallback = null, Action<int, int, long>? idempotencyMetricsCallback = null, Action<string>? warnCallback = null)
     {
         _clock = clock; _builders = builders; _barKeyTracker = tracker; _journal = journal; _ticks = ticks; _barEventType = barEventType; _seq = (journal is FileJournalWriter fj ? fj.NextSequence : 1UL) - 1UL; _onBarEmitted = onBarEmitted; _onPositionMetrics = onPositionMetrics; _riskFormulas = riskFormulas; _basketAggregator = basketAggregator; _configHash = configHash; _schemaVersion = schemaVersion; _riskEnforcer = riskEnforcer; _riskConfig = riskConfig; _equityOverride = equityOverride; _deterministicStrategy = deterministicStrategy; _execution = execution; _positions = positions; _tradesWriter = tradesWriter; _dataVersion = dataVersion; _sourceAdapter = string.IsNullOrWhiteSpace(sourceAdapter) ? "stub" : sourceAdapter; _riskProbeEnabled = riskProbeEnabled; _sentimentConfig = sentimentConfig; _penaltyMode = penaltyConfig ?? "off"; _forcePenalty = forcePenalty; _ciPenaltyScaffold = ciPenaltyScaffold; _riskMode = string.IsNullOrWhiteSpace(riskMode) ? "off" : riskMode.ToLowerInvariant();
         _sizeUnitsFx = sizeUnitsFx; _sizeUnitsXau = sizeUnitsXau;
@@ -130,6 +490,13 @@ public sealed class EngineLoop
             _gvrsAlertManager = new GvrsShadowAlertManager();
         }
         _onGvrsSnapshot = gvrsSnapshotCallback;
+        _slippageModel = slippageModel ?? new ZeroSlippageModel();
+        _utcNow = utcNow;
+        _onOrderAccepted = orderAcceptedCallback;
+        _onOrderRejected = orderRejectedCallback;
+        _onIdempotencyMetrics = idempotencyMetricsCallback;
+        _warnCallback = warnCallback;
+        ReportIdempotencyMetrics();
         if (_marketContextService is null)
         {
             _onGvrsSnapshot?.Invoke(new MarketContextService.GvrsSnapshot(0m, 0m, "unknown", gvrsConfig.EnabledMode, false));
@@ -396,23 +763,59 @@ public sealed class EngineLoop
                                 {
                                     var closeSide = act.DecisionId.EndsWith("-01", StringComparison.Ordinal) ? TradeSide.Sell : TradeSide.Buy;
                                     var units = _openUnits.TryGetValue(act.DecisionId, out var ou) ? ou : 0L;
-                                    var req = new OrderRequest(act.DecisionId, act.Symbol, closeSide, units, tickMinute);
-                                    var result = await _execution.ExecuteMarketAsync(req, ct);
-                                    if (result.Accepted)
+                                    if (units <= 0)
                                     {
-                                        if (result.Fill is { } fill)
+                                        continue;
+                                    }
+
+                                    var timeframeLabel = ResolveTimeframeLabel(interval);
+                                    var intentPrice = bar.Close;
+                                    var slippedPrice = _slippageModel.Apply(intentPrice, closeSide == TradeSide.Buy, act.Symbol, units, UtcNow());
+                                    var req = new OrderRequest(act.DecisionId, act.Symbol, closeSide, units, tickMinute, slippedPrice);
+                                    var outcome = await DispatchOrderAsync(req, timeframeLabel, isExit: true, intentPrice, slippedPrice, ct);
+                                    if (outcome.Status != ExecutionDispatchStatus.Accepted)
+                                    {
+                                        continue;
+                                    }
+
+                                    var executionResult = outcome.Result!;
+                                    var fill = EnsureFill(req, executionResult, slippedPrice);
+                                    if (_positions is not null)
+                                    {
+                                        _positions.OnFill(fill, _schemaVersion, _configHash ?? string.Empty, _sourceAdapter, ExtractDataVersion());
+                                        if (_tradesWriter is not null)
                                         {
-                                            _positions.OnFill(fill, _schemaVersion, _configHash ?? string.Empty, _sourceAdapter, ExtractDataVersion());
-                                            _gvrsAlertManager?.Clear(act.DecisionId);
-                                            if (_tradesWriter is not null)
+                                            foreach (var completed in _positions.Completed.Where(c => c.DecisionId == act.DecisionId))
                                             {
-                                                foreach (var completed in _positions.Completed.Where(c => c.DecisionId == act.DecisionId))
-                                                    _tradesWriter.Append(completed);
+                                                _tradesWriter.Append(completed);
                                             }
-                                            // Clear open-units tracking on successful close so risk exposure reflects current book
-                                            _openUnits.Remove(act.DecisionId);
                                         }
-                                        LogOrderSendOk(req.DecisionId, req.Symbol, result.BrokerOrderId);
+
+                                        var remaining = _positions.GetOpenUnits(act.DecisionId);
+                                        if (remaining > 0)
+                                        {
+                                            _openUnits[act.DecisionId] = remaining;
+                                        }
+                                        else
+                                        {
+                                            _openUnits.Remove(act.DecisionId);
+                                            _gvrsAlertManager?.Clear(act.DecisionId);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        var remaining = _openUnits.TryGetValue(act.DecisionId, out var existing)
+                                            ? Math.Max(0, existing - fill.Units)
+                                            : 0;
+                                        if (remaining > 0)
+                                        {
+                                            _openUnits[act.DecisionId] = remaining;
+                                        }
+                                        else
+                                        {
+                                            _openUnits.Remove(act.DecisionId);
+                                            _gvrsAlertManager?.Clear(act.DecisionId);
+                                        }
                                     }
                                 }
                                 else
@@ -428,10 +831,10 @@ public sealed class EngineLoop
                                         finalUnits = scaled;
                                         lastOriginalUnits = baseUnits; lastAdjustedUnits = finalUnits;
                                     }
+                                    var timeframeLabel = ResolveTimeframeLabel(interval);
                                     RiskRailOutcome? riskOutcome = null;
                                     if (_riskMode != "off" && firstLeg && _riskRails is not null)
                                     {
-                                        var timeframeLabel = ResolveTimeframeLabel(interval);
                                         riskOutcome = _riskRails.EvaluateNewEntry(act.Symbol, timeframeLabel, tickMinute, finalUnits);
                                         foreach (var alert in riskOutcome.Alerts)
                                         {
@@ -450,18 +853,39 @@ public sealed class EngineLoop
                                             finalUnits = riskOutcome.Units;
                                         }
                                     }
-                                    _openUnits[act.DecisionId] = finalUnits;
-                                    var req = new OrderRequest(act.DecisionId, act.Symbol, side, finalUnits, tickMinute);
-                                    var result = await _execution.ExecuteMarketAsync(req, ct);
-                                    if (result.Accepted)
+                                    if (finalUnits <= 0)
                                     {
-                                        if (result.Fill is { } fill)
-                                        {
-                                            _positions.OnFill(fill, _schemaVersion, _configHash ?? string.Empty, _sourceAdapter, ExtractDataVersion());
-                                            _gvrsAlertManager?.Clear(act.DecisionId);
-                                        }
-                                        LogOrderSendOk(req.DecisionId, req.Symbol, result.BrokerOrderId);
+                                        continue;
                                     }
+                                    var intentPrice = bar.Close;
+                                    var slippedPrice = _slippageModel.Apply(intentPrice, side == TradeSide.Buy, act.Symbol, finalUnits, UtcNow());
+                                    var req = new OrderRequest(act.DecisionId, act.Symbol, side, finalUnits, tickMinute, slippedPrice);
+                                    var outcome = await DispatchOrderAsync(req, timeframeLabel, isExit: false, intentPrice, slippedPrice, ct);
+                                    if (outcome.Status != ExecutionDispatchStatus.Accepted)
+                                    {
+                                        continue;
+                                    }
+
+                                    var executionResult = outcome.Result!;
+                                    var fill = EnsureFill(req, executionResult, slippedPrice);
+                                    if (_positions is not null)
+                                    {
+                                        _positions.OnFill(fill, _schemaVersion, _configHash ?? string.Empty, _sourceAdapter, ExtractDataVersion());
+                                        var remaining = _positions.GetOpenUnits(act.DecisionId);
+                                        if (remaining > 0)
+                                        {
+                                            _openUnits[act.DecisionId] = remaining;
+                                        }
+                                        else
+                                        {
+                                            _openUnits.Remove(act.DecisionId);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        _openUnits[act.DecisionId] = fill.Units;
+                                    }
+                                    _gvrsAlertManager?.Clear(act.DecisionId);
                                 }
 
                             }

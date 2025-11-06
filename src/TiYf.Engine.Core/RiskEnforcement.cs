@@ -91,6 +91,7 @@ public sealed class RiskConfig
     public decimal LotStep { get; init; } = 0.01m; // minimal lot step (vol rounding)
     // M4 risk guardrails additions (engine-level, outside enforcement sizing logic)
     public Dictionary<string, decimal>? MaxNetExposureBySymbol { get; init; } = null; // symbol -> absolute exposure cap
+    public Dictionary<string, long>? MaxUnitsPerSymbol { get; init; } = null;
     public decimal? MaxRunDrawdownCCY { get; init; } = null; // run drawdown cap in account CCY
     public bool BlockOnBreach { get; init; } = true; // if true active mode suppresses trades on breach
     public bool EmitEvaluations { get; init; } = true; // control INFO_RISK_EVAL_V1 emission

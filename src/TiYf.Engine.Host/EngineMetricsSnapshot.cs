@@ -8,6 +8,7 @@ public readonly record struct EngineMetricsSnapshot(
     int ActiveOrders,
     long RiskEventsTotal,
     long AlertsTotal,
+    long OrderRejectsTotal,
     int StreamConnected,
     double StreamHeartbeatAgeSeconds,
     double LoopUptimeSeconds,
@@ -18,6 +19,10 @@ public readonly record struct EngineMetricsSnapshot(
     long RiskThrottlesTotal,
     IReadOnlyDictionary<string, long> RiskBlocksByGate,
     IReadOnlyDictionary<string, long> RiskThrottlesByGate,
+    IReadOnlyDictionary<string, long> LastOrderSizeBySymbol,
+    IReadOnlyDictionary<string, long> IdempotencyCacheSizes,
+    long IdempotencyEvictionsTotal,
+    string SlippageModel,
     double? GvrsRaw,
     double? GvrsEwma,
     string? GvrsBucket);

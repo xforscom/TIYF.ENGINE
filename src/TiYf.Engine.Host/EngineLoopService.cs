@@ -14,6 +14,7 @@ using TiYf.Engine.Core;
 using TiYf.Engine.Core.Instruments;
 using TiYf.Engine.Sidecar;
 using TiYf.Engine.Sim;
+using TiYf.Engine.Core.Slippage;
 
 namespace TiYf.Engine.Host;
 
@@ -204,6 +205,11 @@ internal sealed class EngineLoopService : BackgroundService
         var riskMode = ResolveRiskMode(rawDoc);
         var dataVersion = ComputeDataVersion(rawDoc, _configDirectory);
 
+        var slippageName = SlippageModelFactory.Normalize(config.SlippageModel);
+        var slippageModel = SlippageModelFactory.Create(slippageName);
+        _state.SetSlippageModel(slippageName);
+        _state.UpdateIdempotencyMetrics(0, 0, 0);
+
         var journalWriter = new FileJournalWriter(
             journalRoot,
             runId,
@@ -242,12 +248,28 @@ internal sealed class EngineLoopService : BackgroundService
             tradesWriter: _tradesWriter,
             dataVersion: dataVersion,
             sourceAdapter: _state.Adapter,
+            slippageModel: slippageModel,
             riskMode: riskMode,
             riskConfigHash: riskConfigHash,
             newsEvents: newsEvents,
             timeframeLabels: _timeframeLabelByTicks,
             riskGateCallback: (gate, throttled) => _state.RegisterRiskGateEvent(gate, throttled),
-            gvrsSnapshotCallback: snapshot => _state.SetGvrsSnapshot(snapshot));
+            gvrsSnapshotCallback: snapshot => _state.SetGvrsSnapshot(snapshot),
+            orderAcceptedCallback: (symbol, units) =>
+            {
+                _state.RegisterOrderAccepted(symbol, units);
+                UpdateHostMetrics();
+            },
+            orderRejectedCallback: () =>
+            {
+                _state.RegisterOrderRejected();
+                UpdateHostMetrics();
+            },
+            idempotencyMetricsCallback: (orderCache, cancelCache, evictions) =>
+            {
+                _state.UpdateIdempotencyMetrics(orderCache, cancelCache, evictions);
+            },
+            warnCallback: message => _logger.LogWarning("{Message}", message));
 
         _logger.LogInformation("Streaming runtime initialized run_id={RunId} journal={Journal}", runId, journalWriter.RunDirectory);
         _state.SetLastLog($"stream:run_id={runId}");

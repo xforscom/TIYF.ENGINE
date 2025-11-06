@@ -12,7 +12,8 @@ public sealed record OrderRequest(
     string Symbol,
     TradeSide Side,
     long Units,
-    DateTime UtcTs
+    DateTime UtcTs,
+    decimal? PriceIntent = null
 );
 
 public sealed record ExecutionFill(
@@ -24,7 +25,13 @@ public sealed record ExecutionFill(
     DateTime UtcTs
 );
 
-public sealed record ExecutionResult(bool Accepted, string Reason, ExecutionFill? Fill, string? BrokerOrderId);
+public sealed record ExecutionResult(
+    bool Accepted,
+    string Reason,
+    ExecutionFill? Fill,
+    string? BrokerOrderId,
+    int? StatusCode = null,
+    bool Transient = false);
 
 public interface IExecutionAdapter
 {
@@ -81,9 +88,13 @@ public sealed class PositionTracker
         public string Symbol = string.Empty;
         public TradeSide Side;
         public DateTime OpenTs;
-        public decimal EntryPrice;
-        public long Units;
         public string DecisionId = string.Empty;
+        public long UnitsOpen;
+        public long TotalUnits;
+        public decimal EntryNotionalTotal;
+        public decimal EntryNotionalRemaining;
+        public decimal ExitNotionalTotal;
+        public decimal RealizedPnl;
     }
 
     private readonly Dictionary<string, OpenPosition> _open = new();
@@ -96,7 +107,14 @@ public sealed class PositionTracker
     {
         if (_open.Count == 0) return Array.Empty<(string, TradeSide, decimal, long, DateTime)>();
         return _open.Values
-            .Select(p => (p.Symbol, p.Side, p.EntryPrice, p.Units, p.OpenTs))
+            .Select(p =>
+            {
+                var units = p.UnitsOpen;
+                var entry = units > 0
+                    ? decimal.Round(p.EntryNotionalRemaining / units, 6, MidpointRounding.AwayFromZero)
+                    : 0m;
+                return (p.Symbol, p.Side, entry, units, p.OpenTs);
+            })
             .ToArray();
     }
 
@@ -104,42 +122,89 @@ public sealed class PositionTracker
     {
         if (!_open.TryGetValue(fill.DecisionId, out var pos))
         {
-            // treat as open
+            var notional = fill.Price * fill.Units;
             _open[fill.DecisionId] = new OpenPosition
             {
                 Symbol = fill.Symbol,
                 Side = fill.Side,
                 OpenTs = fill.UtcTs,
-                EntryPrice = fill.Price,
-                Units = fill.Units,
-                DecisionId = fill.DecisionId
+                DecisionId = fill.DecisionId,
+                UnitsOpen = fill.Units,
+                TotalUnits = fill.Units,
+                EntryNotionalTotal = notional,
+                EntryNotionalRemaining = notional,
+                ExitNotionalTotal = 0m,
+                RealizedPnl = 0m
             };
             return;
         }
-        // closing fill (must be opposite side)
+
         if (pos.Side == fill.Side)
-            throw new InvalidOperationException($"Closing fill side must be opposite. Decision {fill.DecisionId}");
-        // PnL: (exit - entry) * direction * units
-        var dir = pos.Side == TradeSide.Buy ? 1m : -1m;
-        var pnl = (fill.Price - pos.EntryPrice) * dir * pos.Units;
-        var trade = new CompletedTrade(
-            pos.OpenTs,
-            fill.UtcTs,
-            pos.Symbol,
-            pos.Side,
-            pos.EntryPrice,
-            fill.Price,
-            pos.Units,
-            decimal.Round(pnl, 6, MidpointRounding.AwayFromZero),
-            0m,
-            pos.DecisionId,
-            schemaVersion,
-            configHash,
-            sourceAdapter,
-            dataVersion ?? string.Empty
-        );
-        _completed.Add(trade);
-        _open.Remove(fill.DecisionId);
+        {
+            var notional = fill.Price * fill.Units;
+            pos.UnitsOpen += fill.Units;
+            pos.TotalUnits += fill.Units;
+            pos.EntryNotionalTotal += notional;
+            pos.EntryNotionalRemaining += notional;
+            if (fill.UtcTs < pos.OpenTs)
+            {
+                pos.OpenTs = fill.UtcTs;
+            }
+            return;
+        }
+
+        var unitsClosing = Math.Min(fill.Units, pos.UnitsOpen);
+        if (unitsClosing <= 0)
+        {
+            return;
+        }
+
+        var entryAvg = pos.UnitsOpen > 0 ? pos.EntryNotionalRemaining / pos.UnitsOpen : 0m;
+        pos.ExitNotionalTotal += fill.Price * unitsClosing;
+        var direction = pos.Side == TradeSide.Buy ? 1m : -1m;
+        var pnl = (fill.Price - entryAvg) * unitsClosing * direction;
+        pos.RealizedPnl += pnl;
+
+        pos.EntryNotionalRemaining -= entryAvg * unitsClosing;
+        if (pos.EntryNotionalRemaining < 0)
+        {
+            pos.EntryNotionalRemaining = 0m;
+        }
+        pos.UnitsOpen -= unitsClosing;
+        if (pos.UnitsOpen < 0)
+        {
+            pos.UnitsOpen = 0;
+        }
+
+        if (pos.UnitsOpen == 0)
+        {
+            var entryPrice = pos.TotalUnits > 0 ? pos.EntryNotionalTotal / pos.TotalUnits : 0m;
+            var exitPrice = pos.TotalUnits > 0 ? pos.ExitNotionalTotal / pos.TotalUnits : fill.Price;
+            var trade = new CompletedTrade(
+                pos.OpenTs,
+                fill.UtcTs,
+                pos.Symbol,
+                pos.Side,
+                decimal.Round(entryPrice, 6, MidpointRounding.AwayFromZero),
+                decimal.Round(exitPrice, 6, MidpointRounding.AwayFromZero),
+                pos.TotalUnits,
+                decimal.Round(pos.RealizedPnl, 6, MidpointRounding.AwayFromZero),
+                0m,
+                pos.DecisionId,
+                schemaVersion,
+                configHash,
+                sourceAdapter,
+                dataVersion ?? string.Empty
+            );
+            _completed.Add(trade);
+            _open.Remove(fill.DecisionId);
+        }
+    }
+
+    public long GetOpenUnits(string decisionId)
+    {
+        if (string.IsNullOrWhiteSpace(decisionId)) return 0;
+        return _open.TryGetValue(decisionId, out var pos) ? pos.UnitsOpen : 0;
     }
 }
 

@@ -1,0 +1,51 @@
+name: m6-execution-proof
+
+on:
+  workflow_dispatch:
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build solution
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Run unit tests
+        run: dotnet test --configuration Release --no-build
+
+      - name: Run execution proof harness
+        id: run-proof
+        run: |
+          set -e
+          OUTPUT=$(dotnet run --project tools/ExecutionProof/ExecutionProof.csproj --configuration Release)
+          echo "$OUTPUT"
+          ARTIFACT_PATH=$(echo "$OUTPUT" | grep "Proof artifacts written to" | sed -e "s/.*'//" -e "s/'.*//")
+          mkdir -p proof-artifacts
+          cp "$ARTIFACT_PATH"/* proof-artifacts/
+
+      - name: List proof artifacts
+        run: ls -R proof-artifacts
+
+      - name: Show proof summary
+        run: cat proof-artifacts/summary.json
+
+      - name: Verify alerts and trades
+        run: |
+          grep -F "ALERT_ORDER_REJECTED" proof-artifacts/events.csv
+          grep -F "partial_fills" proof-artifacts/trades.csv
+
+      - name: Upload proof artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: m6-execution-proof-artifacts
+          path: proof-artifacts

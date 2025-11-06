@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using TiYf.Engine.Core;
@@ -29,6 +30,15 @@ public sealed class EngineHostState
     private long _riskThrottlesTotal;
     private readonly Dictionary<string, long> _riskBlocksByGate = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, long> _riskThrottlesByGate = new(StringComparer.OrdinalIgnoreCase);
+    private long _orderRejectsTotal;
+    private readonly Dictionary<string, long> _lastOrderUnitsBySymbol = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, long> _idempotencyCacheSizes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["order"] = 0,
+        ["cancel"] = 0
+    };
+    private long _idempotencyEvictionsTotal;
+    private string _slippageModel = "zero";
     private double? _gvrsRaw;
     private double? _gvrsEwma;
     private string? _gvrsBucket;
@@ -120,6 +130,24 @@ public sealed class EngineHostState
         }
     }
 
+    public void SetSlippageModel(string? model)
+    {
+        lock (_sync)
+        {
+            _slippageModel = string.IsNullOrWhiteSpace(model) ? "zero" : model.Trim().ToLowerInvariant();
+        }
+    }
+
+    public void UpdateIdempotencyMetrics(int orderCacheSize, int cancelCacheSize, long evictionsTotal)
+    {
+        lock (_sync)
+        {
+            _idempotencyCacheSizes["order"] = Math.Max(0, orderCacheSize);
+            _idempotencyCacheSizes["cancel"] = Math.Max(0, cancelCacheSize);
+            _idempotencyEvictionsTotal = Math.Max(0, evictionsTotal);
+        }
+    }
+
     public void BootstrapLoopState(long decisionsTotal, long loopIterationsTotal, DateTime? lastDecisionUtc, IReadOnlyDictionary<string, DateTime?> decisionsByTimeframe)
     {
         lock (_sync)
@@ -192,6 +220,27 @@ public sealed class EngineHostState
         lock (_sync)
         {
             PendingOrders = count;
+        }
+    }
+
+    public void RegisterOrderAccepted(string symbol, long units)
+    {
+        if (string.IsNullOrWhiteSpace(symbol))
+        {
+            return;
+        }
+
+        lock (_sync)
+        {
+            _lastOrderUnitsBySymbol[symbol] = units;
+        }
+    }
+
+    public void RegisterOrderRejected()
+    {
+        lock (_sync)
+        {
+            _orderRejectsTotal++;
         }
     }
 
@@ -347,6 +396,11 @@ public sealed class EngineHostState
                 risk_throttles_total = _riskThrottlesTotal,
                 risk_blocks_by_gate = new Dictionary<string, long>(_riskBlocksByGate, StringComparer.OrdinalIgnoreCase),
                 risk_throttles_by_gate = new Dictionary<string, long>(_riskThrottlesByGate, StringComparer.OrdinalIgnoreCase),
+                order_rejects_total = metrics.OrderRejectsTotal,
+                last_order_size_units = new Dictionary<string, long>(metrics.LastOrderSizeBySymbol, StringComparer.OrdinalIgnoreCase),
+                idempotency_cache_size = new Dictionary<string, long>(_idempotencyCacheSizes, StringComparer.OrdinalIgnoreCase),
+                idempotency_evictions_total = _idempotencyEvictionsTotal,
+                slippage_model = _slippageModel,
                 gvrs_raw = metrics.GvrsRaw,
                 gvrs_ewma = metrics.GvrsEwma,
                 gvrs_bucket = metrics.GvrsBucket
@@ -370,6 +424,7 @@ public sealed class EngineHostState
             _activeOrders,
             _riskEventsTotal,
             _alertsTotal,
+            _orderRejectsTotal,
             streamConnected,
             streamHeartbeatAge,
             loopUptimeSeconds,
@@ -380,6 +435,10 @@ public sealed class EngineHostState
             _riskThrottlesTotal,
             new Dictionary<string, long>(_riskBlocksByGate, StringComparer.OrdinalIgnoreCase),
             new Dictionary<string, long>(_riskThrottlesByGate, StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, long>(_lastOrderUnitsBySymbol, StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, long>(_idempotencyCacheSizes, StringComparer.OrdinalIgnoreCase),
+            _idempotencyEvictionsTotal,
+            _slippageModel,
             _gvrsRaw,
             _gvrsEwma,
             _gvrsBucket);

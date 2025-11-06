@@ -47,6 +47,7 @@ public static class RiskConfigParser
             BlockOnBreach = Bool("block_on_breach", true),
             EmitEvaluations = Bool("emit_evaluations", true),
             MaxNetExposureBySymbol = ParseExposureCaps(riskEl),
+            MaxUnitsPerSymbol = ParseUnitsCaps(riskEl),
             SessionWindow = sessionWindow,
             DailyCap = dailyCap,
             GlobalDrawdown = globalDrawdown ?? (legacyDrawdown.HasValue ? new GlobalDrawdownConfig(legacyDrawdown.Value) : null),
@@ -113,6 +114,35 @@ public static class RiskConfigParser
         {
             var dict = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
             foreach (var p in camel.EnumerateObject()) if (p.Value.ValueKind == JsonValueKind.Number) dict[p.Name] = p.Value.GetDecimal();
+            return dict.Count > 0 ? dict : null;
+        }
+        return null;
+    }
+
+    private static Dictionary<string, long>? ParseUnitsCaps(JsonElement parent)
+    {
+        if (TryObject(parent, "max_units_per_symbol", out var obj))
+        {
+            var dict = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in obj.EnumerateObject())
+            {
+                if (p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetInt64(out var units))
+                {
+                    dict[p.Name] = units;
+                }
+            }
+            return dict.Count > 0 ? dict : null;
+        }
+        if (TryObject(parent, "maxUnitsPerSymbol", out var camel))
+        {
+            var dict = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in camel.EnumerateObject())
+            {
+                if (p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetInt64(out var units))
+                {
+                    dict[p.Name] = units;
+                }
+            }
             return dict.Count > 0 ? dict : null;
         }
         return null;
