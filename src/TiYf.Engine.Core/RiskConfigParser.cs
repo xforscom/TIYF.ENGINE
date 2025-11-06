@@ -297,7 +297,7 @@ public static class RiskConfigParser
         throw new FormatException($"Invalid time of day '{raw}'. Expected HH:mm or HH:mm:ss.");
     }
 
-// --- parser-local helpers (promotion) ---
+    // --- parser-local helpers (promotion) ---
     private static decimal ClampProbability(decimal p)
     {
         if (p < 0m) return 0m;
