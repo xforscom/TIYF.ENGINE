@@ -29,7 +29,7 @@ jobs:
           set -euo pipefail
           OUTPUT=$(dotnet run --project tools/ExecutionProof/ExecutionProof.csproj --configuration Release)
           echo "$OUTPUT"
-          ARTIFACT_PATH=$(echo "$OUTPUT" | grep "Proof artifacts written to" | sed -e "s/.*'//" -e "s/'.*//")
+          ARTIFACT_PATH=$(echo "$OUTPUT" | awk -F"'" '/Proof artifacts written to/ {print $2}')
           if [ -z "$ARTIFACT_PATH" ]; then
             echo "Failed to resolve proof artifact path from harness output" >&2
             exit 1
