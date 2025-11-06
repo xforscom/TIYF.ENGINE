@@ -16,6 +16,7 @@ Modular monolith trading engine MVP (M0). Focus: deterministic replay, bar build
 
 - [Demo Run Guide](docs/DEMO-RUN.md) â€“ Demo configuration, broker mode, expected outputs, and workflow links.
 - [Demo Ops SOP](docs/Demo-Ops-SOP.md) â€“ Start/stop/collect instructions and halt-on-failure rules.
+- [Strategy Promotion Framework](docs/PROMOTION-FRAMEWORK.md) – M7 runtime strategy lifecycle management (Phase 1: telemetry).
 
 ## Run (Prereq: .NET 8 SDK)
 
@@ -202,7 +203,9 @@ On success it prints: `PASS (tests+verify+diff deterministic)`.
 
 If any stage fails, the script exits non-zero with a descriptive bracketed tag (e.g. `[SMOKE] Diff FAILED`).
 
-## Promotion (M1)
+## Config Promotion (M1)
+
+**Note**: This is distinct from the [Strategy Promotion Framework](docs/PROMOTION-FRAMEWORK.md) introduced in M7, which manages runtime strategy lifecycle transitions. This section describes the M1 config A/B testing tool.
 
 Deterministic promotion gating between a baseline config and a candidate.
 
