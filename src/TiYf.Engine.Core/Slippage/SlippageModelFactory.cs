@@ -10,7 +10,6 @@ public static class SlippageModelFactory
         return normalized switch
         {
             "zero" => new ZeroSlippageModel(),
-            null or "" => new ZeroSlippageModel(),
             _ => throw new ArgumentOutOfRangeException(nameof(name), name, "Unsupported slippage model")
         };
     }

@@ -252,11 +252,6 @@ public sealed class EngineLoop
             path = "/opt/tiyf/kill.switch";
         }
 
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return false;
-        }
-
         try
         {
             if (File.Exists(path))
@@ -432,10 +427,9 @@ public sealed class EngineLoop
                 }
                 continue;
             }
-            catch (Exception ex)
+            catch (Exception ex) // intentional last-resort to surface unknown adapter failures
             {
                 Console.WriteLine($"OrderSend unexpected error attempt={attempt + 1} decision={order.DecisionId} symbol={order.Symbol} message={ex.Message}");
-                lastResult = null;
                 UnregisterOrderKey(orderKey);
                 _onOrderRejected?.Invoke();
                 _gvrsAlertManager?.Clear(order.DecisionId);
