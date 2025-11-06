@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Globalization;
 using System.Text.Json;
 
@@ -82,26 +83,20 @@ public static class RiskConfigParser
 
             if (TryArray(promotionEl, "shadow_candidates", out var candidatesEl))
             {
-                var list = new List<string>();
-                foreach (var candidate in candidatesEl.EnumerateArray())
-                {
-                    if (candidate.ValueKind == JsonValueKind.String)
-                    {
-                        var raw = candidate.GetString();
-                        if (!string.IsNullOrWhiteSpace(raw))
-                        {
-                            list.Add(raw.Trim());
-                        }
-                    }
-                }
-                shadowCandidates = list.Count > 0 ? list.ToArray() : Array.Empty<string>();
+                shadowCandidates = candidatesEl.EnumerateArray()
+                    .Where(c => c.ValueKind == JsonValueKind.String)
+                    .Select(c => c.GetString())
+                    .Where(raw => !string.IsNullOrWhiteSpace(raw))
+                    .Select(raw => raw!.Trim())
+                    .Where(raw => raw.Length > 0)
+                    .ToArray();
             }
 
             probationDays = TryInt(promotionEl, "probation_days", out var probation) ? Math.Max(0, probation) : defaultProbationDays;
             minTrades = TryInt(promotionEl, "min_trades", out var trades) ? Math.Max(0, trades) : defaultMinTrades;
             promotionThreshold = TryNumber(promotionEl, "promotion_threshold", out var promote) ? ClampProbability(promote) : defaultPromotionThreshold;
             demotionThreshold = TryNumber(promotionEl, "demotion_threshold", out var demote) ? ClampProbability(demote) : defaultDemotionThreshold;
-            hash = TryCanonicalHash(promotionEl) ?? string.Empty;
+            hash = TryCanonicalHash(promotionEl) ?? ComputeDefaultPromotionHash();
         }
         else
         {
@@ -300,6 +295,13 @@ public static class RiskConfigParser
         throw new FormatException($"Invalid time of day '{raw}'. Expected HH:mm or HH:mm:ss.");
     }
 
+    private static decimal ClampProbability(decimal value)
+    {
+        if (value < 0m) return 0m;
+        if (value > 1m) return 1m;
+        return value;
+    }
+
     private static decimal ClampAlpha(decimal alpha)
     {
         if (alpha < 0.01m) return 0.01m;
@@ -318,6 +320,21 @@ public static class RiskConfigParser
             "halfsize" => DailyCapAction.HalfSize,
             _ => throw new FormatException($"Unsupported daily cap action '{raw}'. Expected 'block' or 'half_size'.")
         };
+    }
+
+    private static string ComputeDefaultPromotionHash()
+    {
+        const string defaultJson = "{\"enabled\":false,\"shadow_candidates\":[],\"probation_days\":30,\"min_trades\":50,\"promotion_threshold\":0.6,\"demotion_threshold\":0.4}";
+        try
+        {
+            using var doc = JsonDocument.Parse(defaultJson);
+            var canonical = JsonCanonicalizer.Canonicalize(doc.RootElement);
+            return ConfigHash.Compute(canonical);
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     private static string? TryCanonicalHash(JsonElement riskEl)
