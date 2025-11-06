@@ -26,12 +26,19 @@ jobs:
       - name: Run execution proof harness
         id: run-proof
         run: |
-          set -e
+          set -euo pipefail
           OUTPUT=$(dotnet run --project tools/ExecutionProof/ExecutionProof.csproj --configuration Release)
           echo "$OUTPUT"
-          ARTIFACT_PATH=$(echo "$OUTPUT" | grep "Proof artifacts written to" | sed -e "s/.*'//" -e "s/'.*//")
+          ARTIFACT_PATH=$(echo "$OUTPUT" | awk -F"'" '/Proof artifacts written to/ {print $2}')
+          test -n "$ARTIFACT_PATH" || { echo "Failed to resolve proof artifact path"; exit 1; }
+          test -d "$ARTIFACT_PATH" || { echo "Proof artifact directory missing: $ARTIFACT_PATH" >&2; exit 1; }
+          if [ "$ARTIFACT_PATH" = "." ]; then
+            echo "Resolved artifact path is '.' (invalid). Check harness output parsing." >&2
+            exit 1
+          fi
+          echo "Resolved proof artifact path: $ARTIFACT_PATH"
           mkdir -p proof-artifacts
-          cp -r "$ARTIFACT_PATH"/* proof-artifacts/
+          cp -a "$ARTIFACT_PATH"/. proof-artifacts/
 
       - name: List proof artifacts
         run: ls -R proof-artifacts
