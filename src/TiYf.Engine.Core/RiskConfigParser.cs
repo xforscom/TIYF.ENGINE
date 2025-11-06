@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Text.Json;
 
 namespace TiYf.Engine.Core;
@@ -82,16 +83,14 @@ public static class RiskConfigParser
 
             if (TryArray(promotionEl, "shadow_candidates", out var candidatesEl))
             {
-                var list = new List<string>();
-                foreach (var candidate in candidatesEl.EnumerateArray())
-                {
-                    if (candidate.ValueKind != JsonValueKind.String) continue;
-                    var raw = candidate.GetString();
-                    if (string.IsNullOrWhiteSpace(raw)) continue;
-                    var trimmed = raw.Trim();
-                    if (trimmed.Length > 0) list.Add(trimmed);
-                }
-                shadowCandidates = list.Count > 0 ? list.ToArray() : Array.Empty<string>();
+                shadowCandidates = candidatesEl.EnumerateArray()
+                    .Where(c => c.ValueKind == JsonValueKind.String)
+                    .Select(c => c.GetString())
+                    .Where(raw => !string.IsNullOrWhiteSpace(raw))
+                    .Select(raw => raw!.Trim())
+                    .Where(trimmed => trimmed.Length > 0)
+                    .ToArray();
+                if (shadowCandidates.Count == 0) shadowCandidates = Array.Empty<string>();
             }
 
             probationDays = TryInt(promotionEl, "probation_days", out var probation) ? Math.Max(0, probation) : defaultProbationDays;
