@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text.Json;
@@ -33,6 +34,7 @@ public static class RiskConfigParser
         var maxRunDrawdown = globalDrawdown?.MaxDrawdown ?? legacyDrawdown;
         var newsBlackout = ParseNewsBlackout(riskEl);
         var globalVolatilityGate = ParseGlobalVolatilityGate(riskEl);
+        var promotion = ParsePromotionConfig(riskEl);
         return new RiskConfig
         {
             RealLeverageCap = Num("real_leverage_cap", 20m),
@@ -52,9 +54,68 @@ public static class RiskConfigParser
             DailyCap = dailyCap,
             GlobalDrawdown = globalDrawdown ?? (legacyDrawdown.HasValue ? new GlobalDrawdownConfig(legacyDrawdown.Value) : null),
             NewsBlackout = newsBlackout,
+            Promotion = promotion,
             GlobalVolatilityGate = globalVolatilityGate,
             RiskConfigHash = TryCanonicalHash(riskEl)
         };
+    }
+
+    private static PromotionConfig ParsePromotionConfig(JsonElement riskEl)
+    {
+        const bool defaultEnabled = false;
+        const int defaultProbationDays = 30;
+        const int defaultMinTrades = 50;
+        const decimal defaultPromotionThreshold = 0.6m;
+        const decimal defaultDemotionThreshold = 0.4m;
+
+        bool enabled = defaultEnabled;
+        IReadOnlyList<string> shadowCandidates = Array.Empty<string>();
+        int probationDays = defaultProbationDays;
+        int minTrades = defaultMinTrades;
+        decimal promotionThreshold = defaultPromotionThreshold;
+        decimal demotionThreshold = defaultDemotionThreshold;
+        string hash;
+
+        if (TryObject(riskEl, "promotion", out var promotionEl))
+        {
+            enabled = TryBool(promotionEl, "enabled", out var enabledValue) ? enabledValue : defaultEnabled;
+
+            if (TryArray(promotionEl, "shadow_candidates", out var candidatesEl))
+            {
+                var list = new List<string>();
+                foreach (var candidate in candidatesEl.EnumerateArray())
+                {
+                    if (candidate.ValueKind == JsonValueKind.String)
+                    {
+                        var raw = candidate.GetString();
+                        if (!string.IsNullOrWhiteSpace(raw))
+                        {
+                            list.Add(raw.Trim());
+                        }
+                    }
+                }
+                shadowCandidates = list.Count > 0 ? list.ToArray() : Array.Empty<string>();
+            }
+
+            probationDays = TryInt(promotionEl, "probation_days", out var probation) ? Math.Max(0, probation) : defaultProbationDays;
+            minTrades = TryInt(promotionEl, "min_trades", out var trades) ? Math.Max(0, trades) : defaultMinTrades;
+            promotionThreshold = TryNumber(promotionEl, "promotion_threshold", out var promote) ? ClampProbability(promote) : defaultPromotionThreshold;
+            demotionThreshold = TryNumber(promotionEl, "demotion_threshold", out var demote) ? ClampProbability(demote) : defaultDemotionThreshold;
+            hash = TryCanonicalHash(promotionEl) ?? string.Empty;
+        }
+        else
+        {
+            hash = ComputeDefaultPromotionHash();
+        }
+
+        return new PromotionConfig(
+            enabled,
+            shadowCandidates,
+            probationDays,
+            minTrades,
+            promotionThreshold,
+            demotionThreshold,
+            hash);
     }
 
     private static bool TryNumber(JsonElement parent, string snake, out decimal value)
