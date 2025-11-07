@@ -23,6 +23,7 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Restore & Build
+        shell: bash
         run: |
           dotnet restore
           dotnet build -c Release --no-restore
