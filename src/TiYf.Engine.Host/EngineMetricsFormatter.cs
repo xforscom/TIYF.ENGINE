@@ -52,6 +52,14 @@ public static class EngineMetricsFormatter
         {
             AppendMetric(builder, "engine_promotion_config_hash", 1, "hash", snapshot.PromotionConfigHash);
         }
+        if (snapshot.PromotionTelemetry is { } promotion)
+        {
+            AppendMetric(builder, "engine_promotion_candidates_total", promotion.CandidatesTotal);
+            AppendMetric(builder, "engine_promotion_probation_days", promotion.ProbationDays);
+            AppendMetric(builder, "engine_promotion_min_trades", promotion.MinTrades);
+            AppendMetric(builder, "engine_promotion_threshold", (double)promotion.PromotionThreshold);
+            AppendMetric(builder, "engine_demotion_threshold", (double)promotion.DemotionThreshold);
+        }
         if (snapshot.GvrsRaw.HasValue)
         {
             AppendMetric(builder, "engine_gvrs_raw", snapshot.GvrsRaw.Value);

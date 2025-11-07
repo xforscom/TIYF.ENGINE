@@ -1,0 +1,47 @@
+name: m7-promotion-proof
+
+on:
+  workflow_dispatch:
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build solution
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Run unit tests
+        run: dotnet test --configuration Release --no-build
+
+      - name: Run promotion telemetry probe
+        run: |
+          set -euo pipefail
+          mkdir -p proof-artifacts/m7-promotion
+          dotnet run --project tools/PromotionProbe/PromotionProbe.csproj --configuration Release -- --config sample-config.demo.json --output proof-artifacts/m7-promotion
+
+      - name: Inspect proof artifacts
+        run: |
+          ls -R proof-artifacts/m7-promotion
+          cat proof-artifacts/m7-promotion/summary.txt
+
+      - name: Verify metrics and health
+        run: |
+          grep -F "engine_promotion_candidates_total" proof-artifacts/m7-promotion/metrics.txt
+          grep -F "engine_promotion_threshold" proof-artifacts/m7-promotion/metrics.txt
+          jq '.promotion' proof-artifacts/m7-promotion/health.json
+
+      - name: Upload proof artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: m7-promotion-proof-artifacts
+          path: proof-artifacts/m7-promotion

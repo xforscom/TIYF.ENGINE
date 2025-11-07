@@ -153,6 +153,10 @@ jobs:
           $gvrsBucket = if ($health.PSObject.Properties.Name -contains 'gvrs_bucket' -and $null -ne $health.gvrs_bucket) { [string]$health.gvrs_bucket } else { '' }
           $gvrsRawString = if ([double]::IsNaN($gvrsRaw)) { '' } else { $gvrsRaw.ToString([System.Globalization.CultureInfo]::InvariantCulture) }
           $gvrsEwmaString = if ([double]::IsNaN($gvrsEwma)) { '' } else { $gvrsEwma.ToString([System.Globalization.CultureInfo]::InvariantCulture) }
+          $promotionBlock = if ($health.PSObject.Properties.Name -contains 'promotion' -and $null -ne $health.promotion) { $health.promotion } else { $null }
+          $promotionCandidates = if ($promotionBlock -ne $null -and $promotionBlock.PSObject.Properties.Name -contains 'candidates') { (@($promotionBlock.candidates) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count } else { 0 }
+          $promotionProbationDays = if ($promotionBlock -ne $null -and $promotionBlock.PSObject.Properties.Name -contains 'probation_days') { [int]$promotionBlock.probation_days } else { 0 }
+          $promotionMinTrades = if ($promotionBlock -ne $null -and $promotionBlock.PSObject.Properties.Name -contains 'min_trades') { [int]$promotionBlock.min_trades } else { 0 }
 
           if (-not $connected) {
             throw "Expected connected=true but found connected=$connected"
@@ -182,6 +186,9 @@ jobs:
           "DAILY_MONITOR_GVRS_RAW=$gvrsRawString" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_GVRS_EWMA=$gvrsEwmaString" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_GVRS_BUCKET=$gvrsBucket" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DAILY_MONITOR_PROMOTION_CANDIDATES=$promotionCandidates" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DAILY_MONITOR_PROMOTION_PROBATION_DAYS=$promotionProbationDays" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DAILY_MONITOR_PROMOTION_MIN_TRADES=$promotionMinTrades" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Upload health artifact
         if: always()
@@ -223,10 +230,13 @@ jobs:
           $gvrsRawFormatted = if ([double]::IsNaN($gvrsRawValue)) { 'n/a' } else { ('{0:0.000}' -f $gvrsRawValue) }
           $gvrsEwmaFormatted = if ([double]::IsNaN($gvrsEwmaValue)) { 'n/a' } else { ('{0:0.000}' -f $gvrsEwmaValue) }
           $gvrsBucket = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_GVRS_BUCKET)) { 'unknown' } else { $env:DAILY_MONITOR_GVRS_BUCKET }
+          $promotionCandidates = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_PROMOTION_CANDIDATES)) { 'n/a' } else { $env:DAILY_MONITOR_PROMOTION_CANDIDATES }
+          $promotionProbationDays = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_PROMOTION_PROBATION_DAYS)) { 'n/a' } else { $env:DAILY_MONITOR_PROMOTION_PROBATION_DAYS }
+          $promotionMinTrades = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_PROMOTION_MIN_TRADES)) { 'n/a' } else { $env:DAILY_MONITOR_PROMOTION_MIN_TRADES }
           $heartbeatFormatted = ('{0:0.0}' -f $heartbeatAge)
           $streamHeartbeatFormatted = ('{0:0.0}' -f $streamHeartbeatAge)
           $barLagString = $barLag.ToString([System.Globalization.CultureInfo]::InvariantCulture)
-          $line = "daily-monitor: adapter={0} connected={1} last_heartbeat_utc={2} heartbeat_age={3}s stream_connected={4} stream_heartbeat_age={5}s bar_lag_ms={6} open_positions={7} active_orders={8} risk_events_total={9} alerts_total={10} last_decision_utc={11} timeframes_active={12} decisions_total={13} loop_iterations_total={14} risk_config_hash={15} risk_blocks_total={16} risk_throttles_total={17} order_rejects_total={18} gvrs_raw={19} gvrs_ewma={20} gvrs_bucket={21}" -f $adapter, $connected, $heartbeatIso, $heartbeatFormatted, $streamConnected, $streamHeartbeatFormatted, $barLagString, $openPositions, $activeOrders, $riskEvents, $alertsTotal, $lastDecisionIso, $timeframes, $decisionsTotal, $loopIterations, $riskConfigHash, $riskBlocksTotal, $riskThrottlesTotal, $orderRejectsTotal, $gvrsRawFormatted, $gvrsEwmaFormatted, $gvrsBucket
+          $line = "daily-monitor: adapter={0} connected={1} last_heartbeat_utc={2} heartbeat_age={3}s stream_connected={4} stream_heartbeat_age={5}s bar_lag_ms={6} open_positions={7} active_orders={8} risk_events_total={9} alerts_total={10} last_decision_utc={11} timeframes_active={12} decisions_total={13} loop_iterations_total={14} risk_config_hash={15} risk_blocks_total={16} risk_throttles_total={17} order_rejects_total={18} gvrs_raw={19} gvrs_ewma={20} gvrs_bucket={21} promotion_candidates={22} promotion_probation_days={23} promotion_min_trades={24}" -f $adapter, $connected, $heartbeatIso, $heartbeatFormatted, $streamConnected, $streamHeartbeatFormatted, $barLagString, $openPositions, $activeOrders, $riskEvents, $alertsTotal, $lastDecisionIso, $timeframes, $decisionsTotal, $loopIterations, $riskConfigHash, $riskBlocksTotal, $riskThrottlesTotal, $orderRejectsTotal, $gvrsRawFormatted, $gvrsEwmaFormatted, $gvrsBucket, $promotionCandidates, $promotionProbationDays, $promotionMinTrades
           Write-Host $line
           Set-Content -Path (Join-Path 'scratch' 'summary.txt') -Value $line -Encoding UTF8
           Add-Content -Encoding UTF8 -Path $env:GITHUB_STEP_SUMMARY -Value "## daily-monitor verdict"

@@ -26,4 +26,5 @@ public readonly record struct EngineMetricsSnapshot(
     double? GvrsRaw,
     double? GvrsEwma,
     string? GvrsBucket,
-    string PromotionConfigHash);
+    string PromotionConfigHash,
+    PromotionTelemetrySnapshot? PromotionTelemetry);

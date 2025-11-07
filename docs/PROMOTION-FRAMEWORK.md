@@ -49,3 +49,13 @@ Sample configs ship with `promotion.enabled` set to `true` purely to surface tel
 Phase 2 (per Blueprint §7.1) will implement runtime accounting, trade
 aggregation, and promotion/demotion decisions. Phase 1 intentionally makes no
 changes to execution or journaling paths.
+
+## Phase 2 — Telemetry surfaces
+
+Phase 2 keeps promotion logic in telemetry-only mode but surfaces the config everywhere Ops needs it:
+
+- `/health` exposes `promotion_config_hash` plus a nested `promotion` object (candidates, probation_days, min_trades, promotion_threshold, demotion_threshold). When the block is absent the property is `null`.
+- `/metrics` adds gauges `engine_promotion_candidates_total`, `engine_promotion_probation_days`, `engine_promotion_min_trades`, `engine_promotion_threshold`, `engine_demotion_threshold`, and keeps the `engine_promotion_config_hash{hash="…"}` one-hot.
+- `daily-monitor` appends `promotion_candidates`, `promotion_probation_days`, and `promotion_min_trades` to the verdict line and archives the same block in `daily-monitor-health/health.json`.
+- `tools/PromotionProbe` plus `m7-promotion-proof.yml` provide deterministic evidence by loading the sample configs, emitting `/health`, `/metrics`, and summary artifacts, and grepping for the new fields.
+- Demo configs continue to ship with `promotion.enabled=true` purely so telemetry stays populated; no runtime promotion/demotion takes place until Phase 3.
