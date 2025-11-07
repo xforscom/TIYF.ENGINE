@@ -51,5 +51,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: promotion-proof-${{ github.event.inputs.ref }}
+          name: promotion-proof-${{ replace(github.event.inputs.ref, "/", "-") }}
           path: proof-artifacts/promotion-proof
