@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Linq;
 using System.Text.Json;
 using TiYf.Engine.Core;
 using TiYf.Engine.Host;
@@ -96,7 +97,7 @@ static object? BuildPromotionBlock(PromotionConfig promotion)
 
     return new
     {
-        candidates = promotion.ShadowCandidates.ToArray(),
+        candidates = promotion.ShadowCandidates?.ToArray() ?? Array.Empty<string>(),
         probation_days = promotion.ProbationDays,
         min_trades = promotion.MinTrades,
         promotion_threshold = promotion.PromotionThreshold,

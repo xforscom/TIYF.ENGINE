@@ -6,12 +6,6 @@ on:
 jobs:
   proof:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-    concurrency:
-      group: m7-promotion-proof-${{ github.ref }}
-      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
 
@@ -47,7 +41,6 @@ jobs:
           jq '.promotion' proof-artifacts/m7-promotion/health.json
 
       - name: Upload proof artifacts
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: m7-promotion-proof-artifacts
