@@ -27,6 +27,7 @@ public sealed class EngineHostState
     private DateTime? _loopStartUtc;
     private string _riskConfigHash = string.Empty;
     private string _promotionConfigHash = string.Empty;
+    private PromotionTelemetrySnapshot? _promotionTelemetry;
     private long _riskBlocksTotal;
     private long _riskThrottlesTotal;
     private readonly Dictionary<string, long> _riskBlocksByGate = new(StringComparer.OrdinalIgnoreCase);
@@ -331,11 +332,29 @@ public sealed class EngineHostState
         }
     }
 
-    public void SetPromotionConfigHash(string hash)
+    public void SetPromotionConfig(PromotionConfig? promotion)
     {
         lock (_sync)
         {
-            _promotionConfigHash = hash ?? string.Empty;
+            if (promotion is null || string.IsNullOrWhiteSpace(promotion.ConfigHash))
+            {
+                _promotionTelemetry = null;
+                _promotionConfigHash = string.Empty;
+                return;
+            }
+
+            var candidates = (promotion.ShadowCandidates ?? Array.Empty<string>())
+                .Where(c => !string.IsNullOrWhiteSpace(c))
+                .Select(c => c.Trim())
+                .ToArray();
+
+            _promotionTelemetry = new PromotionTelemetrySnapshot(
+                candidates,
+                Math.Max(0, promotion.ProbationDays),
+                Math.Max(0, promotion.MinTrades),
+                ClampProbability(promotion.PromotionThreshold),
+                ClampProbability(promotion.DemotionThreshold));
+            _promotionConfigHash = promotion.ConfigHash ?? string.Empty;
         }
     }
 
@@ -413,7 +432,8 @@ public sealed class EngineHostState
                 slippage_model = _slippageModel,
                 gvrs_raw = metrics.GvrsRaw,
                 gvrs_ewma = metrics.GvrsEwma,
-                gvrs_bucket = metrics.GvrsBucket
+                gvrs_bucket = metrics.GvrsBucket,
+                promotion = CreatePromotionHealthUnsafe()
             };
         }
     }
@@ -452,7 +472,8 @@ public sealed class EngineHostState
             _gvrsRaw,
             _gvrsEwma,
             _gvrsBucket,
-            _promotionConfigHash);
+            _promotionConfigHash,
+            _promotionTelemetry);
     }
 
     private static DateTime? NormalizeNullableUtc(DateTime? utc)
@@ -465,6 +486,26 @@ public sealed class EngineHostState
     private static DateTime NormalizeUtc(DateTime utc)
     {
         return utc.Kind == DateTimeKind.Utc ? utc : DateTime.SpecifyKind(utc, DateTimeKind.Utc);
+    }
+
+    private object? CreatePromotionHealthUnsafe()
+    {
+        if (_promotionTelemetry is not { } promotion) return null;
+        return new
+        {
+            candidates = promotion.Candidates.ToArray(),
+            probation_days = promotion.ProbationDays,
+            min_trades = promotion.MinTrades,
+            promotion_threshold = promotion.PromotionThreshold,
+            demotion_threshold = promotion.DemotionThreshold
+        };
+    }
+
+    private static decimal ClampProbability(decimal value)
+    {
+        if (value < 0m) return 0m;
+        if (value > 1m) return 1m;
+        return value;
     }
 
 }
