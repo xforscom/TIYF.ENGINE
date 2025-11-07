@@ -38,7 +38,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -f tools/PromotionProbe/PromotionProbe.csproj || { echo "missing tools/PromotionProbe on ref=${{ github.event.inputs.ref }}" >&2; exit 1; }
           out="proof-artifacts/promotion-proof"
           mkdir -p "$out"
           printf '%s\n' "${{ github.event.inputs.ref }}" > "$out/ref.txt"
