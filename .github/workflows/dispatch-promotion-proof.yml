@@ -11,6 +11,13 @@ on:
 jobs:
   promotion-proof:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    concurrency:
+      group: dispatch-promotion-proof-${{ github.event.inputs.ref }}
+      cancel-in-progress: true
+
     steps:
       - name: Checkout requested ref
         uses: actions/checkout@v4
@@ -22,16 +29,15 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Restore & Build
-        run: |
-          dotnet restore
-          dotnet build -c Release --no-restore
-
-      - name: Run PromotionProbe
+      - name: Run PromotionProbe and verify metrics
+        shell: bash
         run: |
           set -euo pipefail
+          test -f tools/PromotionProbe/PromotionProbe.csproj || { echo "missing tools/PromotionProbe on ref=${{ github.event.inputs.ref }}" >&2; exit 1; }
           out="proof-artifacts/promotion-proof"
           mkdir -p "$out"
+          dotnet restore
+          dotnet build -c Release --no-restore
           dotnet run --project tools/PromotionProbe/PromotionProbe.csproj -c Release -- --config sample-config.demo.json --output "$out"
           test -s "$out/metrics.txt"
           grep -E '^engine_promotion_candidates_total ' "$out/metrics.txt"
@@ -42,6 +48,7 @@ jobs:
           grep -E '^engine_promotion_config_hash\{hash="' "$out/metrics.txt"
 
       - name: Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: promotion-proof-${{ github.event.inputs.ref }}
