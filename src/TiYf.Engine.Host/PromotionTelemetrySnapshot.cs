@@ -9,5 +9,5 @@ public readonly record struct PromotionTelemetrySnapshot(
     decimal PromotionThreshold,
     decimal DemotionThreshold)
 {
-    public int CandidatesTotal => Candidates?.Count ?? 0;
+    public int CandidatesTotal => Candidates.Count;
 }
