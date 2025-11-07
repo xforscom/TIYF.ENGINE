@@ -11,13 +11,6 @@ on:
 jobs:
   promotion-proof:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-    concurrency:
-      group: dispatch-promotion-proof-${{ github.event.inputs.ref }}
-      cancel-in-progress: true
-
     steps:
       - name: Checkout requested ref
         uses: actions/checkout@v4
@@ -36,6 +29,7 @@ jobs:
 
       - name: Run PromotionProbe and verify metrics
         shell: bash
+      - name: Run PromotionProbe
         run: |
           set -euo pipefail
           out="proof-artifacts/promotion-proof"
@@ -51,7 +45,6 @@ jobs:
           grep -E '^engine_promotion_config_hash\{hash="' "$out/metrics.txt"
 
       - name: Upload artifacts
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: promotion-proof
