@@ -15,7 +15,7 @@ jobs:
     permissions:
       contents: read
     concurrency:
-      group: dispatch-promotion-proof-${{ replace(github.event.inputs.ref, '/', '-') }}
+      group: dispatch-promotion-proof-${{ github.event.inputs.ref }}
       cancel-in-progress: true
 
     steps:
@@ -29,6 +29,11 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      - name: Restore & Build
+        run: |
+          dotnet restore
+          dotnet build -c Release --no-restore
+
       - name: Run PromotionProbe and verify metrics
         shell: bash
         run: |
@@ -36,8 +41,7 @@ jobs:
           test -f tools/PromotionProbe/PromotionProbe.csproj || { echo "missing tools/PromotionProbe on ref=${{ github.event.inputs.ref }}" >&2; exit 1; }
           out="proof-artifacts/promotion-proof"
           mkdir -p "$out"
-          dotnet restore
-          dotnet build -c Release --no-restore
+          printf '%s\n' "${{ github.event.inputs.ref }}" > "$out/ref.txt"
           dotnet run --project tools/PromotionProbe/PromotionProbe.csproj -c Release -- --config sample-config.demo.json --output "$out"
           test -s "$out/metrics.txt"
           grep -E '^engine_promotion_candidates_total ' "$out/metrics.txt"
@@ -51,5 +55,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: promotion-proof-${{ replace(github.event.inputs.ref, '/', '-') }}
+          name: promotion-proof
           path: proof-artifacts/promotion-proof
