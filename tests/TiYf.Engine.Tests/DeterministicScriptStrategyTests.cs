@@ -12,7 +12,12 @@ public class DeterministicScriptStrategyTests
         var start = new DateTime(2025, 10, 5, 0, 0, 0, DateTimeKind.Utc);
         var seq = Enumerable.Range(0, 120).Select(i => start.AddMinutes(i)).ToList(); // 120 minutes window
         var clock = new DeterministicSequenceClock(seq);
-        var instruments = new[] { new Instrument(new InstrumentId("I_EURUSD"), "EURUSD", 5), new Instrument(new InstrumentId("I_USDJPY"), "USDJPY", 3), new Instrument(new InstrumentId("I_XAUUSD"), "XAUUSD", 2) };
+        var instruments = new[]
+        {
+            new Instrument(new InstrumentId("I_EURUSD"), "EURUSD", 5, 0.0001m),
+            new Instrument(new InstrumentId("I_USDJPY"), "USDJPY", 3, 0.01m),
+            new Instrument(new InstrumentId("I_XAUUSD"), "XAUUSD", 2, 0.1m)
+        };
         var strat = new DeterministicScriptStrategy(clock, instruments, seq.First());
 
         var emitted = new List<DeterministicScriptStrategy.ScheduledAction>();

@@ -26,6 +26,7 @@ public sealed record EngineConfig(
     string BrokerId = "stub-sim",
     string AccountId = "account-stub",
     string? SlippageModel = "zero",
+    SlippageProfile? Slippage = null,
     string[]? Instruments = null,
     string[]? Intervals = null
 );
@@ -127,6 +128,7 @@ public sealed class EngineLoop
     private readonly Action? _onOrderRejected;
     private readonly Action<int, int, long>? _onIdempotencyMetrics;
     private readonly Action<string>? _warnCallback;
+    private readonly Action<decimal>? _onSlippageApplied;
     private readonly IIdempotencyPersistence? _idempotencyPersistence;
     private long _idempotencyEvictions;
     private bool _orderEvictionWarned;
@@ -159,6 +161,13 @@ public sealed class EngineLoop
             ReportIdempotencyMetrics();
             _idempotencyPersistence?.RemoveKey(IdempotencyKind.Order, key);
         }
+    }
+
+    private decimal ApplySlippage(decimal intentPrice, bool isBuy, string symbol, long units)
+    {
+        var adjusted = _slippageModel.Apply(intentPrice, isBuy, symbol, units, UtcNow());
+        _onSlippageApplied?.Invoke(adjusted - intentPrice);
+        return adjusted;
     }
 
     private bool IsDuplicateCancel(string key, DateTime now)
@@ -497,7 +506,7 @@ public sealed class EngineLoop
         Console.WriteLine($"OrderSend ok decision={decisionId} brokerOrderId={id} symbol={symbol}");
     }
 
-    public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action<Bar>? onBarEmitted = null, Action<int, int>? onPositionMetrics = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, string sourceAdapter = "stub", long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true, SentimentGuardConfig? sentimentConfig = null, string? penaltyConfig = null, bool forcePenalty = false, bool ciPenaltyScaffold = false, string riskMode = "off", string? riskConfigHash = null, IReadOnlyList<NewsEvent>? newsEvents = null, IReadOnlyDictionary<long, string>? timeframeLabels = null, Action<string, bool>? riskGateCallback = null, Action<MarketContextService.GvrsSnapshot>? gvrsSnapshotCallback = null, ISlippageModel? slippageModel = null, Func<DateTime>? utcNow = null, Action<string, long>? orderAcceptedCallback = null, Action? orderRejectedCallback = null, Action<int, int, long>? idempotencyMetricsCallback = null, Action<string>? warnCallback = null, IIdempotencyPersistence? idempotencyPersistence = null, IdempotencySnapshot? persistedIdempotencySnapshot = null)
+    public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action<Bar>? onBarEmitted = null, Action<int, int>? onPositionMetrics = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, string sourceAdapter = "stub", long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true, SentimentGuardConfig? sentimentConfig = null, string? penaltyConfig = null, bool forcePenalty = false, bool ciPenaltyScaffold = false, string riskMode = "off", string? riskConfigHash = null, IReadOnlyList<NewsEvent>? newsEvents = null, IReadOnlyDictionary<long, string>? timeframeLabels = null, Action<string, bool>? riskGateCallback = null, Action<MarketContextService.GvrsSnapshot>? gvrsSnapshotCallback = null, ISlippageModel? slippageModel = null, Func<DateTime>? utcNow = null, Action<string, long>? orderAcceptedCallback = null, Action? orderRejectedCallback = null, Action<int, int, long>? idempotencyMetricsCallback = null, Action<string>? warnCallback = null, Action<decimal>? slippageMetricsCallback = null, IIdempotencyPersistence? idempotencyPersistence = null, IdempotencySnapshot? persistedIdempotencySnapshot = null)
     {
         _clock = clock; _builders = builders; _barKeyTracker = tracker; _journal = journal; _ticks = ticks; _barEventType = barEventType; _seq = (journal is FileJournalWriter fj ? fj.NextSequence : 1UL) - 1UL; _onBarEmitted = onBarEmitted; _onPositionMetrics = onPositionMetrics; _riskFormulas = riskFormulas; _basketAggregator = basketAggregator; _configHash = configHash; _schemaVersion = schemaVersion; _riskEnforcer = riskEnforcer; _riskConfig = riskConfig; _equityOverride = equityOverride; _deterministicStrategy = deterministicStrategy; _execution = execution; _positions = positions; _tradesWriter = tradesWriter; _dataVersion = dataVersion; _sourceAdapter = string.IsNullOrWhiteSpace(sourceAdapter) ? "stub" : sourceAdapter; _riskProbeEnabled = riskProbeEnabled; _sentimentConfig = sentimentConfig; _penaltyMode = penaltyConfig ?? "off"; _forcePenalty = forcePenalty; _ciPenaltyScaffold = ciPenaltyScaffold; _riskMode = string.IsNullOrWhiteSpace(riskMode) ? "off" : riskMode.ToLowerInvariant();
         _sizeUnitsFx = sizeUnitsFx; _sizeUnitsXau = sizeUnitsXau;
@@ -515,6 +524,7 @@ public sealed class EngineLoop
         _onOrderRejected = orderRejectedCallback;
         _onIdempotencyMetrics = idempotencyMetricsCallback;
         _warnCallback = warnCallback;
+        _onSlippageApplied = slippageMetricsCallback;
         _idempotencyPersistence = idempotencyPersistence;
         if (persistedIdempotencySnapshot.HasValue)
         {
@@ -794,7 +804,7 @@ public sealed class EngineLoop
 
                                     var timeframeLabel = ResolveTimeframeLabel(interval);
                                     var intentPrice = bar.Close;
-                                    var slippedPrice = _slippageModel.Apply(intentPrice, closeSide == TradeSide.Buy, act.Symbol, units, UtcNow());
+                                    var slippedPrice = ApplySlippage(intentPrice, closeSide == TradeSide.Buy, act.Symbol, units);
                                     var req = new OrderRequest(act.DecisionId, act.Symbol, closeSide, units, tickMinute, slippedPrice);
                                     var outcome = await DispatchOrderAsync(req, timeframeLabel, isExit: true, intentPrice, slippedPrice, ct);
                                     if (outcome.Status != ExecutionDispatchStatus.Accepted)
@@ -882,7 +892,7 @@ public sealed class EngineLoop
                                         continue;
                                     }
                                     var intentPrice = bar.Close;
-                                    var slippedPrice = _slippageModel.Apply(intentPrice, side == TradeSide.Buy, act.Symbol, finalUnits, UtcNow());
+                                    var slippedPrice = ApplySlippage(intentPrice, side == TradeSide.Buy, act.Symbol, finalUnits);
                                     var req = new OrderRequest(act.DecisionId, act.Symbol, side, finalUnits, tickMinute, slippedPrice);
                                     var outcome = await DispatchOrderAsync(req, timeframeLabel, isExit: false, intentPrice, slippedPrice, ct);
                                     if (outcome.Status != ExecutionDispatchStatus.Accepted)
@@ -989,7 +999,7 @@ public sealed class EngineLoop
                             var snapshotPositions = _openPositions.Select(o => (o.InstrumentId.Value, o.InitialRiskMoneyAccountCcy)).ToList();
                             var snapshot = new BasketSnapshot(snapshotPositions);
                             var riskCfg = _riskConfig ?? new RiskConfig();
-                            var ctx = new RiskContext(equity, snapshot, riskCfg, new InMemoryInstrumentCatalog(new[] { new Instrument(new InstrumentId(bar.InstrumentId.Value), "SYM", 2) }), new PassthroughFx());
+                            var ctx = new RiskContext(equity, snapshot, riskCfg, new InMemoryInstrumentCatalog(new[] { new Instrument(new InstrumentId(bar.InstrumentId.Value), "SYM", 2, 0.0001m) }), new PassthroughFx());
                             var enforcement = _riskEnforcer.Enforce(proposal, ctx);
                             foreach (var alert in enforcement.Alerts)
                             {

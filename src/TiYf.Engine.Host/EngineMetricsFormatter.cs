@@ -54,6 +54,11 @@ public static class EngineMetricsFormatter
         {
             AppendMetric(builder, "engine_slippage_model", 1, "model", snapshot.SlippageModel);
         }
+        if (snapshot.SlippageLastPriceDelta.HasValue)
+        {
+            AppendMetric(builder, "engine_slippage_last_price_delta", snapshot.SlippageLastPriceDelta.Value);
+        }
+        AppendMetric(builder, "engine_slippage_adjusted_orders_total", snapshot.SlippageAdjustedOrdersTotal);
         if (!string.IsNullOrWhiteSpace(snapshot.PromotionConfigHash))
         {
             AppendMetric(builder, "engine_promotion_config_hash", 1, "hash", snapshot.PromotionConfigHash);

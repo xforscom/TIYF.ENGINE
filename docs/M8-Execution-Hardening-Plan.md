@@ -51,10 +51,11 @@ This document outlines the implementation plan for M8 – Execution Hardening (B
   - Add metrics (`engine_slippage_applied_total`, per-instrument averages) and expose chosen profile via `/health`.
   - Update simulator + proof harnesses (m6/m7 + new m8 proof) to validate that expected slippage is applied (widened PnL, correct VWAP) while keeping deterministic results.
   - **Non-scope:** No production broker changes beyond applying slippage at intent time; reconciliation+idempotency logic remains as from phases A/B.
+- **Current status:** Fixed-bps preset is wired end-to-end (config parser, execution hook, `/metrics` + `/health`, and `m8-slippage-proof`). Defaults remain at `zero` in demo configs until Ops flips a config that opts into the preset.
 - **Touch points:** `TiYf.Engine.Core/Slippage`, `TiYf.Engine.Sim` (fixtures + tests), host telemetry, docs describing profile tuning.
 - **Proofs/tests:**
   - Unit tests for slippage calculation per instrument/time bucket.
-  - Extend `m6-execution-proof` (or new `m8-slippage-proof`) to compare expected vs actual fills under the realistic model.
+  - Extend `m6-execution-proof` (or new `m8-slippage-proof`) to compare expected vs actual fills under the realistic model. (`m8-slippage-proof` now runs the deterministic `SlippageProbe` harness against the fixed-bps table.)
 - **Risks:**
   - Breaking deterministic proofs if randomness introduced; keep deterministic tables.
   - Impact on trading PnL / risk calculations; coordinate with Ops before enabling in live adapters.

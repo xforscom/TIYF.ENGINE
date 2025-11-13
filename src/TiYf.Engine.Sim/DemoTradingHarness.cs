@@ -170,7 +170,7 @@ public static class DemoTradingHarness
         var instruments = LoadInstruments(rawConfig, configDir);
         if (instruments.Count == 0)
             throw new InvalidOperationException("Demo harness requires at least one instrument in instrumentsFile");
-        var catalog = new InMemoryInstrumentCatalog(instruments.Select(i => new Instrument(new InstrumentId(i.Symbol), i.Symbol, i.PriceDecimals)));
+        var catalog = new InMemoryInstrumentCatalog(instruments.Select(i => new Instrument(new InstrumentId(i.Symbol), i.Symbol, i.PriceDecimals, i.PipSize)));
 
         var runId = ResolveRunId(options.RunId, config.RunId, rawConfig, timestamps[0]);
         var journalRoot = ResolveJournalRoot(options.JournalRoot, config.JournalRoot, rawConfig, configDir);

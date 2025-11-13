@@ -61,7 +61,7 @@ SampleDataSeeder.EnsureSample(Directory.GetCurrentDirectory());
 var (cfg, cfgHash, raw) = EngineConfigLoader.Load(fullConfigPath);
 Console.WriteLine($"Loaded config RunId={cfg.RunId} hash={cfgHash}");
 
-Instrument instrument = new Instrument(new InstrumentId("INST1"), "FOO", 2); // legacy fallback (non-M0)
+Instrument instrument = new Instrument(new InstrumentId("INST1"), "FOO", 2, 0.0001m); // legacy fallback (non-M0)
 var catalog = new InMemoryInstrumentCatalog(new[] { instrument });
 List<Instrument> m0Instruments = new();
 bool isM0 = false;
@@ -88,7 +88,7 @@ if (isM0)
         if (string.IsNullOrWhiteSpace(instFile)) throw new Exception("instrumentsFile path missing");
         var specs = TiYf.Engine.Core.Instruments.InstrumentsCsvLoader.Load(instFile!);
         foreach (var s in specs)
-            m0Instruments.Add(new Instrument(new InstrumentId(s.Symbol), s.Symbol, s.PriceDecimals));
+            m0Instruments.Add(new Instrument(new InstrumentId(s.Symbol), s.Symbol, s.PriceDecimals, s.PipSize));
         catalog = new InMemoryInstrumentCatalog(m0Instruments);
         if (raw.RootElement.TryGetProperty("output", out var outNode) && outNode.TryGetProperty("journalDir", out var jd) && jd.ValueKind == JsonValueKind.String)
             m0JournalDir = jd.GetString();

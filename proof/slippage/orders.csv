@@ -1,0 +1,4 @@
+symbol,side,intent_price,units
+EURUSD,buy,1.08500,100000
+EURUSD,sell,1.08750,50000
+XAUUSD,buy,1950.00,10
