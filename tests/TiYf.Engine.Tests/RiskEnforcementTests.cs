@@ -8,7 +8,7 @@ public class RiskEnforcementTests
     private sealed class StubCatalog : IInstrumentCatalog
     {
         private readonly Instrument _inst;
-        public StubCatalog(string id = "INST1") => _inst = new Instrument(new InstrumentId(id), id, 2);
+        public StubCatalog(string id = "INST1") => _inst = new Instrument(new InstrumentId(id), id, 2, 0.0001m);
         public bool TryGet(InstrumentId id, out Instrument instrument) { instrument = _inst; return true; }
         public IEnumerable<Instrument> All() { yield return _inst; }
     }

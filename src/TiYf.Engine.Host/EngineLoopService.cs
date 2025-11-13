@@ -214,8 +214,9 @@ internal sealed class EngineLoopService : BackgroundService
         var riskMode = ResolveRiskMode(rawDoc);
         var dataVersion = ComputeDataVersion(rawDoc, _configDirectory);
 
-        var slippageName = SlippageModelFactory.Normalize(config.SlippageModel);
-        var slippageModel = SlippageModelFactory.Create(slippageName);
+        var slippageProfile = config.Slippage;
+        var slippageName = SlippageModelFactory.Normalize(slippageProfile?.Model ?? config.SlippageModel);
+        var slippageModel = SlippageModelFactory.Create(slippageProfile, slippageName);
         _state.SetSlippageModel(slippageName);
         _state.UpdateIdempotencyMetrics(0, 0, 0);
 
@@ -305,6 +306,10 @@ internal sealed class EngineLoopService : BackgroundService
                 _state.UpdateIdempotencyMetrics(orderCache, cancelCache, evictions);
             },
             warnCallback: message => _logger.LogWarning("{Message}", message),
+            slippageMetricsCallback: delta =>
+            {
+                _state.RecordSlippage(delta);
+            },
             idempotencyPersistence: _idempotencyPersistence,
             persistedIdempotencySnapshot: persistedIdempotency);
 
@@ -807,7 +812,7 @@ internal sealed class EngineLoopService : BackgroundService
         var instruments = specs.Select(spec =>
         {
             var symbol = NormalizeInstrument(spec.Symbol);
-            return new Instrument(new InstrumentId(symbol), symbol, spec.PriceDecimals);
+            return new Instrument(new InstrumentId(symbol), symbol, spec.PriceDecimals, spec.PipSize);
         }).ToList();
 
         return new InMemoryInstrumentCatalog(instruments);

@@ -23,6 +23,8 @@ public readonly record struct EngineMetricsSnapshot(
     IReadOnlyDictionary<string, long> IdempotencyCacheSizes,
     long IdempotencyEvictionsTotal,
     string SlippageModel,
+    double? SlippageLastPriceDelta,
+    long SlippageAdjustedOrdersTotal,
     double? GvrsRaw,
     double? GvrsEwma,
     string? GvrsBucket,

@@ -48,7 +48,7 @@ public readonly record struct InstrumentId(string Value)
     public override string ToString() => Value;
 }
 
-public sealed record Instrument(InstrumentId Id, string Symbol, int PriceDecimals);
+public sealed record Instrument(InstrumentId Id, string Symbol, int PriceDecimals, decimal PipSize);
 
 public interface IInstrumentCatalog
 {

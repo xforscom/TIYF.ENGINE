@@ -32,7 +32,7 @@ public class BarV1EmissionTests
 
         // Build runtime pieces manually (avoid needing external config file)
         var (config, configHash, _) = (cfg, ConfigHash.Compute(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(cfg)), (System.Text.Json.JsonDocument?)null);
-        var instruments = File.ReadLines(instrFile).Skip(1).Where(l => !string.IsNullOrWhiteSpace(l)).Select(l => l.Split(',')).Select(p => new Instrument(new InstrumentId(p[0]), p[1], int.Parse(p[2]))).ToList();
+        var instruments = File.ReadLines(instrFile).Skip(1).Where(l => !string.IsNullOrWhiteSpace(l)).Select(l => l.Split(',')).Select(p => new Instrument(new InstrumentId(p[0]), p[1], int.Parse(p[2]), 0.0001m)).ToList();
         var catalog = new InMemoryInstrumentCatalog(instruments);
         var ticks = new CsvTickSource(tickFile, new InstrumentId("I1"));
         var clock = new DeterministicSequenceClock(ticks.Select(t => t.UtcTimestamp));

@@ -74,6 +74,32 @@ public class ExecutionHardeningTests
     }
 
     [Fact]
+    public void SlippageModel_AdjustsPriceAndReportsDelta()
+    {
+        decimal? observed = null;
+        var profile = new SlippageProfile(
+            "fixed_bps",
+            new FixedBpsSlippageProfile(DefaultBps: 1.25m, Instruments: new Dictionary<string, decimal> { ["EURUSD"] = 2m }));
+        var model = SlippageModelFactory.Create(profile);
+        var adapter = new TestExecutionAdapter(order => ExecutionResultSuccess(order, order.PriceIntent ?? 0m));
+        var journal = new TestJournalWriter();
+        var loop = CreateLoop(
+            adapter,
+            journal,
+            utcNow: () => BaseTime,
+            slippageCallback: delta => observed = delta,
+            slippageModelOverride: model);
+
+        var applyMethod = typeof(EngineLoop).GetMethod("ApplySlippage", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var intent = 1.1000m;
+        var adjusted = (decimal)applyMethod.Invoke(loop, new object[] { intent, true, "EURUSD", 100L })!;
+        var expected = model.Apply(intent, true, "EURUSD", 100, BaseTime);
+
+        Assert.Equal(expected, adjusted);
+        Assert.Equal(adjusted - intent, observed);
+    }
+
+    [Fact]
     public async Task Dispatch_SizeLimitBlocksAndEmitsAlert()
     {
         var adapter = new TestExecutionAdapter(
@@ -198,7 +224,9 @@ public class ExecutionHardeningTests
         Action<string, long>? onOrderAccepted = null,
         Action? onOrderRejected = null,
         Action<int, int, long>? onIdempotencyMetrics = null,
-        Action<string>? onWarn = null)
+        Action<string>? onWarn = null,
+        Action<decimal>? slippageCallback = null,
+        ISlippageModel? slippageModelOverride = null)
     {
         var clock = new DeterministicSequenceClock(new[] { BaseTime });
         return new EngineLoop(
@@ -212,12 +240,13 @@ public class ExecutionHardeningTests
             positions: new PositionTracker(),
             riskConfig: riskConfig,
             sourceAdapter: "test-adapter",
-            slippageModel: new PassThroughSlippageModel(),
+            slippageModel: slippageModelOverride ?? new PassThroughSlippageModel(),
             utcNow: utcNow ?? (() => DateTime.UtcNow),
             orderAcceptedCallback: onOrderAccepted,
             orderRejectedCallback: onOrderRejected,
             idempotencyMetricsCallback: onIdempotencyMetrics,
-            warnCallback: onWarn);
+            warnCallback: onWarn,
+            slippageMetricsCallback: slippageCallback);
     }
 
     private static ExecutionResult ExecutionResultSuccess(OrderRequest order, decimal price) =>

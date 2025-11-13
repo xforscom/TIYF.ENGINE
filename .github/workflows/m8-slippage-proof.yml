@@ -1,0 +1,55 @@
+name: m8-slippage-proof
+
+on:
+  workflow_dispatch:
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    concurrency:
+      group: m8-slippage-proof-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure .NET install dir
+        uses: ./.github/actions/configure-dotnet
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.416'
+          dotnet-quality: ga
+          cache: false
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Run SlippageProbe
+        run: |
+          set -euo pipefail
+          out="proof-artifacts/m8-slippage-proof"
+          mkdir -p "$out"
+          dotnet run --project tools/SlippageProbe/SlippageProbe.csproj --configuration Release -- --config proof/slippage/slippage-config.json --orders proof/slippage/orders.csv --output "$out"
+
+      - name: Verify probe outputs
+        run: |
+          set -euo pipefail
+          ls -R proof-artifacts/m8-slippage-proof
+          grep -F "engine_slippage_model" proof-artifacts/m8-slippage-proof/metrics.txt
+          grep -F "slippage_probe_price_delta_total" proof-artifacts/m8-slippage-proof/metrics.txt
+          cat proof-artifacts/m8-slippage-proof/summary.txt
+
+      - name: Upload proof artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m8-slippage-proof-${{ github.ref_name }}
+          path: proof-artifacts/m8-slippage-proof

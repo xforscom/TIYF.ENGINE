@@ -44,6 +44,8 @@ public sealed class EngineHostState
     private int _idempotencyPersistedExpired;
     private DateTime? _idempotencyPersistenceLastLoadUtc;
     private string _slippageModel = "zero";
+    private double? _slippageLastPriceDelta;
+    private long _slippageAdjustedOrdersTotal;
     private double? _gvrsRaw;
     private double? _gvrsEwma;
     private string? _gvrsBucket;
@@ -143,6 +145,18 @@ public sealed class EngineHostState
         lock (_sync)
         {
             _slippageModel = string.IsNullOrWhiteSpace(model) ? "zero" : model.Trim().ToLowerInvariant();
+        }
+    }
+
+    public void RecordSlippage(decimal priceDelta)
+    {
+        lock (_sync)
+        {
+            _slippageLastPriceDelta = (double)priceDelta;
+            if (priceDelta != 0m)
+            {
+                _slippageAdjustedOrdersTotal++;
+            }
         }
     }
 
@@ -447,6 +461,7 @@ public sealed class EngineHostState
                 idempotency_evictions_total = _idempotencyEvictionsTotal,
                 idempotency_persistence = CreateIdempotencyPersistenceHealth(),
                 slippage_model = _slippageModel,
+                slippage = CreateSlippageHealthUnsafe(),
                 gvrs_raw = metrics.GvrsRaw,
                 gvrs_ewma = metrics.GvrsEwma,
                 gvrs_bucket = metrics.GvrsBucket,
@@ -487,6 +502,8 @@ public sealed class EngineHostState
             new Dictionary<string, long>(_idempotencyCacheSizes, StringComparer.OrdinalIgnoreCase),
             _idempotencyEvictionsTotal,
             _slippageModel,
+            _slippageLastPriceDelta,
+            _slippageAdjustedOrdersTotal,
             _gvrsRaw,
             _gvrsEwma,
             _gvrsBucket,
@@ -522,6 +539,15 @@ public sealed class EngineHostState
             min_trades = promotion.MinTrades,
             promotion_threshold = promotion.PromotionThreshold,
             demotion_threshold = promotion.DemotionThreshold
+        };
+    }
+
+    private object CreateSlippageHealthUnsafe()
+    {
+        return new
+        {
+            last_price_delta = _slippageLastPriceDelta,
+            adjusted_orders_total = _slippageAdjustedOrdersTotal
         };
     }
 

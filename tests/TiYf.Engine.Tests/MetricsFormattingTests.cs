@@ -29,6 +29,7 @@ public class MetricsFormattingTests
         state.UpdateIdempotencyMetrics(2, 1, 3);
         state.SetIdempotencyPersistenceStats(4, 1, DateTime.UtcNow);
         state.SetSlippageModel("zero");
+        state.RecordSlippage(0.0002m);
         state.RecordReconciliationTelemetry(ReconciliationStatus.Match, 0, DateTime.UtcNow);
 
         var snapshot = state.CreateMetricsSnapshot();
@@ -56,6 +57,8 @@ public class MetricsFormattingTests
         Assert.Contains("engine_idempotency_persisted_loaded 4", metricsText);
         Assert.Contains("engine_idempotency_persisted_expired_total 1", metricsText);
         Assert.Contains("engine_slippage_model{model=\"zero\"} 1", metricsText);
+        Assert.Contains("engine_slippage_last_price_delta 0.0002", metricsText);
+        Assert.Contains("engine_slippage_adjusted_orders_total 1", metricsText);
         Assert.Contains("engine_reconcile_mismatches_total", metricsText);
         Assert.Contains("engine_reconcile_last_status{status=\"match\"} 1", metricsText);
     }
@@ -79,6 +82,7 @@ public class MetricsFormattingTests
         state.UpdateIdempotencyMetrics(5, 4, 7);
         state.SetIdempotencyPersistenceStats(2, 1, DateTime.UtcNow);
         state.SetSlippageModel("fixed-test");
+        state.RecordSlippage(-0.00015m);
         state.RecordReconciliationTelemetry(ReconciliationStatus.Mismatch, 2, DateTime.UtcNow);
         var payload = state.CreateHealthPayload();
         var json = JsonSerializer.Serialize(payload);
@@ -111,6 +115,9 @@ public class MetricsFormattingTests
         Assert.Equal(5, cacheSize.GetProperty("order").GetInt64());
         Assert.Equal(4, cacheSize.GetProperty("cancel").GetInt64());
         Assert.Equal("fixed-test", root.GetProperty("slippage_model").GetString());
+        var slippage = root.GetProperty("slippage");
+        Assert.Equal(-0.00015, slippage.GetProperty("last_price_delta").GetDouble(), 6);
+        Assert.Equal(1, slippage.GetProperty("adjusted_orders_total").GetInt64());
         Assert.Equal(75, lastOrderSizes.GetProperty("GBPUSD").GetInt64());
         var reconciliation = root.GetProperty("reconciliation");
         Assert.Equal(2, reconciliation.GetProperty("mismatches_total").GetInt64());

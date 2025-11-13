@@ -1,0 +1,17 @@
+{
+  "SchemaVersion": "1.1.0",
+  "RunId": "SLIPPAGE-PROOF",
+  "InstrumentFile": "sample-instruments.csv",
+  "InputTicksFile": "sample-ticks.csv",
+  "JournalRoot": "journals",
+  "Slippage": {
+    "Model": "fixed_bps",
+    "FixedBps": {
+      "DefaultBps": 1.5,
+      "Instruments": {
+        "EURUSD": 0.8,
+        "XAUUSD": 2.0
+      }
+    }
+  }
+}

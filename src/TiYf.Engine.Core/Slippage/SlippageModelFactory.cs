@@ -4,13 +4,14 @@ namespace TiYf.Engine.Core.Slippage;
 
 public static class SlippageModelFactory
 {
-    public static ISlippageModel Create(string? name)
+    public static ISlippageModel Create(SlippageProfile? profile, string? legacyName = null)
     {
-        var normalized = Normalize(name);
+        var normalized = Normalize(profile?.Model ?? legacyName);
         return normalized switch
         {
             "zero" => new ZeroSlippageModel(),
-            _ => throw new ArgumentOutOfRangeException(nameof(name), name, "Unsupported slippage model")
+            "fixed_bps" => new FixedBpsSlippageModel(profile?.FixedBps ?? new FixedBpsSlippageProfile()),
+            _ => throw new ArgumentOutOfRangeException(nameof(profile), profile?.Model ?? legacyName, "Unsupported slippage model")
         };
     }
 
