@@ -10,15 +10,25 @@ on:
 jobs:
   sentiment:
     runs-on: [self-hosted, Linux, X64, tiyf-vps]
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    concurrency:
+      group: m3-sentiment-${{ github.job }}@${{ github.ref }}
+      cancel-in-progress: true
     strategy:
       fail-fast: false
       matrix:
         mode: [off, shadow, active]
     steps:
       - uses: actions/checkout@v4
+      - name: Configure .NET install dir
+        uses: ./.github/actions/configure-dotnet
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '8.0.416'
+          dotnet-quality: ga
+          cache: false
       - name: Ensure jq tool
         run: |
           set -euo pipefail
@@ -61,6 +71,12 @@ jobs:
   invariants:
     runs-on: [self-hosted, Linux, X64, tiyf-vps]
     needs: sentiment
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    concurrency:
+      group: m3-invariants@${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
       - name: Download journals artifacts
@@ -94,9 +110,13 @@ jobs:
             ls -R downloaded || true
             exit 1
           fi
+      - name: Configure .NET install dir
+        uses: ./.github/actions/configure-dotnet
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '8.0.416'
+          dotnet-quality: ga
+          cache: false
       - name: Restore
         run: dotnet restore
       - name: Build Release

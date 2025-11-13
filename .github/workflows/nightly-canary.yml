@@ -14,17 +14,18 @@ concurrency:
 jobs:
   build:
     runs-on: [self-hosted, Linux, X64, tiyf-vps]
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    concurrency:
+      group: nightly-canary-build@${{ github.ref }}
+      cancel-in-progress: true
     outputs:
       build_exit: ${{ steps.build_release.outputs.exit_code }}
     steps:
       - uses: actions/checkout@v4
       - name: Configure .NET install dir
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "DOTNET_INSTALL_DIR=${{ runner.temp }}/.dotnet" >> "$GITHUB_ENV"
-          echo "DOTNET_ROOT=${{ runner.temp }}/.dotnet" >> "$GITHUB_ENV"
-          echo "PATH=${{ runner.temp }}/.dotnet:${{ runner.temp }}/.dotnet/tools:${PATH}" >> "$GITHUB_ENV"
+        uses: ./.github/actions/configure-dotnet
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.416'
@@ -63,6 +64,12 @@ jobs:
   nightly-canary:
     needs: build
     runs-on: [self-hosted, Linux, X64, tiyf-vps]
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    concurrency:
+      group: nightly-canary-main@${{ github.ref }}
+      cancel-in-progress: true
     defaults:
       run:
         shell: bash
@@ -72,12 +79,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Configure .NET install dir
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "DOTNET_INSTALL_DIR=${{ runner.temp }}/.dotnet" >> "$GITHUB_ENV"
-          echo "DOTNET_ROOT=${{ runner.temp }}/.dotnet" >> "$GITHUB_ENV"
-          echo "PATH=${{ runner.temp }}/.dotnet:${{ runner.temp }}/.dotnet/tools:${PATH}" >> "$GITHUB_ENV"
+        uses: ./.github/actions/configure-dotnet
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.416'

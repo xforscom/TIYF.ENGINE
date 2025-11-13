@@ -28,6 +28,13 @@ jobs:
   demo-session:
     runs-on: [self-hosted, Linux, X64, tiyf-vps]
     environment: ctrader-demo
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      issues: write
+    concurrency:
+      group: demo-session-manual@${{ github.ref }}
+      cancel-in-progress: true
     defaults:
       run:
         shell: pwsh
@@ -282,10 +289,15 @@ jobs:
             Write-Warning "Execution policy change failed or is overridden: $($_.Exception.Message)"
           }
 
+      - name: Configure .NET install dir
+        uses: ./.github/actions/configure-dotnet
+
       - name: Setup .NET 8
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '8.0.416'
+          dotnet-quality: ga
+          cache: false
 
       - name: Preflight Values Checklist
         if: ${{ steps.adapter_context.outputs.adapter == 'ctrader-demo' }}

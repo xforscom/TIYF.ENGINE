@@ -36,6 +36,11 @@ jobs:
   demo-daily-oanda:
     runs-on: [self-hosted, Linux, X64, tiyf-vps]
     timeout-minutes: 20
+    permissions:
+      contents: read
+    concurrency:
+      group: demo-daily-oanda@${{ github.ref }}
+      cancel-in-progress: true
     defaults:
       run:
         shell: pwsh
@@ -104,12 +109,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure .NET install dir
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "DOTNET_INSTALL_DIR=${{ runner.temp }}/.dotnet" >> "$GITHUB_ENV"
-          echo "DOTNET_ROOT=${{ runner.temp }}/.dotnet" >> "$GITHUB_ENV"
-          echo "PATH=${{ runner.temp }}/.dotnet:${{ runner.temp }}/.dotnet/tools:${PATH}" >> "$GITHUB_ENV"
+        uses: ./.github/actions/configure-dotnet
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4

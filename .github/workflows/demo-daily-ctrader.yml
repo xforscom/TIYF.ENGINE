@@ -45,6 +45,13 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
+    permissions:
+      contents: write
+      issues: write
+      statuses: write
+    concurrency:
+      group: demo-daily-ctrader@${{ github.ref }}
+      cancel-in-progress: true
     defaults:
       run:
         shell: pwsh
@@ -116,12 +123,7 @@ jobs:
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
 
       - name: Configure .NET install dir
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "DOTNET_INSTALL_DIR=${{ runner.temp }}/.dotnet" >> "$GITHUB_ENV"
-          echo "DOTNET_ROOT=${{ runner.temp }}/.dotnet" >> "$GITHUB_ENV"
-          echo "PATH=${{ runner.temp }}/.dotnet:${{ runner.temp }}/.dotnet/tools:${PATH}" >> "$GITHUB_ENV"
+        uses: ./.github/actions/configure-dotnet
 
       - name: Adapter context
         id: adapter_context
@@ -1135,4 +1137,3 @@ jobs:
 concurrency:
   group: demo-daily-ctrader
   cancel-in-progress: true
-
