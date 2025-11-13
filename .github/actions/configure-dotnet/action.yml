@@ -1,5 +1,8 @@
+---
 name: Configure .NET install dir
-description: Sets DOTNET_INSTALL_DIR/DOTNET_ROOT to a writable runner temp path and prepends it to PATH.
+description: >
+  Sets DOTNET_INSTALL_DIR/DOTNET_ROOT to a writable runner temp path and
+  prepends it to PATH.
 runs:
   using: composite
   steps:
