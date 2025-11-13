@@ -145,6 +145,8 @@ public class RiskExposureClearsOnCloseTests
             {
                 Directory.CreateDirectory(tradesDir);
             }
+            // Test-only fallback: seed a minimal trades header so exposure tests can run without the real writer.
+            // Keep this in sync with the production trades journal schema when that schema changes.
             File.WriteAllText(tradesPath, "utc_ts_open,utc_ts_close,symbol,direction,entry_price,exit_price,volume_units,pnl_ccy,pnl_r,decision_id,schema_version,config_hash,src_adapter,data_version\n");
         }
         Assert.True(File.Exists(tradesPath), $"Trades journal not found: {tradesPath}\nSTDOUT:{stdout}\nSTDERR:{p.StandardError.ReadToEnd()}");
