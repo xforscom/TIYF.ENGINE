@@ -15,13 +15,15 @@ internal sealed class NewsFeedRunner : IAsyncDisposable
     private readonly NewsBlackoutConfig _config;
     private readonly ILogger _logger;
     private readonly TimeSpan _pollInterval;
+    private readonly Func<DateTime> _utcNow;
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _loopTask;
     private readonly List<NewsEvent> _events = new();
     private DateTime? _lastSeenUtc;
-    private long _totalEvents;
+    private int _lastSeenOccurrencesAtUtc;
+    private long _eventsFetchedTotal;
 
-    private NewsFeedRunner(INewsFeed feed, EngineHostState state, Action<IReadOnlyList<NewsEvent>>? onEventsUpdated, NewsBlackoutConfig config, TimeSpan pollInterval, ILogger logger)
+    private NewsFeedRunner(INewsFeed feed, EngineHostState state, Action<IReadOnlyList<NewsEvent>>? onEventsUpdated, NewsBlackoutConfig config, TimeSpan pollInterval, ILogger logger, Func<DateTime> utcNow)
     {
         _feed = feed;
         _state = state;
@@ -29,13 +31,14 @@ internal sealed class NewsFeedRunner : IAsyncDisposable
         _config = config;
         _pollInterval = pollInterval;
         _logger = logger;
+        _utcNow = utcNow;
         _loopTask = Task.Run(() => RunAsync(_cts.Token));
     }
 
-    public static NewsFeedRunner Start(INewsFeed feed, EngineHostState state, Action<IReadOnlyList<NewsEvent>>? onEventsUpdated, NewsBlackoutConfig config, ILogger logger)
+    public static NewsFeedRunner Start(INewsFeed feed, EngineHostState state, Action<IReadOnlyList<NewsEvent>>? onEventsUpdated, NewsBlackoutConfig config, ILogger logger, Func<DateTime>? utcNow = null)
     {
         var intervalSeconds = Math.Max(5, config.PollSeconds);
-        return new NewsFeedRunner(feed, state, onEventsUpdated, config, TimeSpan.FromSeconds(intervalSeconds), logger);
+        return new NewsFeedRunner(feed, state, onEventsUpdated, config, TimeSpan.FromSeconds(intervalSeconds), logger, utcNow ?? (() => DateTime.UtcNow));
     }
 
     private async Task RunAsync(CancellationToken cancellationToken)
@@ -61,13 +64,14 @@ internal sealed class NewsFeedRunner : IAsyncDisposable
     {
         try
         {
-            var newEvents = await _feed.FetchAsync(_lastSeenUtc, cancellationToken).ConfigureAwait(false);
+            var newEvents = await _feed.FetchAsync(_lastSeenUtc, _lastSeenOccurrencesAtUtc, cancellationToken).ConfigureAwait(false);
             if (newEvents.Count > 0)
             {
                 _events.AddRange(newEvents);
                 _events.Sort((a, b) => a.Utc.CompareTo(b.Utc));
                 _lastSeenUtc = _events[^1].Utc;
-                _totalEvents += newEvents.Count;
+                _lastSeenOccurrencesAtUtc = CountOccurrencesFromEnd(_lastSeenUtc.Value);
+                _eventsFetchedTotal += newEvents.Count;
                 _onEventsUpdated?.Invoke(_events.ToArray());
             }
 
@@ -93,7 +97,7 @@ internal sealed class NewsFeedRunner : IAsyncDisposable
         var (start, end) = ComputeCurrentBlackoutWindow(snapshot);
         _state.UpdateNewsTelemetry(
             _lastSeenUtc,
-            _totalEvents,
+            _eventsFetchedTotal,
             start.HasValue && end.HasValue,
             start,
             end);
@@ -106,7 +110,7 @@ internal sealed class NewsFeedRunner : IAsyncDisposable
             return (null, null);
         }
 
-        var now = DateTime.UtcNow;
+        var now = _utcNow();
         foreach (var ev in events)
         {
             var start = ev.Utc.AddMinutes(-_config.MinutesBefore);
@@ -129,10 +133,25 @@ internal sealed class NewsFeedRunner : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
+            _logger.LogDebug("News feed runner cancelled during disposal.");
         }
         finally
         {
             _cts.Dispose();
         }
+    }
+
+    private int CountOccurrencesFromEnd(DateTime targetUtc)
+    {
+        var count = 0;
+        for (var i = _events.Count - 1; i >= 0; i--)
+        {
+            if (_events[i].Utc != targetUtc)
+            {
+                break;
+            }
+            count++;
+        }
+        return count;
     }
 }

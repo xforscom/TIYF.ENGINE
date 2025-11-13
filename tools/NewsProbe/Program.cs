@@ -12,7 +12,8 @@ var nowRaw = parsed.TryGetValue("--now", out var now) ? now : null;
 var (newsConfig, newsFile) = LoadConfig(configPath, newsOverride);
 Directory.CreateDirectory(outputPath);
 var events = LoadEvents(newsFile);
-var nowUtc = ParseOverride(nowRaw) ?? events.FirstOrDefault()?.Utc ?? DateTime.UtcNow;
+var defaultNowUtc = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+var nowUtc = ParseOverride(nowRaw) ?? events.FirstOrDefault()?.Utc ?? defaultNowUtc;
 var (windowStart, windowEnd) = ComputeBlackout(nowUtc, newsConfig, events);
 
 var state = new EngineHostState("proof", Array.Empty<string>());
@@ -174,7 +175,7 @@ static string BuildSummary(int totalEvents, DateTime? lastEventUtc, DateTime? wi
 static string BuildMetrics(IReadOnlyCollection<NewsEvent> events, DateTime? windowStart, DateTime? windowEnd)
 {
     var builder = new System.Text.StringBuilder();
-    builder.AppendLine($"engine_news_events_total {events.Count}");
+    builder.AppendLine($"engine_news_events_fetched_total {events.Count}");
     builder.AppendLine($"engine_news_blackout_windows_total {(windowStart.HasValue && windowEnd.HasValue ? 1 : 0)}");
     if (events.LastOrDefault() is { } last)
     {

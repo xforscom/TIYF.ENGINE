@@ -1099,7 +1099,22 @@ internal sealed class EngineLoopService : BackgroundService
 
         var path = ResolveNewsSourcePath(config.SourcePath);
         var feed = new FileNewsFeed(path, _logger);
-        _newsFeedRunner = NewsFeedRunner.Start(feed, _state, events => _engineLoop?.UpdateNewsEvents(events), config, _logger);
+        _newsFeedRunner = NewsFeedRunner.Start(
+            feed,
+            _state,
+            events =>
+            {
+                var loop = _engineLoop;
+                if (loop is null)
+                {
+                    _logger.LogDebug("News events dropped because engine loop is not available yet (batch size={Count}).", events.Count);
+                    return;
+                }
+                loop.UpdateNewsEvents(events);
+            },
+            config,
+            _logger,
+            () => DateTime.UtcNow);
     }
 
     private string ResolveNewsSourcePath(string? configuredPath)

@@ -22,7 +22,7 @@ internal sealed class FileNewsFeed : INewsFeed
         _logger = logger;
     }
 
-    public async Task<IReadOnlyList<NewsEvent>> FetchAsync(DateTime? sinceUtc, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<NewsEvent>> FetchAsync(DateTime? sinceUtc, int sinceOccurrencesAtTimestamp, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(_path) || !File.Exists(_path))
         {
@@ -39,6 +39,7 @@ internal sealed class FileNewsFeed : INewsFeed
             }
 
             var events = new List<NewsEvent>();
+            var cursorHits = 0;
             foreach (var element in doc.RootElement.EnumerateArray())
             {
                 if (element.ValueKind != JsonValueKind.Object)
@@ -51,9 +52,18 @@ internal sealed class FileNewsFeed : INewsFeed
                     continue;
                 }
 
-                if (sinceUtc.HasValue && utc <= sinceUtc.Value)
+                if (sinceUtc.HasValue)
                 {
-                    continue;
+                    if (utc < sinceUtc.Value)
+                    {
+                        continue;
+                    }
+
+                    if (utc == sinceUtc.Value && cursorHits < sinceOccurrencesAtTimestamp)
+                    {
+                        cursorHits++;
+                        continue;
+                    }
                 }
 
                 var impact = element.TryGetProperty("impact", out var impactProp) && impactProp.ValueKind == JsonValueKind.String
@@ -69,6 +79,11 @@ internal sealed class FileNewsFeed : INewsFeed
                     : new List<string>();
 
                 events.Add(new NewsEvent(utc, impact, tags));
+
+                if (sinceUtc.HasValue && utc == sinceUtc.Value)
+                {
+                    cursorHits++;
+                }
             }
 
             return events.Count == 0

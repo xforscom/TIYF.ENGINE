@@ -26,7 +26,7 @@ public readonly record struct EngineMetricsSnapshot(
     double? SlippageLastPriceDelta,
     long SlippageAdjustedOrdersTotal,
     double? NewsLastEventUnixSeconds,
-    long NewsEventsTotal,
+    long NewsEventsFetchedTotal,
     int NewsBlackoutWindowsActive,
     double? GvrsRaw,
     double? GvrsEwma,

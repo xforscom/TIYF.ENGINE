@@ -61,7 +61,7 @@ public class MetricsFormattingTests
         Assert.Contains("engine_slippage_model{model=\"fixed_bps\"} 1", metricsText);
         Assert.Contains("engine_slippage_last_price_delta 0.0002", metricsText);
         Assert.Contains("engine_slippage_adjusted_orders_total 1", metricsText);
-        Assert.Contains("engine_news_events_total 3", metricsText);
+        Assert.Contains("engine_news_events_fetched_total 3", metricsText);
         Assert.Contains("engine_news_blackout_windows_total 1", metricsText);
         Assert.Contains("engine_news_last_event_ts", metricsText);
         Assert.Contains("engine_reconcile_mismatches_total", metricsText);
@@ -126,7 +126,7 @@ public class MetricsFormattingTests
         Assert.Equal(-0.00015, slippage.GetProperty("last_price_delta").GetDouble(), 6);
         Assert.Equal(1, slippage.GetProperty("adjusted_orders_total").GetInt64());
         var news = root.GetProperty("news");
-        Assert.Equal(5, news.GetProperty("events_total").GetInt64());
+        Assert.Equal(5, news.GetProperty("events_fetched_total").GetInt64());
         Assert.False(news.GetProperty("blackout_active").GetBoolean());
         Assert.Equal(75, lastOrderSizes.GetProperty("GBPUSD").GetInt64());
         var reconciliation = root.GetProperty("reconciliation");

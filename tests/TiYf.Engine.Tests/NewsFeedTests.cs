@@ -28,12 +28,41 @@ public class NewsFeedTests
             File.WriteAllText(tempFile, JsonSerializer.Serialize(events));
 
             var feed = new FileNewsFeed(tempFile, NullLogger.Instance);
-            var all = await feed.FetchAsync(null, CancellationToken.None);
+            var all = await feed.FetchAsync(null, 0, CancellationToken.None);
             Assert.Equal(3, all.Count);
 
-            var filtered = await feed.FetchAsync(all[1].Utc, CancellationToken.None);
+            var filtered = await feed.FetchAsync(all[1].Utc, 1, CancellationToken.None);
             Assert.Single(filtered);
             Assert.Equal(all[2].Utc, filtered[0].Utc);
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public async Task FileNewsFeed_RetainsEventsWithSameTimestamp()
+    {
+        var tempFile = Path.GetTempFileName();
+        try
+        {
+            var events = new[]
+            {
+                new { utc = "2025-02-01T09:00:00Z", impact = "high", tags = new[] { "USD" } },
+                new { utc = "2025-02-01T09:00:00Z", impact = "medium", tags = new[] { "EUR" } },
+                new { utc = "2025-02-01T10:00:00Z", impact = "low", tags = new[] { "JPY" } }
+            };
+            File.WriteAllText(tempFile, JsonSerializer.Serialize(events));
+
+            var feed = new FileNewsFeed(tempFile, NullLogger.Instance);
+            var initial = await feed.FetchAsync(null, 0, CancellationToken.None);
+            Assert.Equal(3, initial.Count);
+
+            // simulate cursor at first timestamp with both occurrences consumed
+            var updated = await feed.FetchAsync(initial[0].Utc, 2, CancellationToken.None);
+            Assert.Single(updated);
+            Assert.Equal(initial[2].Utc, updated[0].Utc);
         }
         finally
         {

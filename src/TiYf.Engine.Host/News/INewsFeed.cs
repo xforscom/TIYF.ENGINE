@@ -8,5 +8,5 @@ namespace TiYf.Engine.Host.News;
 
 internal interface INewsFeed
 {
-    Task<IReadOnlyList<NewsEvent>> FetchAsync(DateTime? sinceUtc, CancellationToken cancellationToken);
+    Task<IReadOnlyList<NewsEvent>> FetchAsync(DateTime? sinceUtc, int sinceOccurrencesAtTimestamp, CancellationToken cancellationToken);
 }

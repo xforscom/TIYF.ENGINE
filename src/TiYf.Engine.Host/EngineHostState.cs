@@ -53,7 +53,7 @@ public sealed class EngineHostState
     private DateTime? _lastReconciliationUtc;
     private ReconciliationStatus _lastReconciliationStatus = ReconciliationStatus.Unknown;
     private DateTime? _newsFeedLastEventUtc;
-    private long _newsFeedEventsTotal;
+    private long _newsFeedEventsFetchedTotal;
     private bool _newsBlackoutActive;
     private DateTime? _newsBlackoutWindowStart;
     private DateTime? _newsBlackoutWindowEnd;
@@ -166,12 +166,13 @@ public sealed class EngineHostState
         }
     }
 
-    public void UpdateNewsTelemetry(DateTime? lastEventUtc, long eventsTotal, bool blackoutActive, DateTime? windowStart, DateTime? windowEnd)
+    public void UpdateNewsTelemetry(DateTime? lastEventUtc, long eventsFetchedTotal, bool blackoutActive, DateTime? windowStart, DateTime? windowEnd)
     {
         lock (_sync)
         {
+            // Normalize to UTC-only timestamps before surfacing in /health.
             _newsFeedLastEventUtc = NormalizeNullableUtc(lastEventUtc);
-            _newsFeedEventsTotal = Math.Max(0, eventsTotal);
+            _newsFeedEventsFetchedTotal = Math.Max(0, eventsFetchedTotal);
             _newsBlackoutActive = blackoutActive;
             _newsBlackoutWindowStart = NormalizeNullableUtc(windowStart);
             _newsBlackoutWindowEnd = NormalizeNullableUtc(windowEnd);
@@ -526,7 +527,7 @@ public sealed class EngineHostState
             _slippageLastPriceDelta,
             _slippageAdjustedOrdersTotal,
             newsLastEventUnix,
-            _newsFeedEventsTotal,
+            _newsFeedEventsFetchedTotal,
             newsWindowsActive,
             _gvrsRaw,
             _gvrsEwma,
@@ -580,7 +581,7 @@ public sealed class EngineHostState
         return new
         {
             last_event_utc = _newsFeedLastEventUtc,
-            events_total = _newsFeedEventsTotal,
+            events_fetched_total = _newsFeedEventsFetchedTotal,
             blackout_active = _newsBlackoutActive,
             blackout_window_start = _newsBlackoutWindowStart,
             blackout_window_end = _newsBlackoutWindowEnd

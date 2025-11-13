@@ -59,7 +59,7 @@ public static class EngineMetricsFormatter
             AppendMetric(builder, "engine_slippage_last_price_delta", snapshot.SlippageLastPriceDelta.Value);
         }
         AppendMetric(builder, "engine_slippage_adjusted_orders_total", snapshot.SlippageAdjustedOrdersTotal);
-        AppendMetric(builder, "engine_news_events_total", snapshot.NewsEventsTotal);
+        AppendMetric(builder, "engine_news_events_fetched_total", snapshot.NewsEventsFetchedTotal);
         AppendMetric(builder, "engine_news_blackout_windows_total", snapshot.NewsBlackoutWindowsActive);
         if (snapshot.NewsLastEventUnixSeconds.HasValue)
         {
