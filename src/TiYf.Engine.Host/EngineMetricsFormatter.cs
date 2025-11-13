@@ -60,6 +60,15 @@ public static class EngineMetricsFormatter
             AppendMetric(builder, "engine_promotion_threshold", (double)promotion.PromotionThreshold);
             AppendMetric(builder, "engine_demotion_threshold", (double)promotion.DemotionThreshold);
         }
+        AppendMetric(builder, "engine_reconcile_mismatches_total", snapshot.ReconciliationMismatchesTotal);
+        if (snapshot.ReconciliationLastUnixSeconds.HasValue)
+        {
+            AppendMetric(builder, "engine_reconcile_last_ts", snapshot.ReconciliationLastUnixSeconds.Value);
+        }
+        if (!string.IsNullOrWhiteSpace(snapshot.ReconciliationLastStatus))
+        {
+            AppendMetric(builder, "engine_reconcile_last_status", 1, "status", snapshot.ReconciliationLastStatus!);
+        }
         if (snapshot.GvrsRaw.HasValue)
         {
             AppendMetric(builder, "engine_gvrs_raw", snapshot.GvrsRaw.Value);

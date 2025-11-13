@@ -24,7 +24,9 @@ public class OandaAdapterTests
             RetryMaxDelay: TimeSpan.FromMilliseconds(10),
             RetryMaxAttempts: 2,
             HandshakeEndpoint: "/accounts/{accountId}/summary",
-            OrderEndpoint: "/accounts/{accountId}/orders");
+            OrderEndpoint: "/accounts/{accountId}/orders",
+            PositionsEndpoint: "/accounts/{accountId}/openPositions",
+            PendingOrdersEndpoint: "/accounts/{accountId}/orders?state=PENDING");
 
         var adapter = new OandaRestExecutionAdapter(new HttpClient(), settings);
         await adapter.ConnectAsync();
@@ -84,7 +86,9 @@ public class OandaAdapterTests
             RetryMaxDelay: TimeSpan.FromMilliseconds(20),
             RetryMaxAttempts: 3,
             HandshakeEndpoint: "/accounts/{accountId}/summary",
-            OrderEndpoint: "/accounts/{accountId}/orders");
+            OrderEndpoint: "/accounts/{accountId}/orders",
+            PositionsEndpoint: "/accounts/{accountId}/openPositions",
+            PendingOrdersEndpoint: "/accounts/{accountId}/orders?state=PENDING");
 
         var adapter = new OandaRestExecutionAdapter(httpClient, settings);
         await adapter.ConnectAsync();

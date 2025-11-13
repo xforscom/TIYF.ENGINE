@@ -27,4 +27,7 @@ public readonly record struct EngineMetricsSnapshot(
     double? GvrsEwma,
     string? GvrsBucket,
     string PromotionConfigHash,
-    PromotionTelemetrySnapshot? PromotionTelemetry);
+    PromotionTelemetrySnapshot? PromotionTelemetry,
+    long ReconciliationMismatchesTotal,
+    double? ReconciliationLastUnixSeconds,
+    string? ReconciliationLastStatus);
