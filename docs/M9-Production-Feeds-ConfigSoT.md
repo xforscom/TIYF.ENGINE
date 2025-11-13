@@ -61,7 +61,7 @@
 
 **Proof expectations**
 - Checklist/proof doc confirming no secrets exist in repo/configs.
-- Workflow logs showing secrets sourced from env (without printing values).</n
+- Workflow logs showing secrets sourced from env (without printing values).
 ## Overall Notes
 - Each phase delivers telemetry/proof evidence before any runtime gating.
 - M9 is sequencing groundwork for eventual M10+ runtime enforcement.
