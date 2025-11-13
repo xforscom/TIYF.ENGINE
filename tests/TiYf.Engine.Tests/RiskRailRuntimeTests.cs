@@ -114,7 +114,7 @@ public class RiskRailRuntimeTests
         var newsEvent = new NewsEvent(new DateTime(2025, 1, 1, 13, 30, 0, DateTimeKind.Utc), "high", new List<string> { "USD" });
         var config = new RiskConfig
         {
-            NewsBlackout = new NewsBlackoutConfig(true, 30, 30, null)
+            NewsBlackout = new NewsBlackoutConfig(true, 30, 30, null, 60)
         };
         var gates = new List<(string Gate, bool Throttled)>();
         var runtime = new RiskRailRuntime(config, "hash", new[] { newsEvent }, (gate, throttled) => gates.Add((gate, throttled)), 100_000m);

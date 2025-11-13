@@ -247,7 +247,8 @@ public static class RiskConfigParser
         int minutesBefore = TryInt(obj, "minutes_before", out var before) ? before : 0;
         int minutesAfter = TryInt(obj, "minutes_after", out var after) ? after : 0;
         string? sourcePath = (TryString(obj, "source_path", out var source) && !string.IsNullOrWhiteSpace(source)) ? source : null;
-        return new NewsBlackoutConfig(enabled, minutesBefore, minutesAfter, sourcePath);
+        int pollSeconds = TryInt(obj, "poll_seconds", out var poll) ? Math.Max(5, poll) : 60;
+        return new NewsBlackoutConfig(enabled, minutesBefore, minutesAfter, sourcePath, pollSeconds);
     }
 
     private static GlobalVolatilityGateConfig ParseGlobalVolatilityGate(JsonElement parent)

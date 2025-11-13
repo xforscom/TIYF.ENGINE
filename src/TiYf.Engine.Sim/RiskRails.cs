@@ -18,7 +18,7 @@ internal sealed class RiskRailRuntime
 {
     private readonly RiskConfig? _config;
     private readonly string _configHash;
-    private readonly IReadOnlyList<NewsEvent> _newsEvents;
+    private IReadOnlyList<NewsEvent> _newsEvents = Array.Empty<NewsEvent>();
     private readonly Action<string, bool>? _gateCallback;
     private readonly Dictionary<string, decimal> _lastCloseBySymbol = new(StringComparer.OrdinalIgnoreCase);
     private readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
@@ -44,11 +44,16 @@ internal sealed class RiskRailRuntime
     {
         _config = config;
         _configHash = riskConfigHash ?? string.Empty;
-        _newsEvents = newsEvents ?? Array.Empty<NewsEvent>();
+        ReplaceNewsEvents(newsEvents ?? Array.Empty<NewsEvent>());
         _gateCallback = gateCallback;
         _startingEquity = startingEquity <= 0m ? 100_000m : startingEquity;
         _equityPeak = _startingEquity;
         _currentEquity = _startingEquity;
+    }
+
+    public void ReplaceNewsEvents(IReadOnlyList<NewsEvent> events)
+    {
+        _newsEvents = events ?? Array.Empty<NewsEvent>();
     }
 
     public decimal DailyPnl => _dailyRealizedPnl + _dailyUnrealizedPnl;
