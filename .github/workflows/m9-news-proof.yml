@@ -40,7 +40,7 @@ jobs:
           set -euo pipefail
           out="proof-artifacts/m9-news-proof"
           mkdir -p "$out"
-          ~/.dotnet/dotnet run --project tools/NewsProbe/NewsProbe.csproj --configuration Release -- --config proof/m9-news-config.json --output "$out" --now 2025-11-01T10:15:00Z
+          dotnet run --project tools/NewsProbe/NewsProbe.csproj --configuration Release -- --config proof/m9-news-config.json --output "$out" --now 2025-11-01T10:15:00Z
 
       - name: Verify probe outputs
         run: |
