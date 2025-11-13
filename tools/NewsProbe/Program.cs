@@ -1,9 +1,7 @@
 using System.Linq;
 using System.Text.Json;
-using Microsoft.Extensions.Logging.Abstractions;
 using TiYf.Engine.Core;
 using TiYf.Engine.Host;
-using TiYf.Engine.Host.News;
 
 var parsed = ParseArgs(args);
 var configPath = parsed.TryGetValue("--config", out var cfg) ? cfg : "proof/news.json";
@@ -13,8 +11,7 @@ var nowRaw = parsed.TryGetValue("--now", out var now) ? now : null;
 
 var (newsConfig, newsFile) = LoadConfig(configPath, newsOverride);
 Directory.CreateDirectory(outputPath);
-var feed = new FileNewsFeed(newsFile, NullLogger.Instance);
-var events = await feed.FetchAsync(null, CancellationToken.None);
+var events = LoadEvents(newsFile);
 var nowUtc = ParseOverride(nowRaw) ?? events.FirstOrDefault()?.Utc ?? DateTime.UtcNow;
 var (windowStart, windowEnd) = ComputeBlackout(nowUtc, newsConfig, events);
 
@@ -99,6 +96,56 @@ static DateTime? ParseOverride(string? raw)
         return dt.Kind == DateTimeKind.Utc ? dt : DateTime.SpecifyKind(dt, DateTimeKind.Utc);
     }
     return null;
+}
+
+static IReadOnlyList<NewsEvent> LoadEvents(string path)
+{
+    if (!File.Exists(path))
+    {
+        return Array.Empty<NewsEvent>();
+    }
+
+    var json = File.ReadAllText(path);
+    using var doc = JsonDocument.Parse(json);
+    if (doc.RootElement.ValueKind != JsonValueKind.Array)
+    {
+        return Array.Empty<NewsEvent>();
+    }
+
+    var events = new List<NewsEvent>();
+    foreach (var element in doc.RootElement.EnumerateArray())
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            continue;
+        }
+
+        if (!element.TryGetProperty("utc", out var utcProp) || utcProp.ValueKind != JsonValueKind.String)
+        {
+            continue;
+        }
+
+        if (!DateTime.TryParse(utcProp.GetString(), null, System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var utc))
+        {
+            continue;
+        }
+
+        utc = utc.Kind == DateTimeKind.Utc ? utc : DateTime.SpecifyKind(utc, DateTimeKind.Utc);
+        var impact = element.TryGetProperty("impact", out var impactProp) && impactProp.ValueKind == JsonValueKind.String
+            ? impactProp.GetString() ?? string.Empty
+            : string.Empty;
+        var tags = element.TryGetProperty("tags", out var tagsProp) && tagsProp.ValueKind == JsonValueKind.Array
+            ? tagsProp.EnumerateArray()
+                .Where(t => t.ValueKind == JsonValueKind.String)
+                .Select(t => t.GetString() ?? string.Empty)
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Select(t => t.Trim())
+                .ToList()
+            : new List<string>();
+        events.Add(new NewsEvent(utc, impact, tags));
+    }
+
+    return events.OrderBy(e => e.Utc).ToList();
 }
 
 static (DateTime?, DateTime?) ComputeBlackout(DateTime nowUtc, NewsBlackoutConfig config, IReadOnlyList<NewsEvent> events)
