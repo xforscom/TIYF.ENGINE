@@ -14,13 +14,26 @@ concurrency:
 jobs:
   build:
     runs-on: [self-hosted, Linux, X64, tiyf-vps]
+    env:
+      DOTNET_INSTALL_DIR: ${{ runner.temp }}/.dotnet
+      DOTNET_ROOT: ${{ runner.temp }}/.dotnet
+      PATH: ${{ runner.temp }}/.dotnet:${{ runner.temp }}/.dotnet/tools:${{ env.PATH }}
     outputs:
       build_exit: ${{ steps.build_release.outputs.exit_code }}
     steps:
       - uses: actions/checkout@v4
+      - name: Configure .NET install dir
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "DOTNET_INSTALL_DIR=${{ runner.temp }}/.dotnet" >> "$GITHUB_ENV"
+          echo "DOTNET_ROOT=${{ runner.temp }}/.dotnet" >> "$GITHUB_ENV"
+          echo "PATH=${{ runner.temp }}/.dotnet:${{ runner.temp }}/.dotnet/tools:${PATH}" >> "$GITHUB_ENV"
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '8.0.416'
+          dotnet-quality: ga
+          cache: false
       - uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d
         with:
           python-version: '3.x'
@@ -58,13 +71,25 @@ jobs:
       run:
         shell: bash
     env:
+      DOTNET_INSTALL_DIR: ${{ runner.temp }}/.dotnet
+      DOTNET_ROOT: ${{ runner.temp }}/.dotnet
+      PATH: ${{ runner.temp }}/.dotnet:${{ runner.temp }}/.dotnet/tools:${{ env.PATH }}
       DOTNET_NOLOGO: true
       CANARY_RUNNER_LABEL: tiyf-vps
     steps:
       - uses: actions/checkout@v4
+      - name: Configure .NET install dir
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "DOTNET_INSTALL_DIR=${{ runner.temp }}/.dotnet" >> "$GITHUB_ENV"
+          echo "DOTNET_ROOT=${{ runner.temp }}/.dotnet" >> "$GITHUB_ENV"
+          echo "PATH=${{ runner.temp }}/.dotnet:${{ runner.temp }}/.dotnet/tools:${PATH}" >> "$GITHUB_ENV"
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '8.0.416'
+          dotnet-quality: ga
+          cache: false
       - uses: actions/setup-node@v4
         with:
           node-version: '20.x'

@@ -40,6 +40,9 @@ jobs:
       run:
         shell: pwsh
     env:
+      DOTNET_INSTALL_DIR: ${{ runner.temp }}/.dotnet
+      DOTNET_ROOT: ${{ runner.temp }}/.dotnet
+      PATH: ${{ runner.temp }}/.dotnet:${{ runner.temp }}/.dotnet/tools:${{ env.PATH }}
       ADAPTER_MODE: oanda-demo
       RUN_ID: ${{ format('OANDA-DAILY-{0}', github.run_number) }}
       DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || inputs.dryRun }}
@@ -103,10 +106,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Configure .NET install dir
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "DOTNET_INSTALL_DIR=${{ runner.temp }}/.dotnet" >> "$GITHUB_ENV"
+          echo "DOTNET_ROOT=${{ runner.temp }}/.dotnet" >> "$GITHUB_ENV"
+          echo "PATH=${{ runner.temp }}/.dotnet:${{ runner.temp }}/.dotnet/tools:${PATH}" >> "$GITHUB_ENV"
+
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '8.0.416'
+          dotnet-quality: ga
+          cache: false
 
       - name: Validate secrets
         run: |
