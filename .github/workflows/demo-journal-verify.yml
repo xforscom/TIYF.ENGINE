@@ -16,14 +16,25 @@ permissions:
 jobs:
   build:
     runs-on: [self-hosted, Linux, X64, tiyf-vps]
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    concurrency:
+      group: demo-journal-build@${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
 
+      - name: Configure .NET install dir
+        uses: ./.github/actions/configure-dotnet
+
       - name: Setup .NET 8
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '8.0.416'
+          dotnet-quality: ga
+          cache: false
 
       - name: Restore and build Release
         run: |
@@ -41,6 +52,12 @@ jobs:
   verify:
     needs: build
     runs-on: [self-hosted, Linux, X64, tiyf-vps]
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    concurrency:
+      group: demo-journal-verify@${{ github.ref }}
+      cancel-in-progress: true
     defaults:
       run:
         shell: pwsh
@@ -96,10 +113,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
 
+      - name: Configure .NET install dir
+        uses: ./.github/actions/configure-dotnet
+
       - name: Setup .NET 8
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '8.0.416'
+          dotnet-quality: ga
+          cache: false
 
       - name: Download release binaries
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093

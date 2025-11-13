@@ -45,6 +45,13 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
+    permissions:
+      contents: write
+      issues: write
+      statuses: write
+    concurrency:
+      group: demo-daily-ctrader@${{ github.ref }}
+      cancel-in-progress: true
     defaults:
       run:
         shell: pwsh
@@ -114,6 +121,9 @@ jobs:
       - name: Checkout
         id: checkout
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
+
+      - name: Configure .NET install dir
+        uses: ./.github/actions/configure-dotnet
 
       - name: Adapter context
         id: adapter_context
@@ -457,9 +467,11 @@ jobs:
 
       - name: Setup .NET 8
         id: setup_dotnet
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '8.0.416'
+          dotnet-quality: ga
+          cache: false
 
       - name: Preflight Values Checklist
         if: ${{ steps.adapter_context.outputs.adapter == 'ctrader-demo' }}
@@ -1125,4 +1137,3 @@ jobs:
 concurrency:
   group: demo-daily-ctrader
   cancel-in-progress: true
-

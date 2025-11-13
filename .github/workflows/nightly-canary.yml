@@ -14,13 +14,23 @@ concurrency:
 jobs:
   build:
     runs-on: [self-hosted, Linux, X64, tiyf-vps]
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    concurrency:
+      group: nightly-canary-build@${{ github.ref }}
+      cancel-in-progress: true
     outputs:
       build_exit: ${{ steps.build_release.outputs.exit_code }}
     steps:
       - uses: actions/checkout@v4
+      - name: Configure .NET install dir
+        uses: ./.github/actions/configure-dotnet
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '8.0.416'
+          dotnet-quality: ga
+          cache: false
       - uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d
         with:
           python-version: '3.x'
@@ -54,6 +64,12 @@ jobs:
   nightly-canary:
     needs: build
     runs-on: [self-hosted, Linux, X64, tiyf-vps]
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    concurrency:
+      group: nightly-canary-main@${{ github.ref }}
+      cancel-in-progress: true
     defaults:
       run:
         shell: bash
@@ -62,9 +78,13 @@ jobs:
       CANARY_RUNNER_LABEL: tiyf-vps
     steps:
       - uses: actions/checkout@v4
+      - name: Configure .NET install dir
+        uses: ./.github/actions/configure-dotnet
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '8.0.416'
+          dotnet-quality: ga
+          cache: false
       - uses: actions/setup-node@v4
         with:
           node-version: '20.x'

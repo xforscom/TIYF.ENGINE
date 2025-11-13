@@ -1,0 +1,15 @@
+---
+name: Configure .NET install dir
+description: >
+  Sets DOTNET_INSTALL_DIR/DOTNET_ROOT to a writable runner temp path and
+  prepends it to PATH.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        DOTNET_ROOT="${RUNNER_TEMP}/.dotnet"
+        echo "DOTNET_INSTALL_DIR=${DOTNET_ROOT}" >> "$GITHUB_ENV"
+        echo "DOTNET_ROOT=${DOTNET_ROOT}" >> "$GITHUB_ENV"
+        echo "PATH=${DOTNET_ROOT}:${DOTNET_ROOT}/tools:${PATH}" >> "$GITHUB_ENV"

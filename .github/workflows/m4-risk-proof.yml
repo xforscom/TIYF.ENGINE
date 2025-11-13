@@ -13,15 +13,23 @@ jobs:
       actions: read
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: m4-risk-proof@${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: Configure .NET install dir
+        uses: ./.github/actions/configure-dotnet
+
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: '8.0.416'
+          dotnet-quality: ga
+          cache: false
 
       - name: Prepare artifacts
         shell: bash

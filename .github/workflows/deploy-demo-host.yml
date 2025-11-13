@@ -34,11 +34,17 @@ jobs:
     if: github.ref == 'refs/heads/main' || inputs.dryRun == true || inputs.allowNonMainDeploy == true
     runs-on: [self-hosted, Linux, X64, tiyf-vps]
     timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: deploy-demo-host@${{ github.ref }}
+      cancel-in-progress: true
     defaults:
       run:
         shell: bash
     env:
-      DOTNET_VERSION: '8.0.x'
+      DOTNET_VERSION: '8.0.416'
       RELEASE_ROOT: /opt/tiyf/releases
       CURRENT_LINK: /opt/tiyf/current
       SERVICE_NAME: tiyf-engine-demo.service
@@ -131,10 +137,15 @@ jobs:
           fi
           shellcheck deploy/scripts/remote-deploy.sh
 
+      - name: Configure .NET install dir
+        uses: ./.github/actions/configure-dotnet
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
+          dotnet-version: '8.0.416'
+          dotnet-quality: ga
+          cache: false
 
       - name: Publish Engine Host
         run: |

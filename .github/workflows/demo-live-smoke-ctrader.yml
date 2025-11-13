@@ -41,6 +41,13 @@ jobs:
   demo-live-smoke-ctrader:
     runs-on: [self-hosted, Linux, X64, tiyf-vps]
     timeout-minutes: 30
+    permissions:
+      contents: write
+      issues: write
+      statuses: write
+    concurrency:
+      group: demo-live-smoke-ctrader@${{ github.ref }}
+      cancel-in-progress: true
     strategy:
       fail-fast: false
     defaults:
@@ -470,11 +477,16 @@ jobs:
             Write-Warning "Execution policy change failed or is overridden: $($_.Exception.Message)"
           }
 
+      - name: Configure .NET install dir
+        uses: ./.github/actions/configure-dotnet
+
       - name: Setup .NET 8
         id: setup_dotnet
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '8.0.416'
+          dotnet-quality: ga
+          cache: false
 
       - name: Preflight Values Checklist
         if: ${{ steps.adapter_context.outputs.adapter == 'ctrader-demo' }}
@@ -1155,8 +1167,6 @@ jobs:
 concurrency:
   group: demo-live-smoke-ctrader
   cancel-in-progress: true
-
-
 
 
 

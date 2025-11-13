@@ -48,6 +48,11 @@ jobs:
   oanda-friday-proof:
     runs-on: [self-hosted, Linux, X64, tiyf-vps]
     timeout-minutes: 30
+    permissions:
+      contents: read
+    concurrency:
+      group: friday-proof-job@${{ github.ref }}
+      cancel-in-progress: true
     defaults:
       run:
         shell: pwsh
@@ -116,10 +121,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Configure .NET install dir
+        uses: ./.github/actions/configure-dotnet
+
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '8.0.416'
+          dotnet-quality: ga
+          cache: false
 
       - name: Validate secrets
         run: |
