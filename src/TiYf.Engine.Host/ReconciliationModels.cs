@@ -127,7 +127,10 @@ internal static class ReconciliationRecordBuilder
             decimal? avgPrice = null;
             if (units > 0)
             {
-                avgPrice = decimal.Round(kvp.Value.Notional / units, 6, MidpointRounding.AwayFromZero);
+                var notional = Math.Abs(kvp.Value.Notional);
+                avgPrice = notional > 0
+                    ? decimal.Round(notional / units, 6, MidpointRounding.AwayFromZero)
+                    : null;
             }
             result[kvp.Key] = new ReconciliationPositionView(kvp.Key, side, units, avgPrice);
         }

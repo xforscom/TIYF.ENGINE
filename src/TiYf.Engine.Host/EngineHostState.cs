@@ -40,6 +40,9 @@ public sealed class EngineHostState
         ["cancel"] = 0
     };
     private long _idempotencyEvictionsTotal;
+    private int _idempotencyPersistedLoaded;
+    private int _idempotencyPersistedExpired;
+    private DateTime? _idempotencyPersistenceLastLoadUtc;
     private string _slippageModel = "zero";
     private double? _gvrsRaw;
     private double? _gvrsEwma;
@@ -150,6 +153,16 @@ public sealed class EngineHostState
             _idempotencyCacheSizes["order"] = Math.Max(0, orderCacheSize);
             _idempotencyCacheSizes["cancel"] = Math.Max(0, cancelCacheSize);
             _idempotencyEvictionsTotal = Math.Max(0, evictionsTotal);
+        }
+    }
+
+    public void SetIdempotencyPersistenceStats(int loaded, int expired, DateTime? lastLoadUtc)
+    {
+        lock (_sync)
+        {
+            _idempotencyPersistedLoaded = Math.Max(0, loaded);
+            _idempotencyPersistedExpired = Math.Max(0, expired);
+            _idempotencyPersistenceLastLoadUtc = NormalizeNullableUtc(lastLoadUtc);
         }
     }
 
@@ -432,6 +445,7 @@ public sealed class EngineHostState
                 last_order_size_units = new Dictionary<string, long>(metrics.LastOrderSizeBySymbol, StringComparer.OrdinalIgnoreCase),
                 idempotency_cache_size = new Dictionary<string, long>(_idempotencyCacheSizes, StringComparer.OrdinalIgnoreCase),
                 idempotency_evictions_total = _idempotencyEvictionsTotal,
+                idempotency_persistence = CreateIdempotencyPersistenceHealth(),
                 slippage_model = _slippageModel,
                 gvrs_raw = metrics.GvrsRaw,
                 gvrs_ewma = metrics.GvrsEwma,
@@ -480,7 +494,10 @@ public sealed class EngineHostState
             _promotionTelemetry,
             _reconciliationMismatchesTotal,
             _lastReconciliationUtc.HasValue ? new DateTimeOffset(_lastReconciliationUtc.Value).ToUnixTimeSeconds() : (double?)null,
-            _lastReconciliationStatus.ToString().ToLowerInvariant());
+            _lastReconciliationStatus.ToString().ToLowerInvariant(),
+            _idempotencyPersistedLoaded,
+            _idempotencyPersistedExpired,
+            _idempotencyPersistenceLastLoadUtc.HasValue ? new DateTimeOffset(_idempotencyPersistenceLastLoadUtc.Value).ToUnixTimeSeconds() : (double?)null);
     }
 
     private static DateTime? NormalizeNullableUtc(DateTime? utc)
@@ -505,6 +522,16 @@ public sealed class EngineHostState
             min_trades = promotion.MinTrades,
             promotion_threshold = promotion.PromotionThreshold,
             demotion_threshold = promotion.DemotionThreshold
+        };
+    }
+
+    private object CreateIdempotencyPersistenceHealth()
+    {
+        return new
+        {
+            last_load_utc = _idempotencyPersistenceLastLoadUtc,
+            loaded_keys = _idempotencyPersistedLoaded,
+            expired_dropped = _idempotencyPersistedExpired
         };
     }
 
@@ -544,4 +571,3 @@ public sealed class EngineHostState
     }
 
 }
-

@@ -28,6 +28,8 @@ internal sealed class EngineLoopService : BackgroundService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly EngineHostOptions _hostOptions;
     private readonly IConnectableExecutionAdapter? _executionAdapter;
+    private FileIdempotencyPersistence? _idempotencyPersistence;
+    private StartupReconciliationRunner? _startupReconciliationRunner;
 
     private LiveTickSource? _tickSource;
     private EngineLoop? _engineLoop;
@@ -171,7 +173,7 @@ internal sealed class EngineLoopService : BackgroundService
         }
     }
 
-    private Task InitializeRuntimeAsync(CancellationToken cancellationToken)
+    private async Task InitializeRuntimeAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var (config, _, raw) = EngineConfigLoader.Load(_configuration.ConfigPath);
@@ -229,6 +231,16 @@ internal sealed class EngineLoopService : BackgroundService
 
         _journalWriter = new HostJournalWriter(journalWriter, OnJournalEvent);
         _tradesWriter = new TradesJournalWriter(journalRoot, runId, schemaVersion, _configuration.ConfigHash, _state.Adapter, dataVersion);
+        var idempotencyPath = Path.Combine(journalRoot, "idempotency", _state.Adapter, "keys.jsonl");
+        _idempotencyPersistence = new FileIdempotencyPersistence(
+            idempotencyPath,
+            TimeSpan.FromHours(24),
+            EngineLoop.OrderIdempotencyCapacity,
+            EngineLoop.CancelIdempotencyCapacity,
+            _logger);
+        var persistedIdempotency = _idempotencyPersistence.Load();
+        var persistedLoaded = persistedIdempotency.Orders.Count + persistedIdempotency.Cancels.Count;
+        _state.SetIdempotencyPersistenceStats(persistedLoaded, persistedIdempotency.ExpiredDropped, persistedIdempotency.LoadedUtc);
         var reconcileRoot = Path.Combine(journalRoot, "reconcile");
         var accountId = string.IsNullOrWhiteSpace(config.AccountId)
             ? (_adapterSettings.AccountId ?? "unknown")
@@ -239,6 +251,10 @@ internal sealed class EngineLoopService : BackgroundService
             CreateBrokerSnapshotProvider(),
             _reconciliationJournal,
             _state,
+            _logger);
+        _startupReconciliationRunner = new StartupReconciliationRunner(
+            () => DateTime.UtcNow,
+            (utc, token) => _reconciliationTelemetry.EmitAsync(utc, token),
             _logger);
         _nextReconciliationUtc = DateTime.UtcNow;
 
@@ -288,12 +304,17 @@ internal sealed class EngineLoopService : BackgroundService
             {
                 _state.UpdateIdempotencyMetrics(orderCache, cancelCache, evictions);
             },
-            warnCallback: message => _logger.LogWarning("{Message}", message));
+            warnCallback: message => _logger.LogWarning("{Message}", message),
+            idempotencyPersistence: _idempotencyPersistence,
+            persistedIdempotencySnapshot: persistedIdempotency);
 
         _logger.LogInformation("Streaming runtime initialized run_id={RunId} journal={Journal}", runId, journalWriter.RunDirectory);
         _state.SetLastLog($"stream:run_id={runId}");
         UpdateHostMetrics();
-        return Task.CompletedTask;
+        if (_startupReconciliationRunner is not null)
+        {
+            await _startupReconciliationRunner.RunOnceAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private async Task DisposeRuntimeAsync()
@@ -319,6 +340,8 @@ internal sealed class EngineLoopService : BackgroundService
         _tickSource = null;
         _engineLoop = null;
         _positionTracker = null;
+        _idempotencyPersistence = null;
+        _startupReconciliationRunner = null;
     }
 
     public override async Task StopAsync(CancellationToken cancellationToken)
@@ -1049,6 +1072,3 @@ internal sealed class EngineLoopService : BackgroundService
         }
     }
 }
-
-
-

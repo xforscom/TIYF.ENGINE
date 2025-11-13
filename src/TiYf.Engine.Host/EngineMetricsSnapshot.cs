@@ -30,4 +30,7 @@ public readonly record struct EngineMetricsSnapshot(
     PromotionTelemetrySnapshot? PromotionTelemetry,
     long ReconciliationMismatchesTotal,
     double? ReconciliationLastUnixSeconds,
-    string? ReconciliationLastStatus);
+    string? ReconciliationLastStatus,
+    int IdempotencyPersistedLoaded,
+    int IdempotencyPersistedExpired,
+    double? IdempotencyPersistenceLastLoadUnix);
