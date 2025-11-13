@@ -28,6 +28,7 @@ public class MetricsFormattingTests
         state.RegisterOrderRejected();
         state.UpdateIdempotencyMetrics(2, 1, 3);
         state.SetSlippageModel("zero");
+        state.RecordReconciliationTelemetry(ReconciliationStatus.Match, 0, DateTime.UtcNow);
 
         var snapshot = state.CreateMetricsSnapshot();
         var metricsText = EngineMetricsFormatter.Format(snapshot);
@@ -52,6 +53,8 @@ public class MetricsFormattingTests
         Assert.Contains("engine_idempotency_cache_size{kind=\"cancel\"} 1", metricsText);
         Assert.Contains("engine_idempotency_evictions_total 3", metricsText);
         Assert.Contains("engine_slippage_model{model=\"zero\"} 1", metricsText);
+        Assert.Contains("engine_reconcile_mismatches_total", metricsText);
+        Assert.Contains("engine_reconcile_last_status{status=\"match\"} 1", metricsText);
     }
 
     [Fact]
@@ -72,6 +75,7 @@ public class MetricsFormattingTests
         state.RegisterOrderRejected();
         state.UpdateIdempotencyMetrics(5, 4, 7);
         state.SetSlippageModel("fixed-test");
+        state.RecordReconciliationTelemetry(ReconciliationStatus.Mismatch, 2, DateTime.UtcNow);
         var payload = state.CreateHealthPayload();
         var json = JsonSerializer.Serialize(payload);
         using var document = JsonDocument.Parse(json);
@@ -104,5 +108,8 @@ public class MetricsFormattingTests
         Assert.Equal(4, cacheSize.GetProperty("cancel").GetInt64());
         Assert.Equal("fixed-test", root.GetProperty("slippage_model").GetString());
         Assert.Equal(75, lastOrderSizes.GetProperty("GBPUSD").GetInt64());
+        var reconciliation = root.GetProperty("reconciliation");
+        Assert.Equal(2, reconciliation.GetProperty("mismatches_total").GetInt64());
+        Assert.Equal("mismatch", reconciliation.GetProperty("last_status").GetString());
     }
 }

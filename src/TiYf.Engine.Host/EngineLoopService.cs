@@ -47,9 +47,14 @@ internal sealed class EngineLoopService : BackgroundService
     private string _engineInstanceId = string.Empty;
     private DateTime _loopStartUtc;
     private readonly object _snapshotSync = new();
+    private readonly TimeSpan _reconciliationInterval = TimeSpan.FromMinutes(5);
+    private DateTime _nextReconciliationUtc = DateTime.MinValue;
+    private readonly SemaphoreSlim _reconcileLock = new(1, 1);
 
     private Task? _engineTask;
     private Task? _heartbeatTask;
+    private ReconciliationJournalWriter? _reconciliationJournal;
+    private ReconciliationTelemetry? _reconciliationTelemetry;
 
     private long _riskEvents;
     private long _alerts;
@@ -224,6 +229,18 @@ internal sealed class EngineLoopService : BackgroundService
 
         _journalWriter = new HostJournalWriter(journalWriter, OnJournalEvent);
         _tradesWriter = new TradesJournalWriter(journalRoot, runId, schemaVersion, _configuration.ConfigHash, _state.Adapter, dataVersion);
+        var reconcileRoot = Path.Combine(journalRoot, "reconcile");
+        var accountId = string.IsNullOrWhiteSpace(config.AccountId)
+            ? (_adapterSettings.AccountId ?? "unknown")
+            : config.AccountId;
+        _reconciliationJournal = new ReconciliationJournalWriter(reconcileRoot, _state.Adapter, runId, _configuration.ConfigHash, accountId);
+        _reconciliationTelemetry = new ReconciliationTelemetry(
+            () => _positionTracker?.SnapshotOpenPositions() ?? Array.Empty<(string, TradeSide, decimal, long, DateTime)>(),
+            CreateBrokerSnapshotProvider(),
+            _reconciliationJournal,
+            _state,
+            _logger);
+        _nextReconciliationUtc = DateTime.UtcNow;
 
         var strategyStart = AlignToMinute(DateTime.UtcNow);
         var strategy = new DeterministicScriptStrategy(clock, instruments.All(), strategyStart);
@@ -291,6 +308,11 @@ internal sealed class EngineLoopService : BackgroundService
         {
             await _journalWriter.DisposeAsync().ConfigureAwait(false);
             _journalWriter = null;
+        }
+        if (_reconciliationJournal is not null)
+        {
+            await _reconciliationJournal.DisposeAsync().ConfigureAwait(false);
+            _reconciliationJournal = null;
         }
 
         _tickSource?.Dispose();
@@ -486,6 +508,8 @@ internal sealed class EngineLoopService : BackgroundService
                 _state.IncrementAlertCounter();
                 UpdateHostMetrics();
             }
+
+            await TryEmitReconciliationAsync(ct).ConfigureAwait(false);
         }
     }
 
@@ -690,6 +714,52 @@ internal sealed class EngineLoopService : BackgroundService
         }
 
         return Path.Combine(configDir, "journals");
+    }
+
+    private Func<CancellationToken, Task<BrokerAccountSnapshot?>> CreateBrokerSnapshotProvider()
+    {
+        if (_executionAdapter is IBrokerAccountSnapshotProvider provider)
+        {
+            return async token => (BrokerAccountSnapshot?)await provider.GetBrokerAccountSnapshotAsync(token).ConfigureAwait(false);
+        }
+
+        return _ => Task.FromResult<BrokerAccountSnapshot?>(null);
+    }
+
+    private async Task TryEmitReconciliationAsync(CancellationToken ct)
+    {
+        if (_reconciliationTelemetry is null)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        if (now < _nextReconciliationUtc)
+        {
+            return;
+        }
+
+        if (!await _reconcileLock.WaitAsync(0, ct).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        try
+        {
+            _nextReconciliationUtc = now + _reconciliationInterval;
+            await _reconciliationTelemetry.EmitAsync(now, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to emit reconciliation snapshot.");
+        }
+        finally
+        {
+            _reconcileLock.Release();
+        }
     }
 
     private InMemoryInstrumentCatalog LoadInstrumentCatalog(EngineConfig config, JsonDocument raw, string configDir)
@@ -978,8 +1048,6 @@ internal sealed class EngineLoopService : BackgroundService
         }
     }
 }
-
-
 
 
 

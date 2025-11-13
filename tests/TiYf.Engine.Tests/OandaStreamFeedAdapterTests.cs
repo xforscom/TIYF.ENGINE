@@ -21,7 +21,9 @@ public class OandaStreamFeedAdapterTests
             RetryMaxDelay: TimeSpan.FromSeconds(2),
             RetryMaxAttempts: 3,
             HandshakeEndpoint: "/accounts/{accountId}/summary",
-            OrderEndpoint: "/accounts/{accountId}/orders");
+            OrderEndpoint: "/accounts/{accountId}/orders",
+            PositionsEndpoint: "/accounts/{accountId}/openPositions",
+            PendingOrdersEndpoint: "/accounts/{accountId}/orders?state=PENDING");
 
     private static OandaStreamSettings CreateStreamSettings(TimeSpan? maxBackoff = null) =>
         new(

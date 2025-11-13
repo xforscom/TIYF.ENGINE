@@ -14,7 +14,9 @@ public sealed record OandaAdapterSettings(
     TimeSpan RetryMaxDelay,
     int RetryMaxAttempts,
     string HandshakeEndpoint,
-    string OrderEndpoint)
+    string OrderEndpoint,
+    string PositionsEndpoint,
+    string PendingOrdersEndpoint)
 {
     public static OandaAdapterSettings FromJson(JsonElement adapterNode, string adapterType)
     {
@@ -99,6 +101,8 @@ public sealed record OandaAdapterSettings(
         var retryAttempts = (int)ResolveLong(cfgNode, "retryMaxAttempts", defaults.RetryMaxAttempts);
         var handshakeEndpoint = ResolveString(cfgNode, "handshakeEndpoint", string.Empty, defaults.HandshakeEndpoint);
         var orderEndpoint = ResolveString(cfgNode, "orderEndpoint", string.Empty, defaults.OrderEndpoint);
+        var positionsEndpoint = ResolveString(cfgNode, "positionsEndpoint", string.Empty, defaults.PositionsEndpoint);
+        var pendingEndpoint = ResolveString(cfgNode, "pendingOrdersEndpoint", string.Empty, defaults.PendingOrdersEndpoint);
 
         return new OandaAdapterSettings(
             lower,
@@ -112,7 +116,9 @@ public sealed record OandaAdapterSettings(
             retryMax <= TimeSpan.Zero ? defaults.RetryMaxDelay : retryMax,
             retryAttempts <= 0 ? defaults.RetryMaxAttempts : retryAttempts,
             string.IsNullOrWhiteSpace(handshakeEndpoint) ? defaults.HandshakeEndpoint : handshakeEndpoint,
-            string.IsNullOrWhiteSpace(orderEndpoint) ? defaults.OrderEndpoint : orderEndpoint);
+            string.IsNullOrWhiteSpace(orderEndpoint) ? defaults.OrderEndpoint : orderEndpoint,
+            string.IsNullOrWhiteSpace(positionsEndpoint) ? defaults.PositionsEndpoint : positionsEndpoint,
+            string.IsNullOrWhiteSpace(pendingEndpoint) ? defaults.PendingOrdersEndpoint : pendingEndpoint);
     }
 
     private static OandaAdapterSettings DefaultsFor(string mode)
@@ -134,6 +140,8 @@ public sealed record OandaAdapterSettings(
             RetryMaxDelay: TimeSpan.FromSeconds(2),
             RetryMaxAttempts: 5,
             HandshakeEndpoint: "/accounts/{accountId}/summary",
-            OrderEndpoint: "/accounts/{accountId}/orders");
+            OrderEndpoint: "/accounts/{accountId}/orders",
+            PositionsEndpoint: "/accounts/{accountId}/openPositions",
+            PendingOrdersEndpoint: "/accounts/{accountId}/orders?state=PENDING");
     }
 }

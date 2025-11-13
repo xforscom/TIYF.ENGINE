@@ -44,6 +44,9 @@ public sealed class EngineHostState
     private double? _gvrsRaw;
     private double? _gvrsEwma;
     private string? _gvrsBucket;
+    private long _reconciliationMismatchesTotal;
+    private DateTime? _lastReconciliationUtc;
+    private ReconciliationStatus _lastReconciliationStatus = ReconciliationStatus.Unknown;
 
     public EngineHostState(string adapter, IEnumerable<string>? featureFlags)
     {
@@ -433,7 +436,8 @@ public sealed class EngineHostState
                 gvrs_raw = metrics.GvrsRaw,
                 gvrs_ewma = metrics.GvrsEwma,
                 gvrs_bucket = metrics.GvrsBucket,
-                promotion = CreatePromotionHealthUnsafe()
+                promotion = CreatePromotionHealthUnsafe(),
+                reconciliation = CreateReconciliationHealthUnsafe()
             };
         }
     }
@@ -473,7 +477,10 @@ public sealed class EngineHostState
             _gvrsEwma,
             _gvrsBucket,
             _promotionConfigHash,
-            _promotionTelemetry);
+            _promotionTelemetry,
+            _reconciliationMismatchesTotal,
+            _lastReconciliationUtc.HasValue ? new DateTimeOffset(_lastReconciliationUtc.Value).ToUnixTimeSeconds() : (double?)null,
+            _lastReconciliationStatus.ToString().ToLowerInvariant());
     }
 
     private static DateTime? NormalizeNullableUtc(DateTime? utc)
@@ -501,6 +508,34 @@ public sealed class EngineHostState
         };
     }
 
+    private object? CreateReconciliationHealthUnsafe()
+    {
+        if (!_lastReconciliationUtc.HasValue && _reconciliationMismatchesTotal == 0 && _lastReconciliationStatus == ReconciliationStatus.Unknown)
+        {
+            return null;
+        }
+
+        return new
+        {
+            last_reconcile_utc = _lastReconciliationUtc,
+            last_status = _lastReconciliationStatus.ToString().ToLowerInvariant(),
+            mismatches_total = _reconciliationMismatchesTotal
+        };
+    }
+
+    public void RecordReconciliationTelemetry(ReconciliationStatus status, long mismatchesDelta, DateTime utc)
+    {
+        lock (_sync)
+        {
+            _lastReconciliationUtc = NormalizeUtc(utc);
+            _lastReconciliationStatus = status;
+            if (mismatchesDelta > 0)
+            {
+                _reconciliationMismatchesTotal += mismatchesDelta;
+            }
+        }
+    }
+
     private static decimal ClampProbability(decimal value)
     {
         if (value < 0m) return 0m;
@@ -509,5 +544,4 @@ public sealed class EngineHostState
     }
 
 }
-
 
