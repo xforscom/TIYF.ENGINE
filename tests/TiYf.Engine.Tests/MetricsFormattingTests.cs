@@ -28,7 +28,7 @@ public class MetricsFormattingTests
         state.RegisterOrderRejected();
         state.UpdateIdempotencyMetrics(2, 1, 3);
         state.SetIdempotencyPersistenceStats(4, 1, DateTime.UtcNow);
-        state.SetSlippageModel("zero");
+        state.SetSlippageModel("fixed_bps");
         state.RecordSlippage(0.0002m);
         state.RecordReconciliationTelemetry(ReconciliationStatus.Match, 0, DateTime.UtcNow);
 
@@ -56,7 +56,7 @@ public class MetricsFormattingTests
         Assert.Contains("engine_idempotency_evictions_total 3", metricsText);
         Assert.Contains("engine_idempotency_persisted_loaded 4", metricsText);
         Assert.Contains("engine_idempotency_persisted_expired_total 1", metricsText);
-        Assert.Contains("engine_slippage_model{model=\"zero\"} 1", metricsText);
+        Assert.Contains("engine_slippage_model{model=\"fixed_bps\"} 1", metricsText);
         Assert.Contains("engine_slippage_last_price_delta 0.0002", metricsText);
         Assert.Contains("engine_slippage_adjusted_orders_total 1", metricsText);
         Assert.Contains("engine_reconcile_mismatches_total", metricsText);
@@ -81,7 +81,7 @@ public class MetricsFormattingTests
         state.RegisterOrderRejected();
         state.UpdateIdempotencyMetrics(5, 4, 7);
         state.SetIdempotencyPersistenceStats(2, 1, DateTime.UtcNow);
-        state.SetSlippageModel("fixed-test");
+        state.SetSlippageModel("fixed_bps");
         state.RecordSlippage(-0.00015m);
         state.RecordReconciliationTelemetry(ReconciliationStatus.Mismatch, 2, DateTime.UtcNow);
         var payload = state.CreateHealthPayload();
@@ -114,7 +114,7 @@ public class MetricsFormattingTests
         var cacheSize = root.GetProperty("idempotency_cache_size");
         Assert.Equal(5, cacheSize.GetProperty("order").GetInt64());
         Assert.Equal(4, cacheSize.GetProperty("cancel").GetInt64());
-        Assert.Equal("fixed-test", root.GetProperty("slippage_model").GetString());
+        Assert.Equal("fixed_bps", root.GetProperty("slippage_model").GetString());
         var slippage = root.GetProperty("slippage");
         Assert.Equal(-0.00015, slippage.GetProperty("last_price_delta").GetDouble(), 6);
         Assert.Equal(1, slippage.GetProperty("adjusted_orders_total").GetInt64());

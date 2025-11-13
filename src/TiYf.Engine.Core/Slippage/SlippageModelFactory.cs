@@ -11,7 +11,7 @@ public static class SlippageModelFactory
         {
             "zero" => new ZeroSlippageModel(),
             "fixed_bps" => new FixedBpsSlippageModel(profile?.FixedBps ?? new FixedBpsSlippageProfile()),
-            _ => throw new ArgumentOutOfRangeException(nameof(profile), profile?.Model ?? legacyName, "Unsupported slippage model")
+            _ => throw new ArgumentOutOfRangeException("model", profile?.Model ?? legacyName, "Unsupported slippage model")
         };
     }
 

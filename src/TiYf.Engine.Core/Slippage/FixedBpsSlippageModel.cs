@@ -4,7 +4,8 @@ using System.Collections.Generic;
 namespace TiYf.Engine.Core.Slippage;
 
 /// <summary>
-/// Applies deterministic slippage by widening fills a fixed number of basis points per instrument.
+/// Applies deterministic slippage by applying a fixed number of basis points per instrument in an adverse direction:
+/// buys fill higher (+delta) and sells fill lower (-delta), both unfavorable to the trader.
 /// </summary>
 public sealed class FixedBpsSlippageModel : ISlippageModel
 {

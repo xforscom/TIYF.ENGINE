@@ -152,6 +152,7 @@ public sealed class EngineHostState
     {
         lock (_sync)
         {
+            // Always capture the last seen delta (including zero) so /health reflects the most recent order.
             _slippageLastPriceDelta = (double)priceDelta;
             if (priceDelta != 0m)
             {

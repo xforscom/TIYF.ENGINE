@@ -6,11 +6,11 @@ var options = ProbeOptions.Parse(args);
 Directory.CreateDirectory(options.OutputDirectory);
 
 var (config, _, _) = EngineConfigLoader.Load(options.ConfigPath);
-var profile = config.Slippage ?? new SlippageProfile(config.SlippageModel ?? "zero");
+var profile = config.Slippage;
 var model = SlippageModelFactory.Create(profile, config.SlippageModel);
 var records = LoadOrders(options.OrdersPath);
 
-var now = DateTime.UtcNow;
+var now = DateTime.UtcNow; // used for timestamp decoration only; model is time-independent in M8-C
 var results = new List<SlippageResult>();
 foreach (var sample in records)
 {
@@ -18,7 +18,8 @@ foreach (var sample in records)
     results.Add(new SlippageResult(sample, adjusted));
 }
 
-var summary = new SlippageSummary(results, SlippageModelFactory.Normalize(profile?.Model ?? config.SlippageModel));
+var modelName = SlippageModelFactory.Normalize(profile?.Model ?? config.SlippageModel);
+var summary = new SlippageSummary(results, modelName);
 WriteSummary(Path.Combine(options.OutputDirectory, "summary.txt"), summary);
 WriteMetrics(Path.Combine(options.OutputDirectory, "metrics.txt"), summary);
 WriteHealth(Path.Combine(options.OutputDirectory, "health.json"), summary);
