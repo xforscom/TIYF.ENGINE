@@ -40,9 +40,6 @@ jobs:
       run:
         shell: pwsh
     env:
-      DOTNET_INSTALL_DIR: ${{ runner.temp }}/.dotnet
-      DOTNET_ROOT: ${{ runner.temp }}/.dotnet
-      PATH: ${{ runner.temp }}/.dotnet:${{ runner.temp }}/.dotnet/tools:${{ env.PATH }}
       ADAPTER_MODE: oanda-demo
       RUN_ID: ${{ format('OANDA-DAILY-{0}', github.run_number) }}
       DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || inputs.dryRun }}

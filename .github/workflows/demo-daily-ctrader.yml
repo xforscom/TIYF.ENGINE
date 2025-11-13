@@ -50,9 +50,6 @@ jobs:
         shell: pwsh
     environment: ctrader-demo
     env:
-      DOTNET_INSTALL_DIR: ${{ runner.temp }}/.dotnet
-      DOTNET_ROOT: ${{ runner.temp }}/.dotnet
-      PATH: ${{ runner.temp }}/.dotnet:${{ runner.temp }}/.dotnet/tools:${{ env.PATH }}
       ADAPTER_REQUESTED: ${{ github.event.inputs.adapter || 'stub' }}
       EXPECTED_UNIVERSE_LINE: EURUSD, GBPUSD, USDJPY, USDCHF, USDCAD, AUDUSD, NZDUSD, XAUUSD
       DISK_REQUIRED_GB: '20'
