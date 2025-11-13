@@ -119,14 +119,15 @@ public sealed class EngineLoop
     private readonly Queue<string> _orderIdQueue = new();
     private readonly Dictionary<string, DateTime> _cancelIdempotency = new(StringComparer.Ordinal);
     private readonly Queue<string> _cancelIdQueue = new();
-    private const int OrderIdempotencyCapacity = 5000;
-    private const int CancelIdempotencyCapacity = 5000;
+    public const int OrderIdempotencyCapacity = 5000;
+    public const int CancelIdempotencyCapacity = 5000;
     private readonly TimeSpan _idempotencyTtl = TimeSpan.FromHours(24);
     private DateTime _lastKillSwitchAlertUtc = DateTime.MinValue;
     private readonly Action<string, long>? _onOrderAccepted;
     private readonly Action? _onOrderRejected;
     private readonly Action<int, int, long>? _onIdempotencyMetrics;
     private readonly Action<string>? _warnCallback;
+    private readonly IIdempotencyPersistence? _idempotencyPersistence;
     private long _idempotencyEvictions;
     private bool _orderEvictionWarned;
     private bool _cancelEvictionWarned;
@@ -148,6 +149,7 @@ public sealed class EngineLoop
         _orderIdQueue.Enqueue(key);
         TrimOrderCache(now);
         ReportIdempotencyMetrics();
+        _idempotencyPersistence?.AddKey(IdempotencyKind.Order, key, now);
     }
 
     private void UnregisterOrderKey(string key)
@@ -155,6 +157,7 @@ public sealed class EngineLoop
         if (_orderIdempotency.Remove(key))
         {
             ReportIdempotencyMetrics();
+            _idempotencyPersistence?.RemoveKey(IdempotencyKind.Order, key);
         }
     }
 
@@ -169,6 +172,7 @@ public sealed class EngineLoop
         _cancelIdQueue.Enqueue(key);
         TrimCancelCache(now);
         ReportIdempotencyMetrics();
+        _idempotencyPersistence?.AddKey(IdempotencyKind.Cancel, key, now);
         return false;
     }
 
@@ -193,6 +197,7 @@ public sealed class EngineLoop
             }
 
             _orderIdempotency.Remove(oldKey);
+            _idempotencyPersistence?.RemoveKey(IdempotencyKind.Order, oldKey);
         }
     }
 
@@ -217,7 +222,27 @@ public sealed class EngineLoop
             }
 
             _cancelIdempotency.Remove(oldKey);
+            _idempotencyPersistence?.RemoveKey(IdempotencyKind.Cancel, oldKey);
         }
+    }
+
+    private void RestoreIdempotency(in IdempotencySnapshot snapshot)
+    {
+        foreach (var entry in snapshot.Orders.OrderBy(e => e.TimestampUtc))
+        {
+            _orderIdempotency[entry.Key] = entry.TimestampUtc;
+            _orderIdQueue.Enqueue(entry.Key);
+        }
+
+        foreach (var entry in snapshot.Cancels.OrderBy(e => e.TimestampUtc))
+        {
+            _cancelIdempotency[entry.Key] = entry.TimestampUtc;
+            _cancelIdQueue.Enqueue(entry.Key);
+        }
+
+        TrimOrderCache(snapshot.LoadedUtc);
+        TrimCancelCache(snapshot.LoadedUtc);
+        ReportIdempotencyMetrics();
     }
 
     private void ReportIdempotencyMetrics()
@@ -472,7 +497,7 @@ public sealed class EngineLoop
         Console.WriteLine($"OrderSend ok decision={decisionId} brokerOrderId={id} symbol={symbol}");
     }
 
-    public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action<Bar>? onBarEmitted = null, Action<int, int>? onPositionMetrics = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, string sourceAdapter = "stub", long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true, SentimentGuardConfig? sentimentConfig = null, string? penaltyConfig = null, bool forcePenalty = false, bool ciPenaltyScaffold = false, string riskMode = "off", string? riskConfigHash = null, IReadOnlyList<NewsEvent>? newsEvents = null, IReadOnlyDictionary<long, string>? timeframeLabels = null, Action<string, bool>? riskGateCallback = null, Action<MarketContextService.GvrsSnapshot>? gvrsSnapshotCallback = null, ISlippageModel? slippageModel = null, Func<DateTime>? utcNow = null, Action<string, long>? orderAcceptedCallback = null, Action? orderRejectedCallback = null, Action<int, int, long>? idempotencyMetricsCallback = null, Action<string>? warnCallback = null)
+    public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action<Bar>? onBarEmitted = null, Action<int, int>? onPositionMetrics = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, string sourceAdapter = "stub", long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true, SentimentGuardConfig? sentimentConfig = null, string? penaltyConfig = null, bool forcePenalty = false, bool ciPenaltyScaffold = false, string riskMode = "off", string? riskConfigHash = null, IReadOnlyList<NewsEvent>? newsEvents = null, IReadOnlyDictionary<long, string>? timeframeLabels = null, Action<string, bool>? riskGateCallback = null, Action<MarketContextService.GvrsSnapshot>? gvrsSnapshotCallback = null, ISlippageModel? slippageModel = null, Func<DateTime>? utcNow = null, Action<string, long>? orderAcceptedCallback = null, Action? orderRejectedCallback = null, Action<int, int, long>? idempotencyMetricsCallback = null, Action<string>? warnCallback = null, IIdempotencyPersistence? idempotencyPersistence = null, IdempotencySnapshot? persistedIdempotencySnapshot = null)
     {
         _clock = clock; _builders = builders; _barKeyTracker = tracker; _journal = journal; _ticks = ticks; _barEventType = barEventType; _seq = (journal is FileJournalWriter fj ? fj.NextSequence : 1UL) - 1UL; _onBarEmitted = onBarEmitted; _onPositionMetrics = onPositionMetrics; _riskFormulas = riskFormulas; _basketAggregator = basketAggregator; _configHash = configHash; _schemaVersion = schemaVersion; _riskEnforcer = riskEnforcer; _riskConfig = riskConfig; _equityOverride = equityOverride; _deterministicStrategy = deterministicStrategy; _execution = execution; _positions = positions; _tradesWriter = tradesWriter; _dataVersion = dataVersion; _sourceAdapter = string.IsNullOrWhiteSpace(sourceAdapter) ? "stub" : sourceAdapter; _riskProbeEnabled = riskProbeEnabled; _sentimentConfig = sentimentConfig; _penaltyMode = penaltyConfig ?? "off"; _forcePenalty = forcePenalty; _ciPenaltyScaffold = ciPenaltyScaffold; _riskMode = string.IsNullOrWhiteSpace(riskMode) ? "off" : riskMode.ToLowerInvariant();
         _sizeUnitsFx = sizeUnitsFx; _sizeUnitsXau = sizeUnitsXau;
@@ -490,6 +515,11 @@ public sealed class EngineLoop
         _onOrderRejected = orderRejectedCallback;
         _onIdempotencyMetrics = idempotencyMetricsCallback;
         _warnCallback = warnCallback;
+        _idempotencyPersistence = idempotencyPersistence;
+        if (persistedIdempotencySnapshot.HasValue)
+        {
+            RestoreIdempotency(persistedIdempotencySnapshot.Value);
+        }
         ReportIdempotencyMetrics();
         if (_marketContextService is null)
         {

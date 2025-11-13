@@ -27,6 +27,7 @@ public class MetricsFormattingTests
         state.RegisterOrderAccepted("EURUSD", 250);
         state.RegisterOrderRejected();
         state.UpdateIdempotencyMetrics(2, 1, 3);
+        state.SetIdempotencyPersistenceStats(4, 1, DateTime.UtcNow);
         state.SetSlippageModel("zero");
         state.RecordReconciliationTelemetry(ReconciliationStatus.Match, 0, DateTime.UtcNow);
 
@@ -52,6 +53,8 @@ public class MetricsFormattingTests
         Assert.Contains("engine_idempotency_cache_size{kind=\"order\"} 2", metricsText);
         Assert.Contains("engine_idempotency_cache_size{kind=\"cancel\"} 1", metricsText);
         Assert.Contains("engine_idempotency_evictions_total 3", metricsText);
+        Assert.Contains("engine_idempotency_persisted_loaded 4", metricsText);
+        Assert.Contains("engine_idempotency_persisted_expired_total 1", metricsText);
         Assert.Contains("engine_slippage_model{model=\"zero\"} 1", metricsText);
         Assert.Contains("engine_reconcile_mismatches_total", metricsText);
         Assert.Contains("engine_reconcile_last_status{status=\"match\"} 1", metricsText);
@@ -74,6 +77,7 @@ public class MetricsFormattingTests
         state.RegisterOrderAccepted("GBPUSD", 75);
         state.RegisterOrderRejected();
         state.UpdateIdempotencyMetrics(5, 4, 7);
+        state.SetIdempotencyPersistenceStats(2, 1, DateTime.UtcNow);
         state.SetSlippageModel("fixed-test");
         state.RecordReconciliationTelemetry(ReconciliationStatus.Mismatch, 2, DateTime.UtcNow);
         var payload = state.CreateHealthPayload();
@@ -111,5 +115,8 @@ public class MetricsFormattingTests
         var reconciliation = root.GetProperty("reconciliation");
         Assert.Equal(2, reconciliation.GetProperty("mismatches_total").GetInt64());
         Assert.Equal("mismatch", reconciliation.GetProperty("last_status").GetString());
+        var persistence = root.GetProperty("idempotency_persistence");
+        Assert.Equal(2, persistence.GetProperty("loaded_keys").GetInt32());
+        Assert.Equal(1, persistence.GetProperty("expired_dropped").GetInt32());
     }
 }

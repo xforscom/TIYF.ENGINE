@@ -105,6 +105,30 @@ public class ReconciliationTelemetryTests : IDisposable
         Assert.Equal(1.2450m, record.EnginePosition!.AveragePrice);
     }
 
+    [Fact]
+    public void RecordBuilder_PureShort_ProducesPositiveAveragePrice()
+    {
+        var now = new DateTime(2024, 5, 10, 0, 0, 0, DateTimeKind.Utc);
+        var enginePositions = new[]
+        {
+            ("USDJPY", TradeSide.Sell, 148.2500m, 100_000L, now)
+        };
+        var brokerSnapshot = new BrokerAccountSnapshot(
+            now,
+            new[]
+            {
+                new BrokerPositionSnapshot("USDJPY", TradeSide.Sell, 100_000L, 148.2500m)
+            },
+            Array.Empty<BrokerOrderSnapshot>());
+
+        var records = ReconciliationRecordBuilder.Build(now, enginePositions, brokerSnapshot);
+        var record = Assert.Single(records);
+        Assert.Equal(ReconciliationStatus.Match, record.Status);
+        Assert.Equal("aligned", record.Reason);
+        Assert.NotNull(record.EnginePosition);
+        Assert.Equal(148.2500m, record.EnginePosition!.AveragePrice);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempDir))

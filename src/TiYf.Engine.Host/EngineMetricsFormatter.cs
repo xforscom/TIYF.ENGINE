@@ -44,6 +44,12 @@ public static class EngineMetricsFormatter
             AppendMetric(builder, "engine_idempotency_cache_size", kvp.Value, "kind", kvp.Key);
         }
         AppendMetric(builder, "engine_idempotency_evictions_total", snapshot.IdempotencyEvictionsTotal);
+        AppendMetric(builder, "engine_idempotency_persisted_loaded", snapshot.IdempotencyPersistedLoaded);
+        AppendMetric(builder, "engine_idempotency_persisted_expired_total", snapshot.IdempotencyPersistedExpired);
+        if (snapshot.IdempotencyPersistenceLastLoadUnix.HasValue)
+        {
+            AppendMetric(builder, "engine_idempotency_persistence_last_load_ts", snapshot.IdempotencyPersistenceLastLoadUnix.Value);
+        }
         if (!string.IsNullOrWhiteSpace(snapshot.SlippageModel))
         {
             AppendMetric(builder, "engine_slippage_model", 1, "model", snapshot.SlippageModel);
