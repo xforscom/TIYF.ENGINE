@@ -104,8 +104,12 @@ internal static class ReconciliationRecordBuilder
             }
 
             var signedUnits = position.Side == TradeSide.Buy ? position.Units : -position.Units;
-            var notional = agg.Notional + (position.EntryPrice * position.Units);
-            var updated = agg with { SignedUnits = agg.SignedUnits + signedUnits, Notional = notional };
+            var signedNotional = position.EntryPrice * signedUnits;
+            var updated = agg with
+            {
+                SignedUnits = agg.SignedUnits + signedUnits,
+                Notional = agg.Notional + signedNotional
+            };
             aggregates[key] = updated;
         }
 

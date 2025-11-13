@@ -751,6 +751,7 @@ internal sealed class EngineLoopService : BackgroundService
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            _logger.LogDebug("Reconciliation snapshot emission canceled.");
         }
         catch (Exception ex)
         {
@@ -1048,7 +1049,6 @@ internal sealed class EngineLoopService : BackgroundService
         }
     }
 }
-
 
 
 

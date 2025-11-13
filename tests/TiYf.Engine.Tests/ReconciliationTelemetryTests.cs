@@ -80,6 +80,31 @@ public class ReconciliationTelemetryTests : IDisposable
         Assert.True(snapshot.ReconciliationLastUnixSeconds.HasValue);
     }
 
+    [Fact]
+    public void RecordBuilder_AggregatesSignedNotionalCorrectly()
+    {
+        var now = new DateTime(2024, 3, 2, 0, 0, 0, DateTimeKind.Utc);
+        var enginePositions = new[]
+        {
+            ("EURUSD", TradeSide.Buy, 1.2500m, 1_500L, now),
+            ("EURUSD", TradeSide.Sell, 1.2600m, 500L, now)
+        };
+        var brokerSnapshot = new BrokerAccountSnapshot(
+            now,
+            new[]
+            {
+                new BrokerPositionSnapshot("EURUSD", TradeSide.Buy, 1_000L, 1.2450m)
+            },
+            Array.Empty<BrokerOrderSnapshot>());
+
+        var records = ReconciliationRecordBuilder.Build(now, enginePositions, brokerSnapshot);
+        var record = Assert.Single(records);
+        Assert.Equal(ReconciliationStatus.Match, record.Status);
+        Assert.Equal("aligned", record.Reason);
+        Assert.NotNull(record.EnginePosition);
+        Assert.Equal(1.2450m, record.EnginePosition!.AveragePrice);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempDir))
