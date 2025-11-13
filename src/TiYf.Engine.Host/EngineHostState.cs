@@ -52,6 +52,11 @@ public sealed class EngineHostState
     private long _reconciliationMismatchesTotal;
     private DateTime? _lastReconciliationUtc;
     private ReconciliationStatus _lastReconciliationStatus = ReconciliationStatus.Unknown;
+    private DateTime? _newsFeedLastEventUtc;
+    private long _newsFeedEventsFetchedTotal;
+    private bool _newsBlackoutActive;
+    private DateTime? _newsBlackoutWindowStart;
+    private DateTime? _newsBlackoutWindowEnd;
 
     public EngineHostState(string adapter, IEnumerable<string>? featureFlags)
     {
@@ -158,6 +163,19 @@ public sealed class EngineHostState
             {
                 _slippageAdjustedOrdersTotal++;
             }
+        }
+    }
+
+    public void UpdateNewsTelemetry(DateTime? lastEventUtc, long eventsFetchedTotal, bool blackoutActive, DateTime? windowStart, DateTime? windowEnd)
+    {
+        lock (_sync)
+        {
+            // Normalize to UTC-only timestamps before surfacing in /health.
+            _newsFeedLastEventUtc = NormalizeNullableUtc(lastEventUtc);
+            _newsFeedEventsFetchedTotal = Math.Max(0, eventsFetchedTotal);
+            _newsBlackoutActive = blackoutActive;
+            _newsBlackoutWindowStart = NormalizeNullableUtc(windowStart);
+            _newsBlackoutWindowEnd = NormalizeNullableUtc(windowEnd);
         }
     }
 
@@ -467,6 +485,7 @@ public sealed class EngineHostState
                 gvrs_ewma = metrics.GvrsEwma,
                 gvrs_bucket = metrics.GvrsBucket,
                 promotion = CreatePromotionHealthUnsafe(),
+                news = CreateNewsHealthUnsafe(),
                 reconciliation = CreateReconciliationHealthUnsafe()
             };
         }
@@ -480,6 +499,8 @@ public sealed class EngineHostState
         var streamConnected = _streamConnected ? 1 : 0;
         var loopUptimeSeconds = _loopStartUtc.HasValue ? Math.Max(0d, (utcNow - _loopStartUtc.Value).TotalSeconds) : 0d;
         var loopLastSuccessUnix = _loopLastSuccessUtc.HasValue ? new DateTimeOffset(_loopLastSuccessUtc.Value).ToUnixTimeSeconds() : 0d;
+        var newsLastEventUnix = _newsFeedLastEventUtc.HasValue ? new DateTimeOffset(_newsFeedLastEventUtc.Value).ToUnixTimeSeconds() : (double?)null;
+        var newsWindowsActive = _newsBlackoutActive ? 1 : 0;
         return new EngineMetricsSnapshot(
             heartbeatAge,
             BarLagMilliseconds,
@@ -505,6 +526,9 @@ public sealed class EngineHostState
             _slippageModel,
             _slippageLastPriceDelta,
             _slippageAdjustedOrdersTotal,
+            newsLastEventUnix,
+            _newsFeedEventsFetchedTotal,
+            newsWindowsActive,
             _gvrsRaw,
             _gvrsEwma,
             _gvrsBucket,
@@ -549,6 +573,18 @@ public sealed class EngineHostState
         {
             last_price_delta = _slippageLastPriceDelta,
             adjusted_orders_total = _slippageAdjustedOrdersTotal
+        };
+    }
+
+    private object CreateNewsHealthUnsafe()
+    {
+        return new
+        {
+            last_event_utc = _newsFeedLastEventUtc,
+            events_fetched_total = _newsFeedEventsFetchedTotal,
+            blackout_active = _newsBlackoutActive,
+            blackout_window_start = _newsBlackoutWindowStart,
+            blackout_window_end = _newsBlackoutWindowEnd
         };
     }
 

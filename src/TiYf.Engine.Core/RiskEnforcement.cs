@@ -72,7 +72,7 @@ public sealed record DailyCapConfig(decimal? LossThreshold, decimal? GainThresho
 
 public sealed record GlobalDrawdownConfig(decimal MaxDrawdown);
 
-public sealed record NewsBlackoutConfig(bool Enabled, int MinutesBefore, int MinutesAfter, string? SourcePath);
+public sealed record NewsBlackoutConfig(bool Enabled, int MinutesBefore, int MinutesAfter, string? SourcePath, int PollSeconds = 60);
 
 public interface IRiskEnforcer
 {

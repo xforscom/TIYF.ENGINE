@@ -59,6 +59,12 @@ public static class EngineMetricsFormatter
             AppendMetric(builder, "engine_slippage_last_price_delta", snapshot.SlippageLastPriceDelta.Value);
         }
         AppendMetric(builder, "engine_slippage_adjusted_orders_total", snapshot.SlippageAdjustedOrdersTotal);
+        AppendMetric(builder, "engine_news_events_fetched_total", snapshot.NewsEventsFetchedTotal);
+        AppendMetric(builder, "engine_news_blackout_windows_total", snapshot.NewsBlackoutWindowsActive);
+        if (snapshot.NewsLastEventUnixSeconds.HasValue)
+        {
+            AppendMetric(builder, "engine_news_last_event_ts", snapshot.NewsLastEventUnixSeconds.Value);
+        }
         if (!string.IsNullOrWhiteSpace(snapshot.PromotionConfigHash))
         {
             AppendMetric(builder, "engine_promotion_config_hash", 1, "hash", snapshot.PromotionConfigHash);

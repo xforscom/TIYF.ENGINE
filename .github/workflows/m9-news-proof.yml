@@ -1,0 +1,58 @@
+name: m9-news-proof
+
+on:
+  workflow_dispatch:
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    concurrency:
+      group: m9-news-proof-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure .NET install dir
+        uses: ./.github/actions/configure-dotnet
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.416'
+          dotnet-quality: ga
+          cache: false
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test --configuration Release --no-build
+
+      - name: Run NewsProbe
+        run: |
+          set -euo pipefail
+          out="proof-artifacts/m9-news-proof"
+          mkdir -p "$out"
+          ~/.dotnet/dotnet run --project tools/NewsProbe/NewsProbe.csproj --configuration Release -- --config proof/m9-news-config.json --output "$out" --now 2025-11-01T10:15:00Z
+
+      - name: Verify probe outputs
+        run: |
+          set -euo pipefail
+          ls proof-artifacts/m9-news-proof
+          grep -F "engine_news_events_total" proof-artifacts/m9-news-proof/metrics.txt
+          grep -F "engine_news_blackout_windows_total" proof-artifacts/m9-news-proof/metrics.txt
+          cat proof-artifacts/m9-news-proof/summary.txt
+
+      - name: Upload proof artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m9-news-proof-${{ github.ref_name }}
+          path: proof-artifacts/m9-news-proof

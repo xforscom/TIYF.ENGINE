@@ -547,6 +547,11 @@ public sealed class EngineLoop
         }
 #endif
     }
+
+    public void UpdateNewsEvents(IReadOnlyList<NewsEvent> events)
+    {
+        _riskRails?.ReplaceNewsEvents(events ?? Array.Empty<NewsEvent>());
+    }
     private readonly long _sizeUnitsFx; private readonly long _sizeUnitsXau;
     private readonly string _penaltyMode; private readonly bool _forcePenalty; private readonly bool _ciPenaltyScaffold;
     private bool _penaltyEmitted = false; // ensure single forced emission

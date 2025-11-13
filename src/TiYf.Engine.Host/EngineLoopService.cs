@@ -15,6 +15,7 @@ using TiYf.Engine.Core.Instruments;
 using TiYf.Engine.Sidecar;
 using TiYf.Engine.Sim;
 using TiYf.Engine.Core.Slippage;
+using TiYf.Engine.Host.News;
 
 namespace TiYf.Engine.Host;
 
@@ -30,6 +31,7 @@ internal sealed class EngineLoopService : BackgroundService
     private readonly IConnectableExecutionAdapter? _executionAdapter;
     private FileIdempotencyPersistence? _idempotencyPersistence;
     private StartupReconciliationRunner? _startupReconciliationRunner;
+    private NewsFeedRunner? _newsFeedRunner;
 
     private LiveTickSource? _tickSource;
     private EngineLoop? _engineLoop;
@@ -111,6 +113,7 @@ internal sealed class EngineLoopService : BackgroundService
         _loopStartUtc = DateTime.UtcNow;
         _state.SetLoopStart(_loopStartUtc);
         _state.SetTimeframes(_configuredTimeframes.Select(tf => tf.Label));
+        _state.UpdateNewsTelemetry(null, 0, false, null, null);
 
         LoadSnapshot();
 
@@ -313,6 +316,8 @@ internal sealed class EngineLoopService : BackgroundService
             idempotencyPersistence: _idempotencyPersistence,
             persistedIdempotencySnapshot: persistedIdempotency);
 
+        await StartNewsFeedMonitorAsync(riskConfig?.NewsBlackout).ConfigureAwait(false);
+
         _logger.LogInformation("Streaming runtime initialized run_id={RunId} journal={Journal}", runId, journalWriter.RunDirectory);
         _state.SetLastLog($"stream:run_id={runId}");
         UpdateHostMetrics();
@@ -339,6 +344,12 @@ internal sealed class EngineLoopService : BackgroundService
         {
             await _reconciliationJournal.DisposeAsync().ConfigureAwait(false);
             _reconciliationJournal = null;
+        }
+
+        if (_newsFeedRunner is not null)
+        {
+            await _newsFeedRunner.DisposeAsync().ConfigureAwait(false);
+            _newsFeedRunner = null;
         }
 
         _tickSource?.Dispose();
@@ -1035,11 +1046,7 @@ internal sealed class EngineLoopService : BackgroundService
             return Array.Empty<NewsEvent>();
         }
 
-        var path = config.SourcePath;
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            path = "/opt/tiyf/news-stub/today.json";
-        }
+        var path = ResolveNewsSourcePath(config.SourcePath);
 
         try
         {
@@ -1075,5 +1082,54 @@ internal sealed class EngineLoopService : BackgroundService
             _logger.LogWarning(ex, "Failed to load news blackout schedule from {Path}", path);
             return Array.Empty<NewsEvent>();
         }
+    }
+
+    private async Task StartNewsFeedMonitorAsync(NewsBlackoutConfig? config)
+    {
+        if (_newsFeedRunner is not null)
+        {
+            await _newsFeedRunner.DisposeAsync().ConfigureAwait(false);
+            _newsFeedRunner = null;
+        }
+
+        if (config is null || !config.Enabled)
+        {
+            return;
+        }
+
+        var path = ResolveNewsSourcePath(config.SourcePath);
+        var feed = new FileNewsFeed(path, _logger);
+        _newsFeedRunner = NewsFeedRunner.Start(
+            feed,
+            _state,
+            events =>
+            {
+                var loop = _engineLoop;
+                if (loop is null)
+                {
+                    _logger.LogDebug("News events dropped because engine loop is not available yet (batch size={Count}).", events.Count);
+                    return;
+                }
+                loop.UpdateNewsEvents(events);
+            },
+            config,
+            _logger,
+            () => DateTime.UtcNow);
+    }
+
+    private string ResolveNewsSourcePath(string? configuredPath)
+    {
+        if (string.IsNullOrWhiteSpace(configuredPath))
+        {
+            return "/opt/tiyf/news-stub/today.json";
+        }
+
+        if (Path.IsPathRooted(configuredPath))
+        {
+            return configuredPath;
+        }
+
+        var root = _configDirectory ?? Directory.GetCurrentDirectory();
+        return Path.GetFullPath(Path.Combine(root, configuredPath));
     }
 }

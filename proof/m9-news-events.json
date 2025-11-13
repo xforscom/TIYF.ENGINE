@@ -1,0 +1,17 @@
+[
+  {
+    "utc": "2025-11-01T10:00:00Z",
+    "impact": "high",
+    "tags": ["USD", "EUR"]
+  },
+  {
+    "utc": "2025-11-01T14:30:00Z",
+    "impact": "medium",
+    "tags": ["GBP"]
+  },
+  {
+    "utc": "2025-11-02T09:15:00Z",
+    "impact": "low",
+    "tags": ["JPY"]
+  }
+]
