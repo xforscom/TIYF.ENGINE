@@ -32,6 +32,7 @@ internal sealed class EngineLoopService : BackgroundService
     private FileIdempotencyPersistence? _idempotencyPersistence;
     private StartupReconciliationRunner? _startupReconciliationRunner;
     private NewsFeedRunner? _newsFeedRunner;
+    private bool _newsHttpAuthWarningLogged;
 
     private LiveTickSource? _tickSource;
     private EngineLoop? _engineLoop;
@@ -113,7 +114,7 @@ internal sealed class EngineLoopService : BackgroundService
         _loopStartUtc = DateTime.UtcNow;
         _state.SetLoopStart(_loopStartUtc);
         _state.SetTimeframes(_configuredTimeframes.Select(tf => tf.Label));
-        _state.UpdateNewsTelemetry(null, 0, false, null, null);
+        _state.UpdateNewsTelemetry(null, 0, false, null, null, "file");
 
         LoadSnapshot();
 
@@ -1046,6 +1047,12 @@ internal sealed class EngineLoopService : BackgroundService
             return Array.Empty<NewsEvent>();
         }
 
+        var sourceType = NormalizeNewsSourceType(config.SourceType);
+        if (string.Equals(sourceType, "http", StringComparison.OrdinalIgnoreCase))
+        {
+            return Array.Empty<NewsEvent>();
+        }
+
         var path = ResolveNewsSourcePath(config.SourcePath);
 
         try
@@ -1097,8 +1104,7 @@ internal sealed class EngineLoopService : BackgroundService
             return;
         }
 
-        var path = ResolveNewsSourcePath(config.SourcePath);
-        var feed = new FileNewsFeed(path, _logger);
+        var feed = CreateNewsFeed(config, out var sourceType);
         _newsFeedRunner = NewsFeedRunner.Start(
             feed,
             _state,
@@ -1113,6 +1119,7 @@ internal sealed class EngineLoopService : BackgroundService
                 loop.UpdateNewsEvents(events);
             },
             config,
+            sourceType,
             _logger,
             () => DateTime.UtcNow);
     }
@@ -1131,5 +1138,62 @@ internal sealed class EngineLoopService : BackgroundService
 
         var root = _configDirectory ?? Directory.GetCurrentDirectory();
         return Path.GetFullPath(Path.Combine(root, configuredPath));
+    }
+
+    private INewsFeed CreateNewsFeed(NewsBlackoutConfig config, out string resolvedSourceType)
+    {
+        var requestedType = NormalizeNewsSourceType(config.SourceType);
+        if (string.Equals(requestedType, "http", StringComparison.OrdinalIgnoreCase) && config.Http is { } http && !string.IsNullOrWhiteSpace(http.BaseUri))
+        {
+            if (!Uri.TryCreate(http.BaseUri, UriKind.Absolute, out var baseUri))
+            {
+                _logger.LogWarning("News HTTP feed base_uri invalid ({BaseUri}); falling back to file source.", http.BaseUri);
+            }
+            else
+            {
+                var client = _httpClientFactory.CreateClient("news-feed");
+                client.Timeout = TimeSpan.FromSeconds(Math.Clamp(config.PollSeconds, 5, 600));
+                var apiKey = ResolveNewsApiKey(http.ApiKeyEnvVar);
+                if (!string.IsNullOrWhiteSpace(http.ApiKeyEnvVar) && string.IsNullOrWhiteSpace(apiKey) && !_newsHttpAuthWarningLogged)
+                {
+                    _logger.LogWarning("News HTTP feed requested env var {EnvVar} but it is not set; continuing without credentials.", http.ApiKeyEnvVar);
+                    _newsHttpAuthWarningLogged = true;
+                }
+
+                resolvedSourceType = "http";
+                return new HttpNewsFeed(
+                    client,
+                    _logger,
+                    baseUri,
+                    http.ApiKeyHeaderName,
+                    apiKey,
+                    http.Headers,
+                    http.QueryParameters);
+            }
+        }
+
+        resolvedSourceType = "file";
+        var path = ResolveNewsSourcePath(config.SourcePath);
+        return new FileNewsFeed(path, _logger);
+    }
+
+    private static string? ResolveNewsApiKey(string? envVar)
+    {
+        if (string.IsNullOrWhiteSpace(envVar))
+        {
+            return null;
+        }
+
+        return Environment.GetEnvironmentVariable(envVar);
+    }
+
+    private static string NormalizeNewsSourceType(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return "file";
+        }
+
+        return raw.Trim().ToLowerInvariant();
     }
 }

@@ -57,6 +57,7 @@ public sealed class EngineHostState
     private bool _newsBlackoutActive;
     private DateTime? _newsBlackoutWindowStart;
     private DateTime? _newsBlackoutWindowEnd;
+    private string _newsFeedSourceType = "file";
 
     public EngineHostState(string adapter, IEnumerable<string>? featureFlags)
     {
@@ -166,7 +167,7 @@ public sealed class EngineHostState
         }
     }
 
-    public void UpdateNewsTelemetry(DateTime? lastEventUtc, long eventsFetchedTotal, bool blackoutActive, DateTime? windowStart, DateTime? windowEnd)
+    public void UpdateNewsTelemetry(DateTime? lastEventUtc, long eventsFetchedTotal, bool blackoutActive, DateTime? windowStart, DateTime? windowEnd, string? sourceType = null)
     {
         lock (_sync)
         {
@@ -176,6 +177,10 @@ public sealed class EngineHostState
             _newsBlackoutActive = blackoutActive;
             _newsBlackoutWindowStart = NormalizeNullableUtc(windowStart);
             _newsBlackoutWindowEnd = NormalizeNullableUtc(windowEnd);
+            if (!string.IsNullOrWhiteSpace(sourceType))
+            {
+                _newsFeedSourceType = NormalizeNewsSourceType(sourceType);
+            }
         }
     }
 
@@ -501,6 +506,7 @@ public sealed class EngineHostState
         var loopLastSuccessUnix = _loopLastSuccessUtc.HasValue ? new DateTimeOffset(_loopLastSuccessUtc.Value).ToUnixTimeSeconds() : 0d;
         var newsLastEventUnix = _newsFeedLastEventUtc.HasValue ? new DateTimeOffset(_newsFeedLastEventUtc.Value).ToUnixTimeSeconds() : (double?)null;
         var newsWindowsActive = _newsBlackoutActive ? 1 : 0;
+        var newsSourceType = _newsFeedSourceType;
         return new EngineMetricsSnapshot(
             heartbeatAge,
             BarLagMilliseconds,
@@ -529,6 +535,7 @@ public sealed class EngineHostState
             newsLastEventUnix,
             _newsFeedEventsFetchedTotal,
             newsWindowsActive,
+            newsSourceType,
             _gvrsRaw,
             _gvrsEwma,
             _gvrsBucket,
@@ -552,6 +559,15 @@ public sealed class EngineHostState
     private static DateTime NormalizeUtc(DateTime utc)
     {
         return utc.Kind == DateTimeKind.Utc ? utc : DateTime.SpecifyKind(utc, DateTimeKind.Utc);
+    }
+
+    private static string NormalizeNewsSourceType(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return "file";
+        }
+        return raw.Trim().ToLowerInvariant();
     }
 
     private object? CreatePromotionHealthUnsafe()
@@ -584,7 +600,8 @@ public sealed class EngineHostState
             events_fetched_total = _newsFeedEventsFetchedTotal,
             blackout_active = _newsBlackoutActive,
             blackout_window_start = _newsBlackoutWindowStart,
-            blackout_window_end = _newsBlackoutWindowEnd
+            blackout_window_end = _newsBlackoutWindowEnd,
+            source_type = _newsFeedSourceType
         };
     }
 

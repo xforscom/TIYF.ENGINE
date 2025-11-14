@@ -72,7 +72,21 @@ public sealed record DailyCapConfig(decimal? LossThreshold, decimal? GainThresho
 
 public sealed record GlobalDrawdownConfig(decimal MaxDrawdown);
 
-public sealed record NewsBlackoutConfig(bool Enabled, int MinutesBefore, int MinutesAfter, string? SourcePath, int PollSeconds = 60);
+public sealed record NewsHttpSourceConfig(
+    string? BaseUri,
+    string? ApiKeyHeaderName = null,
+    string? ApiKeyEnvVar = null,
+    IReadOnlyDictionary<string, string>? Headers = null,
+    IReadOnlyDictionary<string, string>? QueryParameters = null);
+
+public sealed record NewsBlackoutConfig(
+    bool Enabled,
+    int MinutesBefore,
+    int MinutesAfter,
+    string? SourcePath,
+    int PollSeconds = 60,
+    string SourceType = "file",
+    NewsHttpSourceConfig? Http = null);
 
 public interface IRiskEnforcer
 {

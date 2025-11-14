@@ -19,11 +19,12 @@ internal sealed class NewsFeedRunner : IAsyncDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _loopTask;
     private readonly List<NewsEvent> _events = new();
+    private readonly string _sourceType;
     private DateTime? _lastSeenUtc;
     private int _lastSeenOccurrencesAtUtc;
     private long _eventsFetchedTotal;
 
-    private NewsFeedRunner(INewsFeed feed, EngineHostState state, Action<IReadOnlyList<NewsEvent>>? onEventsUpdated, NewsBlackoutConfig config, TimeSpan pollInterval, ILogger logger, Func<DateTime> utcNow)
+    private NewsFeedRunner(INewsFeed feed, EngineHostState state, Action<IReadOnlyList<NewsEvent>>? onEventsUpdated, NewsBlackoutConfig config, TimeSpan pollInterval, ILogger logger, Func<DateTime> utcNow, string sourceType)
     {
         _feed = feed;
         _state = state;
@@ -32,13 +33,14 @@ internal sealed class NewsFeedRunner : IAsyncDisposable
         _pollInterval = pollInterval;
         _logger = logger;
         _utcNow = utcNow;
+        _sourceType = string.IsNullOrWhiteSpace(sourceType) ? "file" : sourceType;
         _loopTask = Task.Run(() => RunAsync(_cts.Token));
     }
 
-    public static NewsFeedRunner Start(INewsFeed feed, EngineHostState state, Action<IReadOnlyList<NewsEvent>>? onEventsUpdated, NewsBlackoutConfig config, ILogger logger, Func<DateTime>? utcNow = null)
+    public static NewsFeedRunner Start(INewsFeed feed, EngineHostState state, Action<IReadOnlyList<NewsEvent>>? onEventsUpdated, NewsBlackoutConfig config, string sourceType, ILogger logger, Func<DateTime>? utcNow = null)
     {
         var intervalSeconds = Math.Max(5, config.PollSeconds);
-        return new NewsFeedRunner(feed, state, onEventsUpdated, config, TimeSpan.FromSeconds(intervalSeconds), logger, utcNow ?? (() => DateTime.UtcNow));
+        return new NewsFeedRunner(feed, state, onEventsUpdated, config, TimeSpan.FromSeconds(intervalSeconds), logger, utcNow ?? (() => DateTime.UtcNow), sourceType);
     }
 
     private async Task RunAsync(CancellationToken cancellationToken)
@@ -100,7 +102,8 @@ internal sealed class NewsFeedRunner : IAsyncDisposable
             _eventsFetchedTotal,
             start.HasValue && end.HasValue,
             start,
-            end);
+            end,
+            _sourceType);
     }
 
     private (DateTime?, DateTime?) ComputeCurrentBlackoutWindow(IReadOnlyList<NewsEvent> events)

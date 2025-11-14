@@ -27,4 +27,38 @@ public class RiskConfigParserTests
         Assert.Empty(rcSnake.Promotion.ShadowCandidates);
         Assert.Equal(rcSnake.Promotion.ConfigHash, rcCamel.Promotion.ConfigHash);
     }
+
+    [Fact]
+    public void NewsBlackout_ParsesHttpSource()
+    {
+        using var document = JsonDocument.Parse("""
+        {
+          "news_blackout": {
+            "enabled": true,
+            "minutes_before": 10,
+            "minutes_after": 20,
+            "poll_seconds": 45,
+            "source_type": "http",
+            "http": {
+              "base_uri": "https://example.test/feed",
+              "api_key_header": "X-Auth",
+              "api_key_env": "NEWS_TOKEN",
+              "headers": { "Accept": "application/json" },
+              "query": { "channel": "fx" }
+            }
+          }
+        }
+        """);
+
+        var config = RiskConfigParser.Parse(document.RootElement);
+        var news = config.NewsBlackout;
+        Assert.NotNull(news);
+        Assert.Equal("http", news!.SourceType);
+        Assert.NotNull(news.Http);
+        Assert.Equal("https://example.test/feed", news.Http!.BaseUri);
+        Assert.Equal("X-Auth", news.Http.ApiKeyHeaderName);
+        Assert.Equal("NEWS_TOKEN", news.Http.ApiKeyEnvVar);
+        Assert.Equal("application/json", news.Http.Headers?["Accept"]);
+        Assert.Equal("fx", news.Http.QueryParameters?["channel"]);
+    }
 }

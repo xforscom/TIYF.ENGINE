@@ -28,6 +28,7 @@ public readonly record struct EngineMetricsSnapshot(
     double? NewsLastEventUnixSeconds,
     long NewsEventsFetchedTotal,
     int NewsBlackoutWindowsActive,
+    string NewsSourceType,
     double? GvrsRaw,
     double? GvrsEwma,
     string? GvrsBucket,

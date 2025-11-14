@@ -17,10 +17,10 @@ var nowUtc = ParseOverride(nowRaw) ?? events.FirstOrDefault()?.Utc ?? defaultNow
 var (windowStart, windowEnd) = ComputeBlackout(nowUtc, newsConfig, events);
 
 var state = new EngineHostState("proof", Array.Empty<string>());
-state.UpdateNewsTelemetry(events.LastOrDefault()?.Utc, events.Count, windowStart.HasValue, windowStart, windowEnd);
+state.UpdateNewsTelemetry(events.LastOrDefault()?.Utc, events.Count, windowStart.HasValue, windowStart, windowEnd, newsConfig.SourceType);
 var health = JsonSerializer.Serialize(state.CreateHealthPayload(), new JsonSerializerOptions { WriteIndented = true });
 
-var metrics = BuildMetrics(events, windowStart, windowEnd);
+var metrics = BuildMetrics(events, windowStart, windowEnd, newsConfig.SourceType);
 var summary = BuildSummary(events.Count, events.LastOrDefault()?.Utc, windowStart, windowEnd);
 
 await File.WriteAllTextAsync(Path.Combine(outputPath, "summary.txt"), summary);
@@ -71,7 +71,8 @@ static (NewsBlackoutConfig Config, string Path) LoadConfig(string configPath, st
         throw new InvalidOperationException("news_blackout.source_path must be set or overridden");
     }
     var poll = blackoutNode.TryGetProperty("poll_seconds", out var pollProp) ? pollProp.GetInt32() : 60;
-    var config = new NewsBlackoutConfig(enabled, before, after, source, poll);
+    var sourceType = blackoutNode.TryGetProperty("source_type", out var typeProp) ? typeProp.GetString() : null;
+    var config = new NewsBlackoutConfig(enabled, before, after, source, poll, string.IsNullOrWhiteSpace(sourceType) ? "file" : sourceType!);
     var resolved = ResolveNewsPath(configPath, source);
     return (config, resolved);
 }
@@ -172,11 +173,13 @@ static string BuildSummary(int totalEvents, DateTime? lastEventUtc, DateTime? wi
     return $"news_summary events={totalEvents} last_event_utc={lastEventUtc?.ToString("O") ?? "n/a"} blackout_active={(windowStart.HasValue ? "true" : "false")} window_start={windowStart?.ToString("O") ?? "n/a"} window_end={windowEnd?.ToString("O") ?? "n/a"}";
 }
 
-static string BuildMetrics(IReadOnlyCollection<NewsEvent> events, DateTime? windowStart, DateTime? windowEnd)
+static string BuildMetrics(IReadOnlyCollection<NewsEvent> events, DateTime? windowStart, DateTime? windowEnd, string? sourceType)
 {
     var builder = new System.Text.StringBuilder();
     builder.AppendLine($"engine_news_events_fetched_total {events.Count}");
     builder.AppendLine($"engine_news_blackout_windows_total {(windowStart.HasValue && windowEnd.HasValue ? 1 : 0)}");
+    var normalizedType = string.IsNullOrWhiteSpace(sourceType) ? "file" : sourceType.Trim().ToLowerInvariant();
+    builder.AppendLine($"engine_news_source{{type=\"{normalizedType}\"}} 1");
     if (events.LastOrDefault() is { } last)
     {
         var unix = new DateTimeOffset(last.Utc).ToUnixTimeSeconds();

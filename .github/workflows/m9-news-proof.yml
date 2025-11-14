@@ -48,6 +48,7 @@ jobs:
           ls proof-artifacts/m9-news-proof
           grep -F "engine_news_events_fetched_total" proof-artifacts/m9-news-proof/metrics.txt
           grep -F "engine_news_blackout_windows_total" proof-artifacts/m9-news-proof/metrics.txt
+          grep -F 'engine_news_source{type="file"}' proof-artifacts/m9-news-proof/metrics.txt
           cat proof-artifacts/m9-news-proof/summary.txt
 
       - name: Upload proof artifacts
