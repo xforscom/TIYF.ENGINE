@@ -75,5 +75,5 @@ static DateTime? ParseUtc(string? raw)
         return parsed.Kind == DateTimeKind.Utc ? parsed : DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
     }
 
-    return false;
+    return null;
 }
