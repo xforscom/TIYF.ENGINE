@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using TiYf.Engine.Core;
 using TiYf.Engine.Core.Text;
+using TiYf.Engine.Sim;
 
 namespace TiYf.Engine.Host;
 
