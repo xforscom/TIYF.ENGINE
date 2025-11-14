@@ -179,7 +179,7 @@ public sealed class EngineHostState
             _newsBlackoutWindowEnd = NormalizeNullableUtc(windowEnd);
             if (!string.IsNullOrWhiteSpace(sourceType))
             {
-                _newsFeedSourceType = NormalizeNewsSourceType(sourceType);
+                _newsFeedSourceType = NewsSourceTypeHelper.Normalize(sourceType);
             }
         }
     }
@@ -559,15 +559,6 @@ public sealed class EngineHostState
     private static DateTime NormalizeUtc(DateTime utc)
     {
         return utc.Kind == DateTimeKind.Utc ? utc : DateTime.SpecifyKind(utc, DateTimeKind.Utc);
-    }
-
-    private static string NormalizeNewsSourceType(string? raw)
-    {
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return "file";
-        }
-        return raw.Trim().ToLowerInvariant();
     }
 
     private object? CreatePromotionHealthUnsafe()

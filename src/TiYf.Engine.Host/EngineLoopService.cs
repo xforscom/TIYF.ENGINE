@@ -1047,7 +1047,7 @@ internal sealed class EngineLoopService : BackgroundService
             return Array.Empty<NewsEvent>();
         }
 
-        var sourceType = NormalizeNewsSourceType(config.SourceType);
+        var sourceType = NewsSourceTypeHelper.Normalize(config.SourceType);
         if (string.Equals(sourceType, "http", StringComparison.OrdinalIgnoreCase))
         {
             return Array.Empty<NewsEvent>();
@@ -1142,7 +1142,7 @@ internal sealed class EngineLoopService : BackgroundService
 
     private INewsFeed CreateNewsFeed(NewsBlackoutConfig config, out string resolvedSourceType)
     {
-        var requestedType = NormalizeNewsSourceType(config.SourceType);
+        var requestedType = NewsSourceTypeHelper.Normalize(config.SourceType);
         if (string.Equals(requestedType, "http", StringComparison.OrdinalIgnoreCase) && config.Http is { } http && !string.IsNullOrWhiteSpace(http.BaseUri))
         {
             if (!Uri.TryCreate(http.BaseUri, UriKind.Absolute, out var baseUri))
@@ -1187,13 +1187,4 @@ internal sealed class EngineLoopService : BackgroundService
         return Environment.GetEnvironmentVariable(envVar);
     }
 
-    private static string NormalizeNewsSourceType(string? raw)
-    {
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return "file";
-        }
-
-        return raw.Trim().ToLowerInvariant();
-    }
 }

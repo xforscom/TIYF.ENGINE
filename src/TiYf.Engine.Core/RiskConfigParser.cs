@@ -178,15 +178,6 @@ public static class RiskConfigParser
         return dict.Count == 0 ? null : dict;
     }
 
-    private static string NormalizeNewsSourceType(string? raw)
-    {
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return "file";
-        }
-        return raw.Trim().ToLowerInvariant();
-    }
-
     private static Dictionary<string, decimal>? ParseExposureCaps(JsonElement parent)
     {
         if (TryObject(parent, "max_net_exposure_by_symbol", out var obj))
@@ -276,7 +267,7 @@ public static class RiskConfigParser
         string? sourcePath = (TryString(obj, "source_path", out var source) && !string.IsNullOrWhiteSpace(source)) ? source : null;
         int pollSeconds = TryInt(obj, "poll_seconds", out var poll) ? Math.Max(5, poll) : 60;
         var sourceTypeRaw = TryString(obj, "source_type", out var st) ? st : null;
-        var sourceType = NormalizeNewsSourceType(sourceTypeRaw);
+        var sourceType = NewsSourceTypeHelper.Normalize(sourceTypeRaw);
         NewsHttpSourceConfig? httpConfig = null;
         if (TryObject(obj, "http", out var httpNode))
         {

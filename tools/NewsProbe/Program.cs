@@ -72,7 +72,7 @@ static (NewsBlackoutConfig Config, string Path) LoadConfig(string configPath, st
     }
     var poll = blackoutNode.TryGetProperty("poll_seconds", out var pollProp) ? pollProp.GetInt32() : 60;
     var sourceType = blackoutNode.TryGetProperty("source_type", out var typeProp) ? typeProp.GetString() : null;
-    var config = new NewsBlackoutConfig(enabled, before, after, source, poll, string.IsNullOrWhiteSpace(sourceType) ? "file" : sourceType!);
+    var config = new NewsBlackoutConfig(enabled, before, after, source, poll, NewsSourceTypeHelper.Normalize(sourceType));
     var resolved = ResolveNewsPath(configPath, source);
     return (config, resolved);
 }
@@ -178,7 +178,7 @@ static string BuildMetrics(IReadOnlyCollection<NewsEvent> events, DateTime? wind
     var builder = new System.Text.StringBuilder();
     builder.AppendLine($"engine_news_events_fetched_total {events.Count}");
     builder.AppendLine($"engine_news_blackout_windows_total {(windowStart.HasValue && windowEnd.HasValue ? 1 : 0)}");
-    var normalizedType = string.IsNullOrWhiteSpace(sourceType) ? "file" : sourceType.Trim().ToLowerInvariant();
+    var normalizedType = NewsSourceTypeHelper.Normalize(sourceType);
     builder.AppendLine($"engine_news_source{{type=\"{normalizedType}\"}} 1");
     if (events.LastOrDefault() is { } last)
     {

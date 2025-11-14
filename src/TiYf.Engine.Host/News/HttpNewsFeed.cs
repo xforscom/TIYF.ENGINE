@@ -69,6 +69,21 @@ internal sealed class HttpNewsFeed : INewsFeed
         {
             throw;
         }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "HTTP error fetching news feed from {Uri}", _baseUri);
+            return Array.Empty<NewsEvent>();
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Malformed news feed payload from {Uri}", _baseUri);
+            return Array.Empty<NewsEvent>();
+        }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(ex, "I/O error fetching news feed from {Uri}", _baseUri);
+            return Array.Empty<NewsEvent>();
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed fetching news feed from {Uri}", _baseUri);
