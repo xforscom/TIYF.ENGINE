@@ -54,6 +54,10 @@
         { "name": "risk_proxy_z", "weight": 0.4 }
       ]
     },
+    "gvrs_gate": {
+      "enabled": true,
+      "block_on_volatile": true
+    },
     "promotion": {
       "enabled": true,
       "shadow_candidates": ["strategyA", "strategyB"],
