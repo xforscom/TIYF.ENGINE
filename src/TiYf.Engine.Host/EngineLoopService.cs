@@ -29,6 +29,7 @@ internal sealed class EngineLoopService : BackgroundService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly EngineHostOptions _hostOptions;
     private readonly IConnectableExecutionAdapter? _executionAdapter;
+    private readonly SecretProvenanceTracker _secretTracker;
     private FileIdempotencyPersistence? _idempotencyPersistence;
     private StartupReconciliationRunner? _startupReconciliationRunner;
     private NewsFeedRunner? _newsFeedRunner;
@@ -76,6 +77,7 @@ internal sealed class EngineLoopService : BackgroundService
         ILogger<EngineLoopService> logger,
         IHttpClientFactory httpClientFactory,
         IOptions<EngineHostOptions> hostOptions,
+        SecretProvenanceTracker secretTracker,
         IConnectableExecutionAdapter? executionAdapter = null)
     {
         _state = state ?? throw new ArgumentNullException(nameof(state));
@@ -85,6 +87,7 @@ internal sealed class EngineLoopService : BackgroundService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _hostOptions = hostOptions?.Value ?? throw new ArgumentNullException(nameof(hostOptions));
+        _secretTracker = secretTracker ?? throw new ArgumentNullException(nameof(secretTracker));
         _configuredTimeframes = ParseTimeframes(_hostOptions.Timeframes);
         if (_configuredTimeframes.Count == 0)
         {
@@ -1153,7 +1156,12 @@ internal sealed class EngineLoopService : BackgroundService
             {
                 var client = _httpClientFactory.CreateClient("news-feed");
                 client.Timeout = TimeSpan.FromSeconds(Math.Clamp(config.PollSeconds, 5, 600));
-                var apiKey = ResolveNewsApiKey(http.ApiKeyEnvVar);
+                var (apiKey, sourceLabel) = ResolveNewsApiKey(http.ApiKeyEnvVar);
+                if (!string.IsNullOrWhiteSpace(sourceLabel))
+                {
+                    _secretTracker.Record("news_http", sourceLabel);
+                    _state.UpdateSecretProvenance(_secretTracker.CreateSnapshot());
+                }
                 if (!string.IsNullOrWhiteSpace(http.ApiKeyEnvVar) && string.IsNullOrWhiteSpace(apiKey) && !_newsHttpAuthWarningLogged)
                 {
                     _logger.LogWarning("News HTTP feed requested env var {EnvVar} but it is not set; continuing without credentials.", http.ApiKeyEnvVar);
@@ -1177,14 +1185,20 @@ internal sealed class EngineLoopService : BackgroundService
         return new FileNewsFeed(path, _logger);
     }
 
-    private static string? ResolveNewsApiKey(string? envVar)
+    private static (string? Value, string Source) ResolveNewsApiKey(string? envVar)
     {
         if (string.IsNullOrWhiteSpace(envVar))
         {
-            return null;
+            return (null, "default");
         }
 
-        return Environment.GetEnvironmentVariable(envVar);
+        var value = Environment.GetEnvironmentVariable(envVar);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return (null, "missing");
+        }
+
+        return (value, "env");
     }
 
 }

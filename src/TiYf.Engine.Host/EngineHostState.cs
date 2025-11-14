@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using TiYf.Engine.Core;
 using TiYf.Engine.Core.Text;
@@ -57,6 +58,9 @@ public sealed class EngineHostState
     private bool _newsBlackoutActive;
     private DateTime? _newsBlackoutWindowStart;
     private DateTime? _newsBlackoutWindowEnd;
+    private string _configPath = string.Empty;
+    private string _configHash = string.Empty;
+    private readonly Dictionary<string, IReadOnlyCollection<string>> _secretProvenance = new(StringComparer.OrdinalIgnoreCase);
     private string _newsFeedSourceType = "file";
 
     public EngineHostState(string adapter, IEnumerable<string>? featureFlags)
@@ -386,6 +390,34 @@ public sealed class EngineHostState
         }
     }
 
+    public void SetConfigSource(string? path, string? hash)
+    {
+        lock (_sync)
+        {
+            _configPath = string.IsNullOrWhiteSpace(path) ? string.Empty : Path.GetFullPath(path);
+            _configHash = hash ?? string.Empty;
+        }
+    }
+
+    public void UpdateSecretProvenance(IReadOnlyDictionary<string, IReadOnlyCollection<string>>? snapshot)
+    {
+        if (snapshot is null)
+        {
+            return;
+        }
+
+        lock (_sync)
+        {
+            _secretProvenance.Clear();
+            foreach (var kvp in snapshot)
+            {
+                var values = kvp.Value?.ToArray() ?? Array.Empty<string>();
+                _secretProvenance[kvp.Key] = values;
+            }
+        }
+    }
+
+
     public void SetPromotionConfig(PromotionConfig? promotion)
     {
         lock (_sync)
@@ -473,6 +505,7 @@ public sealed class EngineHostState
                 decisions_total = metrics.DecisionsTotal,
                 loop_last_success_utc = _loopLastSuccessUtc,
                 loop_start_utc = _loopStartUtc,
+                config = new { path = _configPath, hash = _configHash },
                 risk_config_hash = _riskConfigHash,
                 promotion_config_hash = _promotionConfigHash,
                 risk_blocks_total = _riskBlocksTotal,
@@ -491,6 +524,7 @@ public sealed class EngineHostState
                 gvrs_bucket = metrics.GvrsBucket,
                 promotion = CreatePromotionHealthUnsafe(),
                 news = CreateNewsHealthUnsafe(),
+                secrets = CreateSecretsHealthUnsafe(),
                 reconciliation = CreateReconciliationHealthUnsafe()
             };
         }
@@ -507,6 +541,10 @@ public sealed class EngineHostState
         var newsLastEventUnix = _newsFeedLastEventUtc.HasValue ? new DateTimeOffset(_newsFeedLastEventUtc.Value).ToUnixTimeSeconds() : (double?)null;
         var newsWindowsActive = _newsBlackoutActive ? 1 : 0;
         var newsSourceType = _newsFeedSourceType;
+        var secretSnapshot = _secretProvenance.ToDictionary(
+            kvp => kvp.Key,
+            kvp => (IReadOnlyCollection<string>)(kvp.Value?.ToArray() ?? Array.Empty<string>()),
+            StringComparer.OrdinalIgnoreCase);
         return new EngineMetricsSnapshot(
             heartbeatAge,
             BarLagMilliseconds,
@@ -539,6 +577,8 @@ public sealed class EngineHostState
             _gvrsRaw,
             _gvrsEwma,
             _gvrsBucket,
+            _configHash,
+            _riskConfigHash,
             _promotionConfigHash,
             _promotionTelemetry,
             _reconciliationMismatchesTotal,
@@ -546,7 +586,8 @@ public sealed class EngineHostState
             _lastReconciliationStatus.ToString().ToLowerInvariant(),
             _idempotencyPersistedLoaded,
             _idempotencyPersistedExpired,
-            _idempotencyPersistenceLastLoadUtc.HasValue ? new DateTimeOffset(_idempotencyPersistenceLastLoadUtc.Value).ToUnixTimeSeconds() : (double?)null);
+            _idempotencyPersistenceLastLoadUtc.HasValue ? new DateTimeOffset(_idempotencyPersistenceLastLoadUtc.Value).ToUnixTimeSeconds() : (double?)null,
+            secretSnapshot);
     }
 
     private static DateTime? NormalizeNullableUtc(DateTime? utc)
@@ -594,6 +635,14 @@ public sealed class EngineHostState
             blackout_window_end = _newsBlackoutWindowEnd,
             source_type = _newsFeedSourceType
         };
+    }
+
+    private object CreateSecretsHealthUnsafe()
+    {
+        return _secretProvenance.ToDictionary(
+            kvp => kvp.Key,
+            kvp => string.Join(',', kvp.Value ?? Array.Empty<string>()),
+            StringComparer.OrdinalIgnoreCase);
     }
 
     private object CreateIdempotencyPersistenceHealth()

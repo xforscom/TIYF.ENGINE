@@ -1,3 +1,4 @@
+using System.IO;
 using System.Linq;
 using System.Text.Json;
 using TiYf.Engine.Core;
@@ -17,6 +18,7 @@ var nowUtc = ParseOverride(nowRaw) ?? events.FirstOrDefault()?.Utc ?? defaultNow
 var (windowStart, windowEnd) = ComputeBlackout(nowUtc, newsConfig, events);
 
 var state = new EngineHostState("proof", Array.Empty<string>());
+state.SetConfigSource(Path.GetFullPath(configPath), ConfigHash.Compute(File.ReadAllBytes(configPath)));
 state.UpdateNewsTelemetry(events.LastOrDefault()?.Utc, events.Count, windowStart.HasValue, windowStart, windowEnd, newsConfig.SourceType);
 var health = JsonSerializer.Serialize(state.CreateHealthPayload(), new JsonSerializerOptions { WriteIndented = true });
 

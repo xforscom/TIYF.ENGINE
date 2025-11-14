@@ -1,0 +1,91 @@
+name: m9-config-sot-proof
+
+on:
+  workflow_dispatch:
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    concurrency:
+      group: m9-config-sot-proof-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure .NET install dir
+        uses: ./.github/actions/configure-dotnet
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.416'
+          dotnet-quality: ga
+          cache: false
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Start host (loop disabled)
+        env:
+          OANDA_PRACTICE_TOKEN: demo-token
+          OANDA_PRACTICE_ACCOUNT_ID: demo-account
+          ENGINE_HOST_ENABLE_LOOP: "false"
+          ENGINE_HOST_ENABLE_STREAM: "false"
+          ENGINE_HOST_ENABLE_METRICS: "true"
+          ENGINE_HOST_PORT: "8095"
+        run: |
+          set -euo pipefail
+          dotnet run --project src/TiYf.Engine.Host/TiYf.Engine.Host.csproj --configuration Release -- --config sample-config.demo-oanda.json > host.log 2>&1 &
+          HOST_PID=$!
+          echo $HOST_PID > host.pid
+          for _ in $(seq 1 30); do
+            if curl -fsS "http://localhost:8095/health" > /dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          if ! kill -0 "$HOST_PID" 2>/dev/null; then
+            cat host.log
+            exit 1
+          fi
+
+      - name: Scrape telemetry
+        run: |
+          set -euo pipefail
+          mkdir -p proof-artifacts/m9-config-sot
+          curl -fsS "http://localhost:8095/health" > proof-artifacts/m9-config-sot/health.json
+          curl -fsS "http://localhost:8095/metrics" > proof-artifacts/m9-config-sot/metrics.txt
+          cp host.log proof-artifacts/m9-config-sot/host.log
+
+      - name: Verify config + secret telemetry
+        run: |
+          set -euo pipefail
+          jq -e '.config.path != null and .config.hash != ""' proof-artifacts/m9-config-sot/health.json > /dev/null
+          jq -e '.secrets | has("oanda_demo")' proof-artifacts/m9-config-sot/health.json > /dev/null
+          grep -F 'engine_config_hash' proof-artifacts/m9-config-sot/metrics.txt
+          grep -F 'engine_risk_config_hash' proof-artifacts/m9-config-sot/metrics.txt
+          grep -F 'engine_secret_provenance{integration="oanda_demo",source="env"} 1' proof-artifacts/m9-config-sot/metrics.txt
+          jq -r '.config.path' proof-artifacts/m9-config-sot/health.json > proof-artifacts/m9-config-sot/summary.txt
+
+      - name: Stop host
+        if: always()
+        run: |
+          if [ -f host.pid ]; then
+            HOST_PID=$(cat host.pid)
+            kill "$HOST_PID" 2>/dev/null || true
+            wait "$HOST_PID" 2>/dev/null || true
+          fi
+
+      - name: Upload proof artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m9-config-sot-proof-${{ github.ref_name }}
+          path: proof-artifacts/m9-config-sot

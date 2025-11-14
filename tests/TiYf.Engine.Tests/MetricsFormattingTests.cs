@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text.Json;
@@ -33,6 +34,12 @@ public class MetricsFormattingTests
         var lastNews = new DateTime(2025, 1, 1, 12, 0, 0, DateTimeKind.Utc);
         state.UpdateNewsTelemetry(lastNews, 3, true, lastNews.AddMinutes(-15), lastNews.AddMinutes(15), "file");
         state.RecordReconciliationTelemetry(ReconciliationStatus.Match, 0, DateTime.UtcNow);
+        state.SetConfigSource("/tmp/sample-config.json", "hash-demo");
+        state.SetRiskConfigHash("riskhash");
+        state.UpdateSecretProvenance(new Dictionary<string, IReadOnlyCollection<string>>
+        {
+            ["oanda_demo"] = new[] { "env" }
+        });
 
         var snapshot = state.CreateMetricsSnapshot();
         var metricsText = EngineMetricsFormatter.Format(snapshot);
@@ -65,6 +72,9 @@ public class MetricsFormattingTests
         Assert.Contains("engine_news_blackout_windows_total 1", metricsText);
         Assert.Contains("engine_news_source{type=\"file\"} 1", metricsText);
         Assert.Contains("engine_news_last_event_ts", metricsText);
+        Assert.Contains("engine_config_hash{hash=\"hash-demo\"} 1", metricsText);
+        Assert.Contains("engine_risk_config_hash{hash=\"riskhash\"} 1", metricsText);
+        Assert.Contains("engine_secret_provenance{integration=\"oanda_demo\",source=\"env\"} 1", metricsText);
         Assert.Contains("engine_reconcile_mismatches_total", metricsText);
         Assert.Contains("engine_reconcile_last_status{status=\"match\"} 1", metricsText);
     }
@@ -92,6 +102,12 @@ public class MetricsFormattingTests
         var newsNow = new DateTime(2025, 2, 2, 6, 30, 0, DateTimeKind.Utc);
         state.UpdateNewsTelemetry(newsNow, 5, false, null, null, "file");
         state.RecordReconciliationTelemetry(ReconciliationStatus.Mismatch, 2, DateTime.UtcNow);
+        state.SetConfigSource("/opt/config.json", "cfg-hash");
+        state.SetRiskConfigHash("risk-hash");
+        state.UpdateSecretProvenance(new Dictionary<string, IReadOnlyCollection<string>>
+        {
+            ["ctrader_demo"] = new[] { "env", "missing" }
+        });
         var payload = state.CreateHealthPayload();
         var json = JsonSerializer.Serialize(payload);
         using var document = JsonDocument.Parse(json);
@@ -130,6 +146,11 @@ public class MetricsFormattingTests
         Assert.Equal(5, news.GetProperty("events_fetched_total").GetInt64());
         Assert.False(news.GetProperty("blackout_active").GetBoolean());
         Assert.Equal("file", news.GetProperty("source_type").GetString());
+        var config = root.GetProperty("config");
+        Assert.Equal("/opt/config.json", config.GetProperty("path").GetString());
+        Assert.Equal("cfg-hash", config.GetProperty("hash").GetString());
+        var secrets = root.GetProperty("secrets");
+        Assert.Equal("env,missing", secrets.GetProperty("ctrader_demo").GetString());
         Assert.Equal(75, lastOrderSizes.GetProperty("GBPUSD").GetInt64());
         var reconciliation = root.GetProperty("reconciliation");
         Assert.Equal(2, reconciliation.GetProperty("mismatches_total").GetInt64());

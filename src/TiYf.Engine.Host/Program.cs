@@ -14,7 +14,10 @@ using TiYf.Engine.Sim;
 
 var configPath = ResolveConfigPath(args);
 var (engineConfig, configHash, rawConfig) = EngineConfigLoader.Load(configPath);
-var adapterContext = ResolveAdapterContext(engineConfig, rawConfig);
+var secretTracker = new SecretProvenanceTracker();
+var adapterContext = ResolveAdapterContext(engineConfig, rawConfig, secretTracker);
+adapterContext.State.SetConfigSource(configPath, configHash);
+adapterContext.State.UpdateSecretProvenance(secretTracker.CreateSnapshot());
 
 var builder = WebApplication.CreateBuilder(args);
 var portEnv = Environment.GetEnvironmentVariable("ENGINE_HOST_PORT");
@@ -30,6 +33,7 @@ builder.Services.AddHttpClient("oanda-stream", client =>
     client.Timeout = Timeout.InfiniteTimeSpan;
 });
 builder.Services.AddSingleton(new EngineHostConfiguration(configPath, configHash));
+builder.Services.AddSingleton(secretTracker);
 builder.Services.AddSingleton(adapterContext.State);
 builder.Services.Configure<EngineHostOptions>(options =>
 {
@@ -169,6 +173,7 @@ var app = builder.Build();
 app.Lifetime.ApplicationStarted.Register(() =>
 {
     var logger = app.Services.GetRequiredService<ILogger<Program>>();
+    logger.LogInformation("engine_config_sot path={ConfigPath} hash={ConfigHash}", configPath, configHash);
     logger.LogInformation("TiYf Engine Host started. Config={ConfigPath} Adapter={Adapter} Port={Port}", configPath, adapterContext.State.Adapter, listenPort);
 });
 
@@ -210,7 +215,7 @@ static string ResolveConfigPath(string[] args)
     return Path.GetFullPath("sample-config.demo-ctrader.json");
 }
 
-static AdapterContext ResolveAdapterContext(EngineConfig config, JsonDocument raw)
+static AdapterContext ResolveAdapterContext(EngineConfig config, JsonDocument raw, SecretProvenanceTracker tracker)
 {
     string sourceAdapter = string.IsNullOrWhiteSpace(config.AdapterId) ? "stub" : config.AdapterId.Trim().ToLowerInvariant();
     CTraderAdapterSettings? ctraderSettings = null;
@@ -224,13 +229,14 @@ static AdapterContext ResolveAdapterContext(EngineConfig config, JsonDocument ra
         if (!string.IsNullOrWhiteSpace(typeName))
         {
             sourceAdapter = typeName.Trim().ToLowerInvariant();
+            var recorder = tracker is not null ? new Action<string>(src => tracker.Record(sourceAdapter, src)) : null;
             if (sourceAdapter.StartsWith("ctrader", StringComparison.Ordinal))
             {
-                ctraderSettings = CTraderAdapterSettings.FromJson(adapterNode, sourceAdapter);
+                ctraderSettings = CTraderAdapterSettings.FromJson(adapterNode, sourceAdapter, recorder);
             }
             else if (sourceAdapter.StartsWith("oanda", StringComparison.Ordinal))
             {
-                oandaSettings = OandaAdapterSettings.FromJson(adapterNode, sourceAdapter);
+                oandaSettings = OandaAdapterSettings.FromJson(adapterNode, sourceAdapter, recorder);
                 streamSettings = OandaStreamSettings.FromJson(adapterNode, raw.RootElement, sourceAdapter);
             }
         }

@@ -32,6 +32,8 @@ public readonly record struct EngineMetricsSnapshot(
     double? GvrsRaw,
     double? GvrsEwma,
     string? GvrsBucket,
+    string ConfigHash,
+    string RiskConfigHash,
     string PromotionConfigHash,
     PromotionTelemetrySnapshot? PromotionTelemetry,
     long ReconciliationMismatchesTotal,
@@ -39,4 +41,5 @@ public readonly record struct EngineMetricsSnapshot(
     string? ReconciliationLastStatus,
     int IdempotencyPersistedLoaded,
     int IdempotencyPersistedExpired,
-    double? IdempotencyPersistenceLastLoadUnix);
+    double? IdempotencyPersistenceLastLoadUnix,
+    IReadOnlyDictionary<string, IReadOnlyCollection<string>> SecretProvenance);

@@ -1,3 +1,4 @@
+using System;
 using System.Text.Json;
 
 namespace TiYf.Engine.Sim;
@@ -23,7 +24,7 @@ public sealed record CTraderAdapterSettings(
     string HandshakeEndpoint,
     string OrderEndpoint)
 {
-    public static CTraderAdapterSettings FromJson(JsonElement adapterNode, string adapterType)
+    public static CTraderAdapterSettings FromJson(JsonElement adapterNode, string adapterType, Action<string>? recordSecretSource = null)
     {
         var lower = adapterType?.ToLowerInvariant() ?? "ctrader-demo";
         var defaults = DefaultsFor(lower);
@@ -31,7 +32,7 @@ public sealed record CTraderAdapterSettings(
             ? settingsNode
             : adapterNode;
 
-        static string ResolveString(JsonElement node, string propertyName, string envVar, string fallback = "")
+        static string ResolveString(JsonElement node, string propertyName, string envVar, string fallback = "", Action<string>? recordSource = null)
         {
             if (node.TryGetProperty(propertyName, out var prop) && prop.ValueKind == JsonValueKind.String)
             {
@@ -39,14 +40,30 @@ public sealed record CTraderAdapterSettings(
                 if (value.StartsWith("env:", StringComparison.OrdinalIgnoreCase))
                 {
                     var env = Environment.GetEnvironmentVariable(value.Substring(4));
-                    return string.IsNullOrWhiteSpace(env) ? fallback : env!;
+                    if (!string.IsNullOrWhiteSpace(env))
+                    {
+                        recordSource?.Invoke("env");
+                        return env!;
+                    }
+                    recordSource?.Invoke("missing");
+                    return fallback;
                 }
+                recordSource?.Invoke("config");
                 return value;
             }
             if (!string.IsNullOrWhiteSpace(envVar))
             {
                 var env = Environment.GetEnvironmentVariable(envVar);
-                if (!string.IsNullOrWhiteSpace(env)) return env!;
+                if (!string.IsNullOrWhiteSpace(env))
+                {
+                    recordSource?.Invoke("env");
+                    return env!;
+                }
+                recordSource?.Invoke("missing");
+            }
+            else
+            {
+                recordSource?.Invoke("default");
             }
             return fallback;
         }
@@ -102,13 +119,13 @@ public sealed record CTraderAdapterSettings(
 
         var baseUrl = ResolveString(cfgNode, "baseUrl", string.Empty, defaults.BaseUri.ToString());
         var tokenUrl = ResolveString(cfgNode, "tokenUrl", string.Empty, defaults.TokenUri.ToString());
-        var appId = ResolveString(cfgNode, "applicationId", "CT_APP_ID", defaults.ApplicationId);
-        var clientSecret = ResolveString(cfgNode, "clientSecret", "CT_APP_SECRET", defaults.ClientSecret);
-        var clientId = ResolveString(cfgNode, "clientId", "CT_CLIENT_ID", string.IsNullOrWhiteSpace(defaults.ClientId) ? appId : defaults.ClientId);
-        var accessToken = ResolveString(cfgNode, "accessToken", lower == "ctrader-demo" ? "CT_DEMO_OAUTH_TOKEN" : "CT_LIVE_OAUTH_TOKEN", defaults.AccessToken);
-        var refreshToken = ResolveString(cfgNode, "refreshToken", lower == "ctrader-demo" ? "CT_DEMO_REFRESH_TOKEN" : "CT_LIVE_REFRESH_TOKEN", defaults.RefreshToken);
-        var accountId = ResolveString(cfgNode, "accountId", lower == "ctrader-demo" ? "CT_DEMO_ACCOUNT_ID" : "CT_LIVE_ACCOUNT_ID", defaults.AccountId);
-        var broker = ResolveString(cfgNode, "broker", lower == "ctrader-demo" ? "CT_DEMO_BROKER" : "CT_LIVE_BROKER", defaults.Broker);
+        var appId = ResolveString(cfgNode, "applicationId", "CT_APP_ID", defaults.ApplicationId, recordSecretSource);
+        var clientSecret = ResolveString(cfgNode, "clientSecret", "CT_APP_SECRET", defaults.ClientSecret, recordSecretSource);
+        var clientId = ResolveString(cfgNode, "clientId", "CT_CLIENT_ID", string.IsNullOrWhiteSpace(defaults.ClientId) ? appId : defaults.ClientId, recordSecretSource);
+        var accessToken = ResolveString(cfgNode, "accessToken", lower == "ctrader-demo" ? "CT_DEMO_OAUTH_TOKEN" : "CT_LIVE_OAUTH_TOKEN", defaults.AccessToken, recordSecretSource);
+        var refreshToken = ResolveString(cfgNode, "refreshToken", lower == "ctrader-demo" ? "CT_DEMO_REFRESH_TOKEN" : "CT_LIVE_REFRESH_TOKEN", defaults.RefreshToken, recordSecretSource);
+        var accountId = ResolveString(cfgNode, "accountId", lower == "ctrader-demo" ? "CT_DEMO_ACCOUNT_ID" : "CT_LIVE_ACCOUNT_ID", defaults.AccountId, recordSecretSource);
+        var broker = ResolveString(cfgNode, "broker", lower == "ctrader-demo" ? "CT_DEMO_BROKER" : "CT_LIVE_BROKER", defaults.Broker, recordSecretSource);
 
         var useMockFallback = string.IsNullOrWhiteSpace(accessToken) ? true : defaults.UseMock;
         var useMock = ResolveBool(cfgNode, "useMock", useMockFallback);
