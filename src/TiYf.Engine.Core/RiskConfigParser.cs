@@ -35,6 +35,10 @@ public static class RiskConfigParser
         var newsBlackout = ParseNewsBlackout(riskEl);
         var globalVolatilityGate = ParseGlobalVolatilityGate(riskEl);
         var promotion = ParsePromotionConfig(riskEl);
+        decimal? brokerDailyLossCap = TryNumber(riskEl, "broker_daily_loss_cap_ccy", out var brokerCap) && brokerCap > 0 ? brokerCap : null;
+        long? maxPositionUnits = TryLong(riskEl, "max_position_units", out var maxUnits) && maxUnits > 0 ? maxUnits : null;
+        var symbolUnitCaps = ParseSymbolUnitCaps(riskEl);
+        var cooldown = ParseCooldown(riskEl);
         return new RiskConfig
         {
             RealLeverageCap = Num("real_leverage_cap", 20m),
@@ -56,6 +60,10 @@ public static class RiskConfigParser
             NewsBlackout = newsBlackout,
             Promotion = promotion,
             GlobalVolatilityGate = globalVolatilityGate,
+            BrokerDailyLossCapCcy = brokerDailyLossCap,
+            MaxPositionUnits = maxPositionUnits,
+            SymbolUnitCaps = symbolUnitCaps,
+            Cooldown = cooldown,
             RiskConfigHash = TryCanonicalHash(riskEl)
         };
     }
@@ -151,6 +159,12 @@ public static class RiskConfigParser
         if (TryProperty(parent, SnakeToCamel(snake), out var camel) && camel.ValueKind == JsonValueKind.Number && camel.TryGetInt32(out var v2)) { value = v2; return true; }
         value = 0; return false;
     }
+    private static bool TryLong(JsonElement parent, string snake, out long value)
+    {
+        if (TryProperty(parent, snake, out var el) && el.ValueKind == JsonValueKind.Number && el.TryGetInt64(out var v)) { value = v; return true; }
+        if (TryProperty(parent, SnakeToCamel(snake), out var camel) && camel.ValueKind == JsonValueKind.Number && camel.TryGetInt64(out var v2)) { value = v2; return true; }
+        value = 0; return false;
+    }
     private static bool TryProperty(JsonElement parent, string name, out JsonElement el)
     {
         if (parent.TryGetProperty(name, out el)) return true; el = default; return false;
@@ -220,6 +234,31 @@ public static class RiskConfigParser
                 }
             }
             return dict.Count > 0 ? dict : null;
+        }
+        return null;
+    }
+    private static Dictionary<string, long>? ParseSymbolUnitCaps(JsonElement parent)
+    {
+        static Dictionary<string, long>? ParseInternal(JsonElement obj)
+        {
+            var dict = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in obj.EnumerateObject())
+            {
+                if (p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetInt64(out var units) && units > 0)
+                {
+                    dict[p.Name] = units;
+                }
+            }
+            return dict.Count > 0 ? dict : null;
+        }
+
+        if (TryObject(parent, "symbol_unit_caps", out var snake))
+        {
+            return ParseInternal(snake);
+        }
+        if (TryObject(parent, "symbolUnitCaps", out var camel))
+        {
+            return ParseInternal(camel);
         }
         return null;
     }
@@ -319,6 +358,30 @@ public static class RiskConfigParser
             entryThreshold,
             ewmaAlpha,
             components);
+    }
+
+    private static RiskCooldownConfig ParseCooldown(JsonElement parent)
+    {
+        if (!TryObject(parent, "cooldown", out var obj))
+        {
+            return RiskCooldownConfig.Disabled;
+        }
+
+        var enabled = TryBool(obj, "enabled", out var e) && e;
+        int? consecutive = TryInt(obj, "consecutive_losses", out var losses) ? Math.Max(0, losses) : null;
+        int? minutes = TryInt(obj, "minutes", out var mins) ? Math.Max(0, mins) : null;
+
+        if (!enabled)
+        {
+            return new RiskCooldownConfig(false, consecutive, minutes);
+        }
+
+        if (!consecutive.HasValue || consecutive.Value <= 0 || !minutes.HasValue || minutes.Value <= 0)
+        {
+            return RiskCooldownConfig.Disabled;
+        }
+
+        return new RiskCooldownConfig(true, consecutive.Value, minutes.Value);
     }
 
     private static TimeSpan ParseTimeOfDay(string raw)

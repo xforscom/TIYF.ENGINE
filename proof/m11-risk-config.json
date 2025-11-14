@@ -1,0 +1,49 @@
+{
+  "risk": {
+    "broker_daily_loss_cap_ccy": 1000,
+    "max_position_units": 200000,
+    "symbol_unit_caps": {
+      "EURUSD": 120000,
+      "GBPUSD": 110000
+    },
+    "cooldown": {
+      "enabled": true,
+      "consecutive_losses": 2,
+      "minutes": 15
+    }
+  },
+  "scenario": {
+    "instrument": "EURUSD",
+    "timeframe": "H1",
+    "decision_utc": "2025-02-01T00:00:00Z",
+    "requested_units": 60000,
+    "bar_price": 1.1000,
+    "starting_equity": 100000,
+    "trades": [
+      {
+        "decision_id": "RAIL-01",
+        "symbol": "EURUSD",
+        "side": "buy",
+        "units": 10000,
+        "entry_price": 1.0000,
+        "exit_price": 0.9000,
+        "open_utc": "2025-01-31T02:00:00Z",
+        "close_utc": "2025-01-31T03:00:00Z"
+      },
+      {
+        "decision_id": "RAIL-02",
+        "symbol": "EURUSD",
+        "side": "buy",
+        "units": 10000,
+        "entry_price": 1.0000,
+        "exit_price": 0.8000,
+        "open_utc": "2025-01-31T04:00:00Z",
+        "close_utc": "2025-01-31T05:00:00Z"
+      }
+    ],
+    "open_positions": [
+      { "symbol": "EURUSD", "units": 80000 },
+      { "symbol": "GBPUSD", "units": 100000 }
+    ]
+  }
+}

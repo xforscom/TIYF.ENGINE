@@ -1,430 +1,280 @@
 using System.Globalization;
-using System.Reflection;
-using System.Text;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using TiYf.Engine.Core;
 using TiYf.Engine.Core.Infrastructure;
+using TiYf.Engine.Host;
 using TiYf.Engine.Sim;
 
-namespace RiskRailsProbe;
+var argsMap = ParseArgs(args);
+var configPath = argsMap.TryGetValue("--config", out var config) ? config : "proof/m11-risk-config.json";
+var outputPath = argsMap.TryGetValue("--output", out var output) ? output : "proof-artifacts/m11-risk-rails";
+Directory.CreateDirectory(outputPath);
 
-internal static class Program
+using var configDoc = JsonDocument.Parse(File.ReadAllText(configPath));
+var root = configDoc.RootElement;
+if (!root.TryGetProperty("risk", out var riskNode) || riskNode.ValueKind != JsonValueKind.Object)
 {
-    private const string DefaultTimeframeLabel = "H1";
-    private const long DefaultUnits = 1000;
+    throw new InvalidOperationException("risk block is required in the proof config");
+}
+if (!root.TryGetProperty("scenario", out var scenarioNode) || scenarioNode.ValueKind != JsonValueKind.Object)
+{
+    throw new InvalidOperationException("scenario block is required in the proof config");
+}
 
-    private const decimal DefaultPerTradeRiskPct = 0.01m;
-    private const decimal LargeCap = 100000m;
-    private const decimal DefaultRealLeverageCap = 1000m;
+var riskConfig = RiskConfigParser.Parse(riskNode);
+var canonical = JsonCanonicalizer.Canonicalize(riskNode);
+var riskConfigHash = riskConfig.RiskConfigHash ?? ConfigHash.Compute(canonical);
+var scenario = Scenario.Parse(scenarioNode);
 
-    internal static int Main(string[] args)
+RiskRailTelemetrySnapshot? telemetrySnapshot = null;
+var runtime = new RiskRailRuntime(
+    riskConfig,
+    riskConfigHash,
+    Array.Empty<NewsEvent>(),
+    gateCallback: null,
+    scenario.StartingEquity,
+    telemetryCallback: snapshot => telemetrySnapshot = snapshot,
+    clock: () => scenario.DecisionUtc);
+
+var tracker = new PositionTracker();
+ApplyTrades(tracker, scenario.Trades);
+var bar = new Bar(
+    new InstrumentId(scenario.Instrument),
+    scenario.DecisionUtc.AddMinutes(-1),
+    scenario.DecisionUtc,
+    scenario.BarPrice,
+    scenario.BarPrice,
+    scenario.BarPrice,
+    scenario.BarPrice,
+    1m);
+runtime.UpdateBar(bar, tracker);
+
+var openPositions = scenario.OpenPositions.Count == 0
+    ? Array.Empty<RiskPositionUnits>()
+    : scenario.OpenPositions.ToArray();
+var outcome = runtime.EvaluateNewEntry(
+    scenario.Instrument,
+    scenario.Timeframe,
+    scenario.DecisionUtc,
+    scenario.RequestedUnits,
+    openPositions);
+
+var telemetry = telemetrySnapshot ?? new RiskRailTelemetrySnapshot(
+    null,
+    0m,
+    0,
+    null,
+    0,
+    0,
+    null,
+    new Dictionary<string, long>(),
+    new Dictionary<string, long>(),
+    false,
+    false,
+    null,
+    0,
+    null,
+    null);
+
+var summary = BuildSummary(outcome, telemetry);
+var state = new EngineHostState("risk-rails-proof", Array.Empty<string>());
+state.MarkConnected(true);
+state.SetLoopStart(scenario.DecisionUtc);
+state.SetConfigSource(Path.GetFullPath(configPath), riskConfigHash);
+state.SetRiskConfigHash(riskConfigHash);
+state.UpdateRiskRailsTelemetry(telemetry);
+var metrics = EngineMetricsFormatter.Format(state.CreateMetricsSnapshot());
+var health = JsonSerializer.Serialize(state.CreateHealthPayload(), new JsonSerializerOptions { WriteIndented = true });
+
+await File.WriteAllTextAsync(Path.Combine(outputPath, "summary.txt"), summary);
+await File.WriteAllTextAsync(Path.Combine(outputPath, "metrics.txt"), metrics);
+await File.WriteAllTextAsync(Path.Combine(outputPath, "health.json"), health);
+
+Console.WriteLine(summary);
+
+static Dictionary<string, string> ParseArgs(string[] rawArgs)
+{
+    var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    for (var i = 0; i < rawArgs.Length - 1; i++)
     {
-        try
+        var key = rawArgs[i];
+        if (!key.StartsWith("--", StringComparison.Ordinal))
         {
-            var options = ArgumentOptions.Parse(args);
-
-            var riskNode = BuildRiskJson(options);
-            using var riskDoc = JsonDocument.Parse(riskNode.ToJsonString());
-            var riskConfig = RiskConfigParser.Parse(riskDoc.RootElement);
-            var canonical = JsonCanonicalizer.Canonicalize(riskDoc.RootElement);
-            var configHash = ConfigHash.Compute(canonical);
-
-            var newsEvents = LoadNewsEvents(options.NewsFile);
-
-            var runtime = new RiskRailRuntime(
-                riskConfig,
-                configHash,
-                newsEvents,
-                gateCallback: null,
-                startingEquity: options.EquityPeak ?? 100_000m);
-
-            SeedRuntimeState(runtime, options);
-
-            var outcome = runtime.EvaluateNewEntry(
-                instrument: options.Instrument,
-                timeframe: options.TimeframeLabel ?? DefaultTimeframeLabel,
-                decisionUtc: options.DecisionTimestamp,
-                requestedUnits: options.Units ?? DefaultUnits);
-
-            if (outcome.Alerts.Count == 0)
-            {
-                Console.WriteLine("NO_ALERT");
-                return 2;
-            }
-
-            WriteJournal(outcome.Alerts, options, configHash);
-            Console.WriteLine(outcome.Alerts[0].EventType);
-            return 0;
+            continue;
         }
-        catch (ArgumentOptions.ArgumentOptionsException ex)
+        var value = rawArgs[i + 1];
+        if (value.StartsWith("--", StringComparison.Ordinal))
         {
-            Console.Error.WriteLine($"Argument error: {ex.Message}");
-            return 1;
+            continue;
         }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine("Probe failed:");
-            Console.Error.WriteLine(ex);
-            return 1;
-        }
+        map[key] = value;
+        i++;
+    }
+    return map;
+}
+
+static void ApplyTrades(PositionTracker tracker, IReadOnlyList<ScenarioTrade> trades)
+{
+    foreach (var trade in trades)
+    {
+        tracker.OnFill(
+            new ExecutionFill(trade.DecisionId, trade.Symbol, trade.Side, trade.EntryPrice, trade.Units, trade.OpenUtc),
+            Schema.Version,
+            trade.ConfigHash,
+            "risk-rails-proof",
+            null);
+        var exitSide = trade.Side == TradeSide.Buy ? TradeSide.Sell : TradeSide.Buy;
+        tracker.OnFill(
+            new ExecutionFill(trade.DecisionId, trade.Symbol, exitSide, trade.ExitPrice, trade.Units, trade.CloseUtc),
+            Schema.Version,
+            trade.ConfigHash,
+            "risk-rails-proof",
+            null);
+    }
+}
+
+static string BuildSummary(RiskRailOutcome outcome, RiskRailTelemetrySnapshot telemetry)
+{
+    var brokerCap = outcome.Alerts.Any(a => a.EventType == "ALERT_RISK_BROKER_DAILY_CAP_SOFT") ? 1 : 0;
+    var maxPosition = outcome.Alerts.Any(a => a.EventType == "ALERT_RISK_MAX_POSITION_SOFT") ? 1 : 0;
+    var symbolCaps = outcome.Alerts.Count(a => a.EventType == "ALERT_RISK_SYMBOL_CAP_SOFT");
+    var cooldownAlert = outcome.Alerts.Any(a => a.EventType == "ALERT_RISK_COOLDOWN_SOFT") ? 1 : 0;
+    return $"risk_rails_summary broker_cap_hit={brokerCap} max_position_hit={maxPosition} symbol_caps_hit={symbolCaps} cooldown_alert={cooldownAlert} cooldown_triggers={telemetry.CooldownTriggersTotal}";
+}
+
+internal sealed record Scenario(
+    string Instrument,
+    string Timeframe,
+    DateTime DecisionUtc,
+    long RequestedUnits,
+    decimal BarPrice,
+    decimal StartingEquity,
+    IReadOnlyList<ScenarioTrade> Trades,
+    IReadOnlyList<RiskPositionUnits> OpenPositions)
+{
+    public static Scenario Parse(JsonElement node)
+    {
+        var instrument = GetRequiredString(node, "instrument");
+        var timeframe = GetRequiredString(node, "timeframe");
+        var decisionUtc = ParseUtc(GetRequiredString(node, "decision_utc"));
+        var requestedUnits = GetRequiredLong(node, "requested_units");
+        var barPrice = node.TryGetProperty("bar_price", out var barEl) && barEl.ValueKind == JsonValueKind.Number ? barEl.GetDecimal() : 1m;
+        var startingEquity = node.TryGetProperty("starting_equity", out var equityEl) && equityEl.ValueKind == JsonValueKind.Number ? equityEl.GetDecimal() : 100_000m;
+        var trades = ParseTrades(node);
+        var openPositions = ParseOpenPositions(node);
+        return new Scenario(instrument, timeframe, decisionUtc, requestedUnits, barPrice, startingEquity, trades, openPositions);
     }
 
-    private static JsonObject BuildRiskJson(ArgumentOptions options)
+    private static IReadOnlyList<ScenarioTrade> ParseTrades(JsonElement node)
     {
-        var risk = new JsonObject
+        if (!node.TryGetProperty("trades", out var arr) || arr.ValueKind != JsonValueKind.Array)
         {
-            ["per_trade_risk_pct"] = JsonValue.Create(DefaultPerTradeRiskPct),
-            ["real_leverage_cap"] = JsonValue.Create(DefaultRealLeverageCap),
-            ["per_position_risk_cap_pct"] = JsonValue.Create(LargeCap),
-            ["basket_risk_cap_pct"] = JsonValue.Create(LargeCap),
-            ["block_on_breach"] = JsonValue.Create(true),
-            ["emit_evaluations"] = JsonValue.Create(true)
-        };
-
-        if (options.SessionWindow is not null)
-        {
-            var (start, end) = options.SessionWindow.Value;
-            risk["session_window"] = new JsonObject
-            {
-                ["start_utc"] = start,
-                ["end_utc"] = end
-            };
+            return Array.Empty<ScenarioTrade>();
         }
 
-        if (options.HasDailyCap)
+        var trades = new List<ScenarioTrade>();
+        foreach (var item in arr.EnumerateArray())
         {
-            var daily = new JsonObject
-            {
-                ["action_on_breach"] = options.DailyCapAction ?? "block"
-            };
-            if (options.DailyLossThreshold.HasValue)
-            {
-                daily["loss"] = JsonValue.Create(options.DailyLossThreshold.Value);
-            }
-            if (options.DailyGainThreshold.HasValue)
-            {
-                daily["gain"] = JsonValue.Create(options.DailyGainThreshold.Value);
-            }
-            risk["daily_cap"] = daily;
+            var id = GetRequiredString(item, "decision_id");
+            var symbol = GetRequiredString(item, "symbol");
+            var side = ParseSide(GetRequiredString(item, "side"));
+            var units = GetRequiredLong(item, "units");
+            var entryPrice = item.GetProperty("entry_price").GetDecimal();
+            var exitPrice = item.GetProperty("exit_price").GetDecimal();
+            var openUtc = ParseUtc(GetRequiredString(item, "open_utc"));
+            var closeUtc = ParseUtc(GetRequiredString(item, "close_utc"));
+            trades.Add(new ScenarioTrade(id, symbol, side, units, entryPrice, exitPrice, openUtc, closeUtc));
         }
 
-        if (options.DrawdownMax.HasValue)
-        {
-            risk["global_drawdown"] = new JsonObject
-            {
-                ["max_dd"] = JsonValue.Create(options.DrawdownMax.Value)
-            };
-        }
-
-        if (!string.IsNullOrWhiteSpace(options.NewsFile))
-        {
-            risk["news_blackout"] = new JsonObject
-            {
-                ["enabled"] = JsonValue.Create(true),
-                ["minutes_before"] = JsonValue.Create(options.NewsMinutesBefore ?? 0),
-                ["minutes_after"] = JsonValue.Create(options.NewsMinutesAfter ?? 0),
-                ["source_path"] = options.NewsFile
-            };
-        }
-
-        return risk;
+        return trades;
     }
 
-    private static IReadOnlyList<NewsEvent> LoadNewsEvents(string? newsFile)
+    private static IReadOnlyList<RiskPositionUnits> ParseOpenPositions(JsonElement node)
     {
-        if (string.IsNullOrWhiteSpace(newsFile) || !File.Exists(newsFile))
+        if (!node.TryGetProperty("open_positions", out var arr) || arr.ValueKind != JsonValueKind.Array)
         {
-            return Array.Empty<NewsEvent>();
+            return Array.Empty<RiskPositionUnits>();
         }
 
-        using var doc = JsonDocument.Parse(File.ReadAllText(newsFile));
-        if (doc.RootElement.ValueKind != JsonValueKind.Array)
+        var positions = new List<RiskPositionUnits>();
+        foreach (var item in arr.EnumerateArray())
         {
-            return Array.Empty<NewsEvent>();
-        }
-
-        var events = new List<NewsEvent>();
-        foreach (var item in doc.RootElement.EnumerateArray())
-        {
-            if (!item.TryGetProperty("utc", out var utcEl) || utcEl.ValueKind != JsonValueKind.String)
+            if (!item.TryGetProperty("symbol", out var symbolEl) || symbolEl.ValueKind != JsonValueKind.String)
             {
                 continue;
             }
-
-            var ts = ParseUtc(utcEl.GetString()!);
-            var impact = item.TryGetProperty("impact", out var impactEl) && impactEl.ValueKind == JsonValueKind.String
-                ? impactEl.GetString() ?? string.Empty
-                : string.Empty;
-
-            var tags = new List<string>();
-            if (item.TryGetProperty("tags", out var tagsEl) && tagsEl.ValueKind == JsonValueKind.Array)
+            if (!item.TryGetProperty("units", out var unitsEl) || unitsEl.ValueKind != JsonValueKind.Number)
             {
-                foreach (var tag in tagsEl.EnumerateArray())
-                {
-                    if (tag.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(tag.GetString()))
-                    {
-                        tags.Add(tag.GetString()!.Trim());
-                    }
-                }
+                continue;
             }
-
-            events.Add(new NewsEvent(ts, impact, tags));
-        }
-
-        return events;
-    }
-
-    private static void SeedRuntimeState(RiskRailRuntime runtime, ArgumentOptions options)
-    {
-        var runtimeType = typeof(RiskRailRuntime);
-
-        void SetField(string name, object value)
-        {
-            var field = runtimeType.GetField(name, BindingFlags.Instance | BindingFlags.NonPublic);
-            if (field is null)
+            var symbol = symbolEl.GetString();
+            var units = unitsEl.GetInt64();
+            if (string.IsNullOrWhiteSpace(symbol) || units <= 0)
             {
-                throw new InvalidOperationException($"Unable to locate field '{name}' on RiskRailRuntime.");
+                continue;
             }
-            field.SetValue(runtime, value);
+            positions.Add(new RiskPositionUnits(symbol, units));
         }
 
-        var pnl = options.PnlToday ?? 0m;
-        SetField("_dailyRealizedPnl", pnl);
-        SetField("_dailyUnrealizedPnl", 0m);
-        SetField("_totalRealizedPnl", pnl);
-        SetField("_totalUnrealizedPnl", 0m);
-
-        if (options.EquityPeak.HasValue)
-        {
-            SetField("_equityPeak", options.EquityPeak.Value);
-        }
-        if (options.EquityNow.HasValue)
-        {
-            SetField("_currentEquity", options.EquityNow.Value);
-        }
+        return positions;
     }
 
-    private static void WriteJournal(IReadOnlyList<RiskRailAlert> alerts, ArgumentOptions options, string configHash)
+    private static string GetRequiredString(JsonElement node, string property)
     {
-        var outPath = options.OutputPath ?? throw new ArgumentNullException(nameof(options.OutputPath));
-        var directory = Path.GetDirectoryName(outPath);
-        if (!string.IsNullOrWhiteSpace(directory))
+        if (!node.TryGetProperty(property, out var el) || el.ValueKind != JsonValueKind.String)
         {
-            Directory.CreateDirectory(directory);
+            throw new InvalidOperationException($"scenario.{property} must be provided");
         }
-
-        using var writer = new StreamWriter(outPath, append: false, encoding: new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-        writer.WriteLine($"schema_version={Schema.Version},config_hash={configHash},adapter_id=probe,broker=probe,account_id=probe");
-        writer.WriteLine("sequence,utc_ts,event_type,src_adapter,payload_json");
-
-        var sequence = 1;
-        foreach (var alert in alerts)
+        var value = el.GetString();
+        if (string.IsNullOrWhiteSpace(value))
         {
-            var payloadJson = JsonSerializer.Serialize(alert.Payload, new JsonSerializerOptions { WriteIndented = false });
-            var escapedPayload = EscapeCsv(payloadJson);
-            writer.WriteLine($"{sequence},{options.DecisionTimestamp:O},{alert.EventType},probe,{escapedPayload}");
-            sequence++;
+            throw new InvalidOperationException($"scenario.{property} must not be empty");
         }
+        return value.Trim();
     }
 
-    private static string EscapeCsv(string value)
+    private static long GetRequiredLong(JsonElement node, string property)
     {
-        if (value.Contains('"') || value.Contains(','))
+        if (!node.TryGetProperty(property, out var el) || el.ValueKind != JsonValueKind.Number)
         {
-            return $"\"{value.Replace("\"", "\"\"")}\"";
+            throw new InvalidOperationException($"scenario.{property} must be provided");
         }
-        return value;
+        return el.GetInt64();
     }
 
     private static DateTime ParseUtc(string value)
     {
-        if (DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var result))
+        if (DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsed))
         {
-            return DateTime.SpecifyKind(result, DateTimeKind.Utc);
+            return parsed.Kind == DateTimeKind.Utc ? parsed : DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
         }
-        throw new FormatException($"Invalid UTC timestamp '{value}'.");
+        throw new InvalidOperationException($"Invalid UTC timestamp '{value}'");
     }
 
-    private sealed class ArgumentOptions
+    private static TradeSide ParseSide(string raw)
     {
-        public sealed class ArgumentOptionsException : Exception
+        return raw.ToLowerInvariant() switch
         {
-            public ArgumentOptionsException(string message) : base(message) { }
-        }
+            "buy" => TradeSide.Buy,
+            "sell" => TradeSide.Sell,
+            _ => throw new InvalidOperationException($"Unsupported trade side '{raw}'")
+        };
+    }
+}
 
-        public DateTime DecisionTimestamp { get; private set; }
-        public string Instrument { get; private set; } = string.Empty;
-        public string? TimeframeLabel { get; private set; }
-        public long? Units { get; private set; }
-        public string? OutputPath { get; private set; }
-        public (string Start, string End)? SessionWindow { get; private set; }
-        public decimal? DailyLossThreshold { get; private set; }
-        public decimal? DailyGainThreshold { get; private set; }
-        public string? DailyCapAction { get; private set; }
-        public decimal? DrawdownMax { get; private set; }
-        public decimal? PnlToday { get; private set; }
-        public decimal? EquityPeak { get; private set; }
-        public decimal? EquityNow { get; private set; }
-        public string? NewsFile { get; private set; }
-        public int? NewsMinutesBefore { get; private set; }
-        public int? NewsMinutesAfter { get; private set; }
-        private bool DailyCapSpecified { get; set; }
-
-        public bool HasDailyCap => DailyCapSpecified;
-
-        public static ArgumentOptions Parse(string[] args)
-        {
-            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            for (var i = 0; i < args.Length; i++)
-            {
-                var arg = args[i];
-                if (!arg.StartsWith("--", StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                var key = arg[2..];
-                if (string.IsNullOrWhiteSpace(key))
-                {
-                    continue;
-                }
-
-                string value;
-                if (i + 1 < args.Length && !args[i + 1].StartsWith("--", StringComparison.Ordinal))
-                {
-                    value = args[++i];
-                }
-                else
-                {
-                    value = "true";
-                }
-
-                map[key] = value;
-            }
-
-            var opts = new ArgumentOptions
-            {
-                DecisionTimestamp = ParseUtc(GetRequired(map, "ts")),
-                Instrument = GetRequired(map, "inst"),
-                OutputPath = GetRequired(map, "out")
-            };
-
-            if (map.TryGetValue("timeframe", out var timeframe) && !string.IsNullOrWhiteSpace(timeframe))
-            {
-                opts.TimeframeLabel = timeframe.Trim();
-            }
-            if (map.TryGetValue("units", out var unitsRaw) && long.TryParse(unitsRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var units))
-            {
-                opts.Units = Math.Max(1, units);
-            }
-
-            string? sessionStart = null;
-            string? sessionEnd = null;
-            if (map.TryGetValue("session", out var sessionRaw) && !string.IsNullOrWhiteSpace(sessionRaw))
-            {
-                var parts = sessionRaw.Split('-', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                if (parts.Length != 2)
-                {
-                    throw new ArgumentOptionsException("Session window must be formatted as HH:mm[:ss]-HH:mm[:ss].");
-                }
-                sessionStart = parts[0];
-                sessionEnd = parts[1];
-            }
-            else
-            {
-                if (map.TryGetValue("session-start", out var startRaw) && !string.IsNullOrWhiteSpace(startRaw))
-                {
-                    sessionStart = startRaw;
-                }
-                if (map.TryGetValue("session-end", out var endRaw) && !string.IsNullOrWhiteSpace(endRaw))
-                {
-                    sessionEnd = endRaw;
-                }
-            }
-
-            if (!string.IsNullOrWhiteSpace(sessionStart) || !string.IsNullOrWhiteSpace(sessionEnd))
-            {
-                if (string.IsNullOrWhiteSpace(sessionStart) || string.IsNullOrWhiteSpace(sessionEnd))
-                {
-                    throw new ArgumentOptionsException("Session window requires both start and end times.");
-                }
-                opts.SessionWindow = (NormalizeTime(sessionStart!), NormalizeTime(sessionEnd!));
-            }
-
-            if (map.TryGetValue("daily-loss", out var lossRaw) && decimal.TryParse(lossRaw, NumberStyles.Float, CultureInfo.InvariantCulture, out var loss))
-            {
-                opts.DailyLossThreshold = loss;
-                opts.DailyCapSpecified = true;
-            }
-            if (map.TryGetValue("daily-gain", out var gainRaw) && decimal.TryParse(gainRaw, NumberStyles.Float, CultureInfo.InvariantCulture, out var gain))
-            {
-                opts.DailyGainThreshold = gain;
-                opts.DailyCapSpecified = true;
-            }
-            if (map.TryGetValue("action", out var actionRaw) && !string.IsNullOrWhiteSpace(actionRaw))
-            {
-                opts.DailyCapAction = actionRaw.Trim().ToLowerInvariant();
-                opts.DailyCapSpecified = true;
-            }
-
-            if (map.TryGetValue("dd", out var ddRaw) && decimal.TryParse(ddRaw, NumberStyles.Float, CultureInfo.InvariantCulture, out var dd))
-            {
-                opts.DrawdownMax = dd;
-            }
-
-            if (map.TryGetValue("pnl-today", out var pnlRaw) && decimal.TryParse(pnlRaw, NumberStyles.Float, CultureInfo.InvariantCulture, out var pnl))
-            {
-                opts.PnlToday = pnl;
-            }
-
-            if (map.TryGetValue("equity-peak", out var peakRaw) && decimal.TryParse(peakRaw, NumberStyles.Float, CultureInfo.InvariantCulture, out var peak))
-            {
-                opts.EquityPeak = peak;
-            }
-            if (map.TryGetValue("equity-now", out var nowRaw) && decimal.TryParse(nowRaw, NumberStyles.Float, CultureInfo.InvariantCulture, out var now))
-            {
-                opts.EquityNow = now;
-            }
-
-            if (map.TryGetValue("news-file", out var newsFile) && !string.IsNullOrWhiteSpace(newsFile))
-            {
-                opts.NewsFile = newsFile;
-                if (map.TryGetValue("news-before", out var beforeRaw) && int.TryParse(beforeRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var before))
-                {
-                    opts.NewsMinutesBefore = before;
-                }
-                if (map.TryGetValue("news-after", out var afterRaw) && int.TryParse(afterRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var after))
-                {
-                    opts.NewsMinutesAfter = after;
-                }
-            }
-
-            if (opts.EquityPeak.HasValue && !opts.EquityNow.HasValue)
-            {
-                opts.EquityNow = opts.EquityPeak;
-            }
-
-            return opts;
-        }
-
-        private static string GetRequired(Dictionary<string, string> map, string key)
-        {
-            if (map.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
-            {
-                return value;
-            }
-            throw new ArgumentOptionsException($"Missing required argument --{key}.");
-        }
-
-        private static string NormalizeTime(string input)
-        {
-            var formats = new[] { @"hh\:mm", @"hh\:mm\:ss" };
-            if (TimeSpan.TryParseExact(input, formats, CultureInfo.InvariantCulture, out var ts))
-            {
-                return ts.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture);
-            }
-            throw new ArgumentOptionsException($"Invalid time format '{input}'. Use HH:mm or HH:mm:ss.");
-        }
+internal sealed record ScenarioTrade(
+    string DecisionId,
+    string Symbol,
+    TradeSide Side,
+    long Units,
+    decimal EntryPrice,
+    decimal ExitPrice,
+    DateTime OpenUtc,
+    DateTime CloseUtc,
+    string ConfigHash = "proof")
+{
+    public ScenarioTrade(string decisionId, string symbol, TradeSide side, long units, decimal entryPrice, decimal exitPrice, DateTime openUtc, DateTime closeUtc)
+        : this(decisionId, symbol, side, units, entryPrice, exitPrice, openUtc, closeUtc, "proof")
+    {
     }
 }

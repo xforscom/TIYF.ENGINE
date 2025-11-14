@@ -29,6 +29,63 @@ public class RiskConfigParserTests
     }
 
     [Fact]
+    public void RiskConfig_ParsesNewRailFields()
+    {
+        using var document = JsonDocument.Parse("""
+        {
+          "broker_daily_loss_cap_ccy": 1500,
+          "max_position_units": 250000,
+          "symbol_unit_caps": {
+            "EURUSD": 100000,
+            "GBPUSD": -10
+          },
+          "cooldown": {
+            "enabled": true,
+            "consecutive_losses": 3,
+            "minutes": 15
+          }
+        }
+        """);
+
+        var config = RiskConfigParser.Parse(document.RootElement);
+
+        Assert.Equal(1500m, config.BrokerDailyLossCapCcy);
+        Assert.Equal(250000, config.MaxPositionUnits);
+        Assert.NotNull(config.SymbolUnitCaps);
+        Assert.True(config.SymbolUnitCaps!.ContainsKey("EURUSD"));
+        Assert.False(config.SymbolUnitCaps.ContainsKey("GBPUSD"));
+        Assert.True(config.Cooldown.Enabled);
+        Assert.Equal(3, config.Cooldown.ConsecutiveLosses);
+        Assert.Equal(15, config.Cooldown.CooldownMinutes);
+    }
+
+    [Fact]
+    public void RiskConfig_NormalizesInvalidRailValues()
+    {
+        using var document = JsonDocument.Parse("""
+        {
+          "broker_daily_loss_cap_ccy": -5,
+          "max_position_units": -1,
+          "symbol_unit_caps": {
+            "EURUSD": 0
+          },
+          "cooldown": {
+            "enabled": true,
+            "consecutive_losses": 0,
+            "minutes": -5
+          }
+        }
+        """);
+
+        var config = RiskConfigParser.Parse(document.RootElement);
+
+        Assert.Null(config.BrokerDailyLossCapCcy);
+        Assert.Null(config.MaxPositionUnits);
+        Assert.Null(config.SymbolUnitCaps);
+        Assert.False(config.Cooldown.Enabled);
+    }
+
+    [Fact]
     public void NewsBlackout_ParsesHttpSource()
     {
         using var document = JsonDocument.Parse("""

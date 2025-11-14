@@ -72,6 +72,11 @@ public sealed record DailyCapConfig(decimal? LossThreshold, decimal? GainThresho
 
 public sealed record GlobalDrawdownConfig(decimal MaxDrawdown);
 
+public sealed record RiskCooldownConfig(bool Enabled, int? ConsecutiveLosses, int? CooldownMinutes)
+{
+    public static RiskCooldownConfig Disabled { get; } = new(false, null, null);
+}
+
 public sealed record NewsHttpSourceConfig(
     string? BaseUri,
     string? ApiKeyHeaderName = null,
@@ -118,6 +123,10 @@ public sealed class RiskConfig
     public NewsBlackoutConfig? NewsBlackout { get; init; }
     public PromotionConfig Promotion { get; init; } = PromotionConfig.Default;
     public GlobalVolatilityGateConfig GlobalVolatilityGate { get; init; } = GlobalVolatilityGateConfig.Disabled;
+    public decimal? BrokerDailyLossCapCcy { get; init; }
+    public long? MaxPositionUnits { get; init; }
+    public Dictionary<string, long>? SymbolUnitCaps { get; init; }
+    public RiskCooldownConfig Cooldown { get; init; } = RiskCooldownConfig.Disabled;
     public string? RiskConfigHash { get; init; }
     public string PromotionConfigHash => Promotion.ConfigHash;
 }
