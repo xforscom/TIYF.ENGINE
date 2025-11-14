@@ -239,26 +239,13 @@ public static class RiskConfigParser
     }
     private static Dictionary<string, long>? ParseSymbolUnitCaps(JsonElement parent)
     {
-        static Dictionary<string, long>? ParseInternal(JsonElement obj)
-        {
-            var dict = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
-            foreach (var p in obj.EnumerateObject())
-            {
-                if (p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetInt64(out var units) && units > 0)
-                {
-                    dict[p.Name] = units;
-                }
-            }
-            return dict.Count > 0 ? dict : null;
-        }
-
         if (TryObject(parent, "symbol_unit_caps", out var snake))
         {
-            return ParseInternal(snake);
+            return ParsePositiveUnitsDictionary(snake);
         }
         if (TryObject(parent, "symbolUnitCaps", out var camel))
         {
-            return ParseInternal(camel);
+            return ParsePositiveUnitsDictionary(camel);
         }
         return null;
     }
@@ -439,5 +426,20 @@ public static class RiskConfigParser
         {
             return null;
         }
+    }
+
+    private static Dictionary<string, long>? ParsePositiveUnitsDictionary(JsonElement obj)
+    {
+        var dict = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in obj.EnumerateObject())
+        {
+            if (p.Value.ValueKind == JsonValueKind.Number &&
+                p.Value.TryGetInt64(out var units) &&
+                units > 0)
+            {
+                dict[p.Name] = units;
+            }
+        }
+        return dict.Count > 0 ? dict : null;
     }
 }

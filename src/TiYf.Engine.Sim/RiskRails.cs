@@ -299,6 +299,9 @@ internal sealed class RiskRailRuntime
         return null;
     }
 
+    /// <summary>
+    /// Evaluates telemetry-only rails (caps and cooldown) and emits soft alerts without blocking.
+    /// </summary>
     private void EvaluateTelemetryRails(string instrument, string timeframe, DateTime ts, long requestedUnits, List<RiskRailAlert> alerts)
     {
         EvaluateBrokerDailyLossCap(instrument, timeframe, ts, alerts);
@@ -306,6 +309,9 @@ internal sealed class RiskRailRuntime
         EvaluateCooldown(instrument, timeframe, ts, alerts);
     }
 
+    /// <summary>
+    /// Emits a telemetry alert if the configured broker daily loss cap would be exceeded.
+    /// </summary>
     private void EvaluateBrokerDailyLossCap(string instrument, string timeframe, DateTime ts, List<RiskRailAlert> alerts)
     {
         if (!_brokerDailyLossCapCcy.HasValue)
@@ -331,6 +337,9 @@ internal sealed class RiskRailRuntime
         _brokerDailyLossViolations++;
     }
 
+    /// <summary>
+    /// Records telemetry for global and per-symbol caps without altering execution.
+    /// </summary>
     private void EvaluatePositionCaps(string instrument, string timeframe, DateTime ts, long requestedUnits, List<RiskRailAlert> alerts)
     {
         var unitsAbs = Math.Abs(requestedUnits);
@@ -363,12 +372,11 @@ internal sealed class RiskRailRuntime
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(instrument))
+        var symbolKey = instrument?.Trim();
+        if (string.IsNullOrWhiteSpace(symbolKey))
         {
             return;
         }
-
-        var symbolKey = instrument.Trim();
         if (_symbolUnitCaps.TryGetValue(symbolKey, out var cap) && cap > 0)
         {
             var current = _symbolUnitUsage.TryGetValue(symbolKey, out var usage) ? usage : 0;
@@ -390,6 +398,9 @@ internal sealed class RiskRailRuntime
         }
     }
 
+    /// <summary>
+    /// Emits telemetry describing cooldown state when the guard is active.
+    /// </summary>
     private void EvaluateCooldown(string instrument, string timeframe, DateTime ts, List<RiskRailAlert> alerts)
     {
         if (!_cooldownConfig.Enabled)
@@ -451,21 +462,22 @@ internal sealed class RiskRailRuntime
         }
 
         long total = 0;
-        foreach (var (symbol, rawUnits) in snapshot)
+        foreach (var entry in snapshot.Where(e => !string.IsNullOrWhiteSpace(e.Symbol)))
         {
-            if (string.IsNullOrWhiteSpace(symbol))
+            var normalizedSymbol = entry.Symbol!.Trim();
+            if (string.IsNullOrWhiteSpace(normalizedSymbol))
             {
                 continue;
             }
 
-            var absUnits = Math.Abs(rawUnits);
+            var absUnits = Math.Abs(entry.Units);
             if (absUnits <= 0)
             {
                 continue;
             }
 
             total += absUnits;
-            _symbolUnitUsage[symbol] = _symbolUnitUsage.TryGetValue(symbol, out var existing) ? existing + absUnits : absUnits;
+            _symbolUnitUsage[normalizedSymbol] = _symbolUnitUsage.TryGetValue(normalizedSymbol, out var existing) ? existing + absUnits : absUnits;
         }
 
         _maxPositionUnitsUsed = total;
@@ -498,12 +510,14 @@ internal sealed class RiskRailRuntime
                     if (trade.PnlCcy < 0m)
                     {
                         _cooldownLossStreak++;
-                        if (_cooldownConfig.ConsecutiveLosses.HasValue &&
-                            _cooldownConfig.ConsecutiveLosses.Value > 0 &&
-                            _cooldownLossStreak >= _cooldownConfig.ConsecutiveLosses.Value)
+                        if (_cooldownConfig.ConsecutiveLosses.HasValue)
                         {
-                            TriggerCooldown(trade.UtcTsClose);
-                            _cooldownLossStreak = 0;
+                            var consecutiveLosses = _cooldownConfig.ConsecutiveLosses.Value;
+                            if (consecutiveLosses > 0 && _cooldownLossStreak >= consecutiveLosses)
+                            {
+                                TriggerCooldown(trade.UtcTsClose);
+                                _cooldownLossStreak = 0;
+                            }
                         }
                     }
                     else if (trade.PnlCcy > 0m)

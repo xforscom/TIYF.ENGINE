@@ -659,7 +659,7 @@ public sealed class EngineHostState
             new Dictionary<string, long>(_riskSymbolCapViolations, StringComparer.OrdinalIgnoreCase),
             _riskCooldownEnabled,
             _riskCooldownActive,
-            _riskCooldownActiveUntilUtc.HasValue ? new DateTimeOffset(_riskCooldownActiveUntilUtc.Value).ToUnixTimeSeconds() : (double?)null,
+            _riskCooldownActiveUntilUtc.HasValue ? (double)new DateTimeOffset(_riskCooldownActiveUntilUtc.Value).ToUnixTimeSeconds() : (double?)null,
             _riskCooldownTriggersTotal,
             _riskCooldownConsecutiveLosses,
             _riskCooldownMinutes,

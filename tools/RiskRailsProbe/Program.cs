@@ -5,6 +5,8 @@ using TiYf.Engine.Core.Infrastructure;
 using TiYf.Engine.Host;
 using TiYf.Engine.Sim;
 
+// RiskRailsProbe drives the m11-risk-rails proof workflow: it loads a deterministic config,
+// replays synthetic trades, and emits summary/metrics/health artifacts for validation.
 var argsMap = ParseArgs(args);
 var configPath = argsMap.TryGetValue("--config", out var config) ? config : "proof/m11-risk-config.json";
 var outputPath = argsMap.TryGetValue("--output", out var output) ? output : "proof-artifacts/m11-risk-rails";
@@ -105,7 +107,7 @@ static Dictionary<string, string> ParseArgs(string[] rawArgs)
         var value = rawArgs[i + 1];
         if (value.StartsWith("--", StringComparison.Ordinal))
         {
-            continue;
+            throw new InvalidOperationException($"Flag '{key}' requires a value.");
         }
         map[key] = value;
         i++;
