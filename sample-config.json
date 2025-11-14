@@ -3,5 +3,8 @@
   "RunId":"RUN-DEMO",
   "InstrumentFile":"sample-instruments.csv",
   "InputTicksFile":"sample-ticks.csv",
-  "JournalRoot":"journals"
+  "JournalRoot":"journals",
+  "gvrs_gate": {
+    "enabled": false
+  }
 }

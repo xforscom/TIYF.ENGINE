@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1.3.0",
+  "run": {
+    "runId": "GVRS-GATE-PROOF"
+  },
+  "InstrumentFile": "sample-instruments.csv",
+  "InputTicksFile": "sample-ticks.csv",
+  "JournalRoot": "journals",
+  "gvrs_gate": {
+    "enabled": true
+  }
+}

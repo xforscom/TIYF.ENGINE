@@ -120,6 +120,9 @@ public static class EngineMetricsFormatter
         {
             AppendMetric(builder, "engine_gvrs_bucket", 1d, "bucket", snapshot.GvrsBucket!);
         }
+        AppendMetric(builder, "engine_gvrs_gate_blocks_total", snapshot.GvrsGateBlocksTotal);
+        var blockingValue = snapshot.GvrsGateWouldBlock ? 1 : 0;
+        AppendMetric(builder, "engine_gvrs_gate_is_blocking", blockingValue, "state", "volatile");
         return builder.ToString();
     }
 

@@ -27,5 +27,8 @@
       "promotion_threshold": 0.6,
       "demotion_threshold": 0.4
     }
+  },
+  "gvrs_gate": {
+    "enabled": false
   }
 }

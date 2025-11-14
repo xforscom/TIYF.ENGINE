@@ -1,0 +1,65 @@
+name: m10-gvrs-gate-proof
+
+on:
+  workflow_dispatch:
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    concurrency:
+      group: m10-gvrs-gate-proof-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure .NET install dir
+        uses: ./.github/actions/configure-dotnet
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.416'
+          dotnet-quality: ga
+          cache: false
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test --configuration Release --no-build
+
+      - name: Run GVRS gate probe
+        run: |
+          set -euo pipefail
+          out="proof-artifacts/m10-gvrs-gate"
+          mkdir -p "$out"
+          dotnet run --project tools/GvrsGateProbe/GvrsGateProbe.csproj --configuration Release -- --config proof/m10-gvrs-config.json --output "$out" --now 2025-08-01T00:00:00Z
+
+      - name: Verify proof artifacts
+        run: |
+          set -euo pipefail
+          ls proof-artifacts/m10-gvrs-gate
+          grep -F "engine_gvrs_gate_blocks_total 1" proof-artifacts/m10-gvrs-gate/metrics.txt
+          grep -F 'engine_gvrs_gate_is_blocking{state="volatile"} 1' proof-artifacts/m10-gvrs-gate/metrics.txt
+          python3 - <<'PY'
+          import json, sys
+          data = json.load(open("proof-artifacts/m10-gvrs-gate/health.json"))
+          gate = data.get("gvrs_gate") or {}
+          if not gate.get("last_block_utc"):
+              raise SystemExit("missing gvrs_gate.last_block_utc")
+          PY
+          cat proof-artifacts/m10-gvrs-gate/summary.txt
+
+      - name: Upload proof artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m10-gvrs-gate-proof-${{ github.ref_name }}
+          path: proof-artifacts/m10-gvrs-gate

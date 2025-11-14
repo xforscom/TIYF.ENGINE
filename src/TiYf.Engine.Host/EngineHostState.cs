@@ -62,6 +62,9 @@ public sealed class EngineHostState
     private string _configHash = string.Empty;
     private readonly Dictionary<string, IReadOnlyCollection<string>> _secretProvenance = new(StringComparer.OrdinalIgnoreCase);
     private string _newsFeedSourceType = "file";
+    private bool _gvrsGateEnabled;
+    private long _gvrsGateBlocksTotal;
+    private DateTime? _gvrsGateLastBlockUtc;
 
     public EngineHostState(string adapter, IEnumerable<string>? featureFlags)
     {
@@ -155,6 +158,23 @@ public sealed class EngineHostState
         lock (_sync)
         {
             _slippageModel = string.IsNullOrWhiteSpace(model) ? "zero" : model.Trim().ToLowerInvariant();
+        }
+    }
+
+    public void SetGvrsGateConfig(bool enabled)
+    {
+        lock (_sync)
+        {
+            _gvrsGateEnabled = enabled;
+        }
+    }
+
+    public void RegisterGvrsGateBlock(DateTime utc)
+    {
+        lock (_sync)
+        {
+            _gvrsGateBlocksTotal++;
+            _gvrsGateLastBlockUtc = NormalizeUtc(utc);
         }
     }
 
@@ -522,6 +542,12 @@ public sealed class EngineHostState
                 gvrs_raw = metrics.GvrsRaw,
                 gvrs_ewma = metrics.GvrsEwma,
                 gvrs_bucket = metrics.GvrsBucket,
+                gvrs_gate = new
+                {
+                    bucket = metrics.GvrsBucket,
+                    blocking_enabled = _gvrsGateEnabled,
+                    last_block_utc = _gvrsGateLastBlockUtc
+                },
                 promotion = CreatePromotionHealthUnsafe(),
                 news = CreateNewsHealthUnsafe(),
                 secrets = CreateSecretsHealthUnsafe(),
@@ -541,6 +567,8 @@ public sealed class EngineHostState
         var newsLastEventUnix = _newsFeedLastEventUtc.HasValue ? new DateTimeOffset(_newsFeedLastEventUtc.Value).ToUnixTimeSeconds() : (double?)null;
         var newsWindowsActive = _newsBlackoutActive ? 1 : 0;
         var newsSourceType = _newsFeedSourceType;
+        var gvrsGateWouldBlock = _gvrsGateEnabled && string.Equals(_gvrsBucket, "volatile", StringComparison.OrdinalIgnoreCase);
+        var gvrsGateLastBlockUnix = _gvrsGateLastBlockUtc.HasValue ? new DateTimeOffset(_gvrsGateLastBlockUtc.Value).ToUnixTimeSeconds() : (double?)null;
         var secretSnapshot = _secretProvenance.ToDictionary(
             kvp => kvp.Key,
             kvp => (IReadOnlyCollection<string>)(kvp.Value?.ToArray() ?? Array.Empty<string>()),
@@ -577,6 +605,10 @@ public sealed class EngineHostState
             _gvrsRaw,
             _gvrsEwma,
             _gvrsBucket,
+            _gvrsGateBlocksTotal,
+            gvrsGateLastBlockUnix,
+            _gvrsGateEnabled,
+            gvrsGateWouldBlock,
             _configHash,
             _riskConfigHash,
             _promotionConfigHash,
