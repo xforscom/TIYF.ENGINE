@@ -35,6 +35,7 @@ public readonly record struct EngineMetricsSnapshot(
     long GvrsGateBlocksTotal,
     double? GvrsGateLastBlockUnixSeconds,
     bool GvrsGateEnabled,
+    bool GvrsGateBlockingEnabled,
     bool GvrsGateWouldBlock,
     string ConfigHash,
     string RiskConfigHash,

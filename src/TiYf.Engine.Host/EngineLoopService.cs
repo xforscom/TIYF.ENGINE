@@ -221,8 +221,8 @@ internal sealed class EngineLoopService : BackgroundService
         var riskMode = ResolveRiskMode(rawDoc);
         var dataVersion = ComputeDataVersion(rawDoc, _configDirectory);
 
-        var gvrsGateEnabled = GvrsGateConfigHelper.ResolveGvrsGateEnabled(rawDoc);
-        _state.SetGvrsGateConfig(gvrsGateEnabled);
+        var gvrsGateConfig = GvrsGateConfigHelper.Resolve(rawDoc);
+        _state.SetGvrsGateConfig(gvrsGateConfig.Enabled, gvrsGateConfig.BlockOnVolatile);
 
         var slippageProfile = config.Slippage;
         var slippageName = SlippageModelFactory.Normalize(slippageProfile?.Model ?? config.SlippageModel);
@@ -301,7 +301,8 @@ internal sealed class EngineLoopService : BackgroundService
             timeframeLabels: _timeframeLabelByTicks,
             riskGateCallback: (gate, throttled) => _state.RegisterRiskGateEvent(gate, throttled),
             gvrsSnapshotCallback: snapshot => _state.SetGvrsSnapshot(snapshot),
-            gvrsGateEnabled: gvrsGateEnabled,
+            gvrsGateEnabled: gvrsGateConfig.Enabled,
+            gvrsGateBlockOnVolatile: gvrsGateConfig.BlockOnVolatile,
             gvrsGateCallback: utc =>
             {
                 _state.RegisterGvrsGateBlock(utc);

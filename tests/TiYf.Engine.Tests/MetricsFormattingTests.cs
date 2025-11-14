@@ -25,7 +25,7 @@ public class MetricsFormattingTests
         state.UpdateStreamConnection(true);
         state.RecordLoopDecision("H1", decisionTime);
         state.SetGvrsSnapshot(new MarketContextService.GvrsSnapshot(0.25m, 0.20m, "calm", "shadow", true));
-        state.SetGvrsGateConfig(true);
+        state.SetGvrsGateConfig(true, false);
         state.RegisterGvrsGateBlock(decisionTime);
         state.RegisterOrderAccepted("EURUSD", 250);
         state.RegisterOrderRejected();
@@ -76,6 +76,7 @@ public class MetricsFormattingTests
         Assert.Contains("engine_news_last_event_ts", metricsText);
         Assert.Contains("engine_config_hash{hash=\"hash-demo\"} 1", metricsText);
         Assert.Contains("engine_risk_config_hash{hash=\"riskhash\"} 1", metricsText);
+        Assert.Contains("engine_gvrs_gate_blocking_enabled 0", metricsText);
         Assert.Contains("engine_gvrs_gate_blocks_total 1", metricsText);
         Assert.Contains("engine_gvrs_gate_is_blocking{state=\"volatile\"} 0", metricsText);
         Assert.Contains("engine_secret_provenance{integration=\"oanda_demo\",source=\"env\"} 1", metricsText);
@@ -97,7 +98,7 @@ public class MetricsFormattingTests
         state.UpdateStreamConnection(true);
         state.RecordLoopDecision("H4", decisionTime);
         state.SetGvrsSnapshot(new MarketContextService.GvrsSnapshot(0.15m, 0.10m, "moderate", "shadow", true));
-        state.SetGvrsGateConfig(true);
+        state.SetGvrsGateConfig(true, true);
         state.RegisterGvrsGateBlock(decisionTime);
         state.RegisterOrderAccepted("GBPUSD", 75);
         state.RegisterOrderRejected();

@@ -18,10 +18,10 @@ var state = new EngineHostState("gvrs-gate-proof", Array.Empty<string>());
 state.MarkConnected(true);
 state.SetLoopStart(nowUtc);
 state.SetConfigSource(Path.GetFullPath(configPath), configHash);
-var gateEnabled = GvrsGateConfigHelper.ResolveGvrsGateEnabled(rawDoc);
-state.SetGvrsGateConfig(gateEnabled);
+var gateConfig = GvrsGateConfigHelper.Resolve(rawDoc);
+state.SetGvrsGateConfig(gateConfig.Enabled, gateConfig.BlockOnVolatile);
 state.SetGvrsSnapshot(new MarketContextService.GvrsSnapshot(0.9m, 0.85m, "volatile", "shadow", true));
-if (gateEnabled)
+if (gateConfig.Enabled)
 {
     state.RegisterGvrsGateBlock(nowUtc);
 }
@@ -34,7 +34,7 @@ var blocksTotal = snapshot.GvrsGateBlocksTotal;
 var lastBlock = snapshot.GvrsGateLastBlockUnixSeconds.HasValue
     ? DateTimeOffset.FromUnixTimeSeconds((long)snapshot.GvrsGateLastBlockUnixSeconds.Value).UtcDateTime.ToString("O")
     : "n/a";
-var summary = $"gvrs_gate_summary bucket={bucket} gate_enabled={gateEnabled.ToString().ToLowerInvariant()} blocks_total={blocksTotal} last_block_utc={lastBlock}";
+var summary = $"gvrs_gate_summary bucket={bucket} gate_enabled={gateConfig.Enabled.ToString().ToLowerInvariant()} blocking_enabled={gateConfig.BlockOnVolatile.ToString().ToLowerInvariant()} blocks_total={blocksTotal} last_block_utc={lastBlock}";
 
 await File.WriteAllTextAsync(Path.Combine(outputPath, "metrics.txt"), metrics);
 await File.WriteAllTextAsync(Path.Combine(outputPath, "health.json"), health);

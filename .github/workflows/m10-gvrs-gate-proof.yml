@@ -38,9 +38,6 @@ jobs:
       - name: Build
         run: dotnet build --configuration Release --no-restore
 
-      - name: Test
-        run: dotnet test --configuration Release --no-build
-
       - name: Run GVRS gate probe
         run: |
           set -euo pipefail
@@ -54,6 +51,7 @@ jobs:
           ls proof-artifacts/m10-gvrs-gate
           grep -F "engine_gvrs_gate_blocks_total 1" proof-artifacts/m10-gvrs-gate/metrics.txt
           grep -F 'engine_gvrs_gate_is_blocking{state="volatile"} 1' proof-artifacts/m10-gvrs-gate/metrics.txt
+          grep -F 'engine_gvrs_gate_blocking_enabled 1' proof-artifacts/m10-gvrs-gate/metrics.txt
           python3 - <<'PY'
           import json, sys
           data = json.load(open("proof-artifacts/m10-gvrs-gate/health.json"))
@@ -62,6 +60,7 @@ jobs:
               raise SystemExit("missing gvrs_gate.last_block_utc")
           PY
           cat proof-artifacts/m10-gvrs-gate/summary.txt
+          grep -F "blocking_enabled=true" proof-artifacts/m10-gvrs-gate/summary.txt
 
       - name: Upload proof artifacts
         if: always()

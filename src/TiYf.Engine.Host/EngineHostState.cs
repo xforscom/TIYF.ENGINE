@@ -62,6 +62,7 @@ public sealed class EngineHostState
     private string _configHash = string.Empty;
     private readonly Dictionary<string, IReadOnlyCollection<string>> _secretProvenance = new(StringComparer.OrdinalIgnoreCase);
     private string _newsFeedSourceType = "file";
+    private bool _gvrsGateBlockingEnabled;
     private bool _gvrsGateEnabled;
     private long _gvrsGateBlocksTotal;
     private DateTime? _gvrsGateLastBlockUtc;
@@ -161,11 +162,12 @@ public sealed class EngineHostState
         }
     }
 
-    public void SetGvrsGateConfig(bool enabled)
+    public void SetGvrsGateConfig(bool enabled, bool blockOnVolatile)
     {
         lock (_sync)
         {
             _gvrsGateEnabled = enabled;
+            _gvrsGateBlockingEnabled = blockOnVolatile;
         }
     }
 
@@ -545,7 +547,7 @@ public sealed class EngineHostState
                 gvrs_gate = new
                 {
                     bucket = metrics.GvrsBucket,
-                    blocking_enabled = _gvrsGateEnabled,
+                    blocking_enabled = _gvrsGateBlockingEnabled,
                     last_block_utc = _gvrsGateLastBlockUtc
                 },
                 promotion = CreatePromotionHealthUnsafe(),
@@ -567,7 +569,7 @@ public sealed class EngineHostState
         var newsLastEventUnix = _newsFeedLastEventUtc.HasValue ? new DateTimeOffset(_newsFeedLastEventUtc.Value).ToUnixTimeSeconds() : (double?)null;
         var newsWindowsActive = _newsBlackoutActive ? 1 : 0;
         var newsSourceType = _newsFeedSourceType;
-        var gvrsGateWouldBlock = _gvrsGateEnabled && string.Equals(_gvrsBucket, "volatile", StringComparison.OrdinalIgnoreCase);
+        var gvrsGateWouldBlock = _gvrsGateEnabled && _gvrsGateBlockingEnabled && string.Equals(_gvrsBucket, "volatile", StringComparison.OrdinalIgnoreCase);
         var gvrsGateLastBlockUnix = _gvrsGateLastBlockUtc.HasValue ? new DateTimeOffset(_gvrsGateLastBlockUtc.Value).ToUnixTimeSeconds() : (double?)null;
         var secretSnapshot = _secretProvenance.ToDictionary(
             kvp => kvp.Key,
@@ -608,6 +610,7 @@ public sealed class EngineHostState
             _gvrsGateBlocksTotal,
             gvrsGateLastBlockUnix,
             _gvrsGateEnabled,
+            _gvrsGateBlockingEnabled,
             gvrsGateWouldBlock,
             _configHash,
             _riskConfigHash,
