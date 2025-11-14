@@ -65,5 +65,8 @@
   },
   "featureFlags": {
     "risk": "active"
+  },
+  "gvrs_gate": {
+    "enabled": false
   }
 }

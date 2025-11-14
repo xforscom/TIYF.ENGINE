@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using TiYf.Engine.Core;
@@ -13,6 +14,8 @@ using TiYf.Engine.Sidecar;
 using TiYf.Engine.Core.Slippage;
 
 namespace TiYf.Engine.Sim;
+
+public sealed record GvrsGateConfig(bool Enabled = false);
 
 public sealed record EngineConfig(
     string SchemaVersion,
@@ -28,7 +31,8 @@ public sealed record EngineConfig(
     string? SlippageModel = "zero",
     SlippageProfile? Slippage = null,
     string[]? Instruments = null,
-    string[]? Intervals = null
+    string[]? Intervals = null,
+    [property: JsonPropertyName("gvrs_gate")] GvrsGateConfig? GvrsGate = null
 );
 
 public static class EngineConfigLoader
@@ -133,6 +137,7 @@ public sealed class EngineLoop
     private long _idempotencyEvictions;
     private bool _orderEvictionWarned;
     private bool _cancelEvictionWarned;
+    private readonly GvrsGateMonitor? _gvrsGateMonitor;
 
     private string? ExtractDataVersion() => _dataVersion;
     private DateTime UtcNow() => _utcNow?.Invoke() ?? DateTime.UtcNow;
@@ -506,7 +511,7 @@ public sealed class EngineLoop
         Console.WriteLine($"OrderSend ok decision={decisionId} brokerOrderId={id} symbol={symbol}");
     }
 
-    public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action<Bar>? onBarEmitted = null, Action<int, int>? onPositionMetrics = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, string sourceAdapter = "stub", long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true, SentimentGuardConfig? sentimentConfig = null, string? penaltyConfig = null, bool forcePenalty = false, bool ciPenaltyScaffold = false, string riskMode = "off", string? riskConfigHash = null, IReadOnlyList<NewsEvent>? newsEvents = null, IReadOnlyDictionary<long, string>? timeframeLabels = null, Action<string, bool>? riskGateCallback = null, Action<MarketContextService.GvrsSnapshot>? gvrsSnapshotCallback = null, ISlippageModel? slippageModel = null, Func<DateTime>? utcNow = null, Action<string, long>? orderAcceptedCallback = null, Action? orderRejectedCallback = null, Action<int, int, long>? idempotencyMetricsCallback = null, Action<string>? warnCallback = null, Action<decimal>? slippageMetricsCallback = null, IIdempotencyPersistence? idempotencyPersistence = null, IdempotencySnapshot? persistedIdempotencySnapshot = null)
+    public EngineLoop(IClock clock, Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> builders, IBarKeyTracker tracker, IJournalWriter journal, ITickSource ticks, string barEventType, Action<Bar>? onBarEmitted = null, Action<int, int>? onPositionMetrics = null, IRiskFormulas? riskFormulas = null, IBasketRiskAggregator? basketAggregator = null, string? configHash = null, string schemaVersion = TiYf.Engine.Core.Infrastructure.Schema.Version, IRiskEnforcer? riskEnforcer = null, RiskConfig? riskConfig = null, decimal? equityOverride = null, DeterministicScriptStrategy? deterministicStrategy = null, IExecutionAdapter? execution = null, PositionTracker? positions = null, TradesJournalWriter? tradesWriter = null, string? dataVersion = null, string sourceAdapter = "stub", long sizeUnitsFx = 1000, long sizeUnitsXau = 1, bool riskProbeEnabled = true, SentimentGuardConfig? sentimentConfig = null, string? penaltyConfig = null, bool forcePenalty = false, bool ciPenaltyScaffold = false, string riskMode = "off", string? riskConfigHash = null, IReadOnlyList<NewsEvent>? newsEvents = null, IReadOnlyDictionary<long, string>? timeframeLabels = null, Action<string, bool>? riskGateCallback = null, Action<MarketContextService.GvrsSnapshot>? gvrsSnapshotCallback = null, bool gvrsGateEnabled = false, Action<DateTime>? gvrsGateCallback = null, ISlippageModel? slippageModel = null, Func<DateTime>? utcNow = null, Action<string, long>? orderAcceptedCallback = null, Action? orderRejectedCallback = null, Action<int, int, long>? idempotencyMetricsCallback = null, Action<string>? warnCallback = null, Action<decimal>? slippageMetricsCallback = null, IIdempotencyPersistence? idempotencyPersistence = null, IdempotencySnapshot? persistedIdempotencySnapshot = null)
     {
         _clock = clock; _builders = builders; _barKeyTracker = tracker; _journal = journal; _ticks = ticks; _barEventType = barEventType; _seq = (journal is FileJournalWriter fj ? fj.NextSequence : 1UL) - 1UL; _onBarEmitted = onBarEmitted; _onPositionMetrics = onPositionMetrics; _riskFormulas = riskFormulas; _basketAggregator = basketAggregator; _configHash = configHash; _schemaVersion = schemaVersion; _riskEnforcer = riskEnforcer; _riskConfig = riskConfig; _equityOverride = equityOverride; _deterministicStrategy = deterministicStrategy; _execution = execution; _positions = positions; _tradesWriter = tradesWriter; _dataVersion = dataVersion; _sourceAdapter = string.IsNullOrWhiteSpace(sourceAdapter) ? "stub" : sourceAdapter; _riskProbeEnabled = riskProbeEnabled; _sentimentConfig = sentimentConfig; _penaltyMode = penaltyConfig ?? "off"; _forcePenalty = forcePenalty; _ciPenaltyScaffold = ciPenaltyScaffold; _riskMode = string.IsNullOrWhiteSpace(riskMode) ? "off" : riskMode.ToLowerInvariant();
         _sizeUnitsFx = sizeUnitsFx; _sizeUnitsXau = sizeUnitsXau;
@@ -526,6 +531,7 @@ public sealed class EngineLoop
         _warnCallback = warnCallback;
         _onSlippageApplied = slippageMetricsCallback;
         _idempotencyPersistence = idempotencyPersistence;
+        _gvrsGateMonitor = gvrsGateEnabled ? new GvrsGateMonitor(true, gvrsGateCallback) : null;
         if (persistedIdempotencySnapshot.HasValue)
         {
             RestoreIdempotency(persistedIdempotencySnapshot.Value);
@@ -882,6 +888,15 @@ public sealed class EngineLoop
                                         }
                                         var gvrsConfig = _riskConfig?.GlobalVolatilityGate ?? GlobalVolatilityGateConfig.Disabled;
                                         await TryEmitGvrsShadowAlert(gvrsConfig, act.DecisionId, act.Symbol, timeframeLabel, tickMinute, ct);
+                                        if (_gvrsGateMonitor is not null && _marketContextService is { HasValue: true } svcGate)
+                                        {
+                                            var gateAlert = _gvrsGateMonitor.TryCreateAlert(svcGate.CurrentBucket, svcGate.CurrentRaw, svcGate.CurrentEwma, act.Symbol, timeframeLabel, tickMinute);
+                                            if (gateAlert is { } ga)
+                                            {
+                                                var gatePayload = EnrichWithGvrs(ga.Payload);
+                                                await _journal.AppendAsync(new JournalEvent(++_seq, tickMinute, ga.EventType, _sourceAdapter, gatePayload), ct);
+                                            }
+                                        }
                                         if (_riskMode == "active")
                                         {
                                             if (!riskOutcome.Allowed)

@@ -221,6 +221,9 @@ internal sealed class EngineLoopService : BackgroundService
         var riskMode = ResolveRiskMode(rawDoc);
         var dataVersion = ComputeDataVersion(rawDoc, _configDirectory);
 
+        var gvrsGateEnabled = GvrsGateConfigHelper.ResolveGvrsGateEnabled(rawDoc);
+        _state.SetGvrsGateConfig(gvrsGateEnabled);
+
         var slippageProfile = config.Slippage;
         var slippageName = SlippageModelFactory.Normalize(slippageProfile?.Model ?? config.SlippageModel);
         var slippageModel = SlippageModelFactory.Create(slippageProfile, slippageName);
@@ -298,6 +301,12 @@ internal sealed class EngineLoopService : BackgroundService
             timeframeLabels: _timeframeLabelByTicks,
             riskGateCallback: (gate, throttled) => _state.RegisterRiskGateEvent(gate, throttled),
             gvrsSnapshotCallback: snapshot => _state.SetGvrsSnapshot(snapshot),
+            gvrsGateEnabled: gvrsGateEnabled,
+            gvrsGateCallback: utc =>
+            {
+                _state.RegisterGvrsGateBlock(utc);
+                UpdateHostMetrics();
+            },
             orderAcceptedCallback: (symbol, units) =>
             {
                 _state.RegisterOrderAccepted(symbol, units);

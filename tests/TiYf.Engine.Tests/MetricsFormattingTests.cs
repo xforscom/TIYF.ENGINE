@@ -25,6 +25,8 @@ public class MetricsFormattingTests
         state.UpdateStreamConnection(true);
         state.RecordLoopDecision("H1", decisionTime);
         state.SetGvrsSnapshot(new MarketContextService.GvrsSnapshot(0.25m, 0.20m, "calm", "shadow", true));
+        state.SetGvrsGateConfig(true);
+        state.RegisterGvrsGateBlock(decisionTime);
         state.RegisterOrderAccepted("EURUSD", 250);
         state.RegisterOrderRejected();
         state.UpdateIdempotencyMetrics(2, 1, 3);
@@ -74,6 +76,8 @@ public class MetricsFormattingTests
         Assert.Contains("engine_news_last_event_ts", metricsText);
         Assert.Contains("engine_config_hash{hash=\"hash-demo\"} 1", metricsText);
         Assert.Contains("engine_risk_config_hash{hash=\"riskhash\"} 1", metricsText);
+        Assert.Contains("engine_gvrs_gate_blocks_total 1", metricsText);
+        Assert.Contains("engine_gvrs_gate_is_blocking{state=\"volatile\"} 0", metricsText);
         Assert.Contains("engine_secret_provenance{integration=\"oanda_demo\",source=\"env\"} 1", metricsText);
         Assert.Contains("engine_reconcile_mismatches_total", metricsText);
         Assert.Contains("engine_reconcile_last_status{status=\"match\"} 1", metricsText);
@@ -93,6 +97,8 @@ public class MetricsFormattingTests
         state.UpdateStreamConnection(true);
         state.RecordLoopDecision("H4", decisionTime);
         state.SetGvrsSnapshot(new MarketContextService.GvrsSnapshot(0.15m, 0.10m, "moderate", "shadow", true));
+        state.SetGvrsGateConfig(true);
+        state.RegisterGvrsGateBlock(decisionTime);
         state.RegisterOrderAccepted("GBPUSD", 75);
         state.RegisterOrderRejected();
         state.UpdateIdempotencyMetrics(5, 4, 7);
@@ -132,6 +138,10 @@ public class MetricsFormattingTests
         Assert.Equal(0.15, gvrsRaw.GetDouble(), 3);
         Assert.Equal(0.10, root.GetProperty("gvrs_ewma").GetDouble(), 3);
         Assert.Equal("Moderate", root.GetProperty("gvrs_bucket").GetString());
+        var gvrsGate = root.GetProperty("gvrs_gate");
+        Assert.Equal("Moderate", gvrsGate.GetProperty("bucket").GetString());
+        Assert.True(gvrsGate.GetProperty("blocking_enabled").GetBoolean());
+        Assert.False(string.IsNullOrWhiteSpace(gvrsGate.GetProperty("last_block_utc").GetString()));
         Assert.Equal(1, root.GetProperty("order_rejects_total").GetInt64());
         var lastOrderSizes = root.GetProperty("last_order_size_units");
         Assert.Equal(7, root.GetProperty("idempotency_evictions_total").GetInt64());
