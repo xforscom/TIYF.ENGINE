@@ -160,6 +160,24 @@ public static class RiskConfigParser
         return string.Concat(snake.Split('_', StringSplitOptions.RemoveEmptyEntries).Select((s, i) => i == 0 ? s : char.ToUpperInvariant(s[0]) + s.Substring(1)));
     }
 
+    private static IReadOnlyDictionary<string, string>? ParseStringDictionary(JsonElement parent, string propertyName)
+    {
+        if (!TryObject(parent, propertyName, out var obj)) return null;
+        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var prop in obj.EnumerateObject())
+        {
+            if (prop.Value.ValueKind == JsonValueKind.String)
+            {
+                var value = prop.Value.GetString();
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    dict[prop.Name] = value;
+                }
+            }
+        }
+        return dict.Count == 0 ? null : dict;
+    }
+
     private static Dictionary<string, decimal>? ParseExposureCaps(JsonElement parent)
     {
         if (TryObject(parent, "max_net_exposure_by_symbol", out var obj))
@@ -248,7 +266,22 @@ public static class RiskConfigParser
         int minutesAfter = TryInt(obj, "minutes_after", out var after) ? after : 0;
         string? sourcePath = (TryString(obj, "source_path", out var source) && !string.IsNullOrWhiteSpace(source)) ? source : null;
         int pollSeconds = TryInt(obj, "poll_seconds", out var poll) ? Math.Max(5, poll) : 60;
-        return new NewsBlackoutConfig(enabled, minutesBefore, minutesAfter, sourcePath, pollSeconds);
+        var sourceTypeRaw = TryString(obj, "source_type", out var st) ? st : null;
+        var sourceType = NewsSourceTypeHelper.Normalize(sourceTypeRaw);
+        NewsHttpSourceConfig? httpConfig = null;
+        if (TryObject(obj, "http", out var httpNode))
+        {
+            var baseUri = TryString(httpNode, "base_uri", out var baseRaw) ? baseRaw : null;
+            var headerName = TryString(httpNode, "api_key_header", out var headerRaw) ? headerRaw : null;
+            var apiKeyEnv = TryString(httpNode, "api_key_env", out var envRaw) ? envRaw : null;
+            var headers = ParseStringDictionary(httpNode, "headers");
+            var query = ParseStringDictionary(httpNode, "query");
+            if (!string.IsNullOrWhiteSpace(baseUri))
+            {
+                httpConfig = new NewsHttpSourceConfig(baseUri, headerName, apiKeyEnv, headers, query);
+            }
+        }
+        return new NewsBlackoutConfig(enabled, minutesBefore, minutesAfter, sourcePath, pollSeconds, sourceType, httpConfig);
     }
 
     private static GlobalVolatilityGateConfig ParseGlobalVolatilityGate(JsonElement parent)
