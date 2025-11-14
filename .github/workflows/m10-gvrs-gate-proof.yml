@@ -16,6 +16,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Compute safe ref name
+        id: vars
+        run: |
+          set -euo pipefail
+          safe_ref="${GITHUB_REF_NAME//\//-}"
+          echo "safe_ref=$safe_ref" >> "$GITHUB_OUTPUT"
+
       - name: Configure .NET install dir
         uses: ./.github/actions/configure-dotnet
 
@@ -23,7 +30,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.416'
-          dotnet-quality: ga
           cache: false
 
       - name: Restore
@@ -61,5 +67,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: m10-gvrs-gate-proof-${{ github.ref_name }}
+          name: m10-gvrs-gate-proof-${{ steps.vars.outputs.safe_ref }}
           path: proof-artifacts/m10-gvrs-gate
