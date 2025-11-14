@@ -67,6 +67,7 @@
     "risk": "active"
   },
   "gvrs_gate": {
-    "enabled": false
+    "enabled": true,
+    "block_on_volatile": true
   }
 }
