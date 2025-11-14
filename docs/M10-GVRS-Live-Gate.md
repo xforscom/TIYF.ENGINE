@@ -16,13 +16,14 @@
 
 ```json
 "gvrs_gate": {
-  "enabled": false
+  "enabled": false,
+  "block_on_volatile": false
 }
 ```
 
-- Default is disabled; demo configs keep `false`.
-- Parser tolerates missing block (treated as disabled).
-- Even when enabled, this phase still allows orders (future phase will flip to runtime blocking).
+- `enabled` controls telemetry + alerting.
+- `block_on_volatile` opts into live blocking; defaults to false, so existing telemetry-only deployments are unchanged.
+- Demo/sample configs keep both values false.
 
 ### Telemetry Additions
 

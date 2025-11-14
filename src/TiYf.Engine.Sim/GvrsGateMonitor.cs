@@ -5,18 +5,22 @@ using TiYf.Engine.Core.Text;
 
 namespace TiYf.Engine.Sim;
 
+internal readonly record struct GvrsGateResult(RiskRailAlert Alert, bool Blocked);
+
 internal sealed class GvrsGateMonitor
 {
     private readonly bool _enabled;
+    private readonly bool _blockOnVolatile;
     private readonly Action<DateTime>? _onBlock;
 
-    public GvrsGateMonitor(bool enabled, Action<DateTime>? onBlock)
+    public GvrsGateMonitor(bool enabled, bool blockOnVolatile, Action<DateTime>? onBlock)
     {
         _enabled = enabled;
+        _blockOnVolatile = blockOnVolatile;
         _onBlock = onBlock;
     }
 
-    public RiskRailAlert? TryCreateAlert(string? bucket, decimal raw, decimal ewma, string symbol, string timeframe, DateTime decisionUtc)
+    public GvrsGateResult? Evaluate(string? bucket, decimal raw, decimal ewma, string symbol, string timeframe, DateTime decisionUtc)
     {
         if (!_enabled)
         {
@@ -43,8 +47,10 @@ internal sealed class GvrsGateMonitor
             gvrs_bucket = normalizedBucket,
             gvrs_raw = raw,
             gvrs_ewma = ewma,
-            blocking_enabled = true
+            blocking_enabled = _blockOnVolatile
         });
-        return new RiskRailAlert("ALERT_BLOCK_GVRS_GATE", payload, false);
+        var alert = new RiskRailAlert("ALERT_BLOCK_GVRS_GATE", payload, false);
+        var blocked = _blockOnVolatile;
+        return new GvrsGateResult(alert, blocked);
     }
 }
