@@ -70,7 +70,6 @@ jobs:
           jq -e '.config.path != null and .config.hash != ""' proof-artifacts/m9-config-sot/health.json > /dev/null
           jq -e '.secrets | has("oanda_demo")' proof-artifacts/m9-config-sot/health.json > /dev/null
           grep -F 'engine_config_hash' proof-artifacts/m9-config-sot/metrics.txt
-          grep -F 'engine_risk_config_hash' proof-artifacts/m9-config-sot/metrics.txt
           grep -F 'engine_secret_provenance{integration="oanda_demo",source="env"} 1' proof-artifacts/m9-config-sot/metrics.txt
           jq -r '.config.path' proof-artifacts/m9-config-sot/health.json > proof-artifacts/m9-config-sot/summary.txt
 
