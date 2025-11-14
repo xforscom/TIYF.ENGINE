@@ -27,6 +27,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Compute safe ref name
+        id: vars
+        run: |
+          set -euo pipefail
+          safe_ref="${GITHUB_REF_NAME//\//-}"
+          echo "safe_ref=$safe_ref" >> "$GITHUB_OUTPUT"
+
       - name: Configure .NET install dir
         uses: ./.github/actions/configure-dotnet
 
@@ -72,5 +79,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: m11-risk-rails-proof-${{ github.ref_name }}
+          name: m11-risk-rails-proof-${{ steps.vars.outputs.safe_ref }}
           path: proof-artifacts/m11-risk-rails
