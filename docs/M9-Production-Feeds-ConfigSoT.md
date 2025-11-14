@@ -25,6 +25,9 @@
 - Daily-monitor line includes explicit blackout status.
 
 ## Phase M9-B – Config Source of Truth (Git + Hashes)
+**Status: ✅ implemented on main (`feat/m9b-live-news-adapter` / PR #109).**  
+Engine startup now emits an explicit `engine_config_sot path=… hash=…` log, `/health` exposes `config { path, hash }`, and `/metrics` surfaces both `engine_config_hash{hash="…"}` and `engine_risk_config_hash{hash="…"}`. Daily fan-outs and proofs capture the same values so Ops can tie a running host back to the Git blob that produced it.
+
 **In scope**
 - Define how configs are stored as Git-tracked blobs (e.g., `/config/*.json`, versioned).
 - Compute and emit a `config_sot_hash` at boot alongside risk/promotion hashes.
@@ -41,10 +44,13 @@
 - Proof harnesses that read config hashes (risk/promotion probes).
 
 **Proof expectations**
-- Demonstrate a deterministic run where `config_sot_hash` matches the Git blob (artifact capture + logs).
-- Daily-monitor artifact shows `config_sot_hash` along with risk/promotion hashes.
+- `m9-config-sot-proof` workflow launches the host (loop disabled), scrapes `/health` + `/metrics`, and asserts the config path/hash plus secret provenance gauges (see M9-C below).
+- Daily-monitor artifact shows the config hash alongside the existing risk/promotion hashes.
 
 ## Phase M9-C – Secrets Handling & Provenance
+**Status: ✅ implemented on main (`feat/m9c-config-sot`).**  
+Secret reads now update a `SecretProvenanceTracker`, `/health` exposes `secrets { integration: "env|missing|…" }`, `/metrics` outputs `engine_secret_provenance{integration=\"…\",source=\"…\"}`, and no secret values (or env var names) are logged or exported. Demo configs remain file-backed; HTTP news/API integrations stay opt-in via config + env secrets only.
+
 **In scope**
 - Document approved secret surfaces (env vars, secret store injection) and forbid secrets in JSON configs or committed artifacts.
 - Audit adapters, config loader, and workflows to ensure secrets are only pulled from env/secret inputs.
@@ -60,8 +66,8 @@
 - Documentation in `docs/DEMO-RUN.md`, runbooks.
 
 **Proof expectations**
-- Checklist/proof doc confirming no secrets exist in repo/configs.
-- Workflow logs showing secrets sourced from env (without printing values).
+- `m9-config-sot-proof` workflow verifies that `/health.secrets` includes `oanda_demo` and `/metrics` reports `engine_secret_provenance{integration=\"oanda_demo\",source=\"env\"} 1`, all with dummy env values (no secret data leaked).
+- Daily-monitor lines carry the new config + secrets tail so Ops can audit provenance at a glance.
 ## Overall Notes
 - Each phase delivers telemetry/proof evidence before any runtime gating.
 - M9 is sequencing groundwork for eventual M10+ runtime enforcement.

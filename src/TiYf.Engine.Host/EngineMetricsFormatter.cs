@@ -50,6 +50,24 @@ public static class EngineMetricsFormatter
         {
             AppendMetric(builder, "engine_idempotency_persistence_last_load_ts", snapshot.IdempotencyPersistenceLastLoadUnix.Value);
         }
+        if (!string.IsNullOrWhiteSpace(snapshot.ConfigHash))
+        {
+            AppendMetric(builder, "engine_config_hash", 1, "hash", snapshot.ConfigHash);
+        }
+        if (!string.IsNullOrWhiteSpace(snapshot.RiskConfigHash))
+        {
+            AppendMetric(builder, "engine_risk_config_hash", 1, "hash", snapshot.RiskConfigHash);
+        }
+        if (snapshot.SecretProvenance is { Count: > 0 })
+        {
+            foreach (var kvp in snapshot.SecretProvenance)
+            {
+                foreach (var source in kvp.Value ?? Array.Empty<string>())
+                {
+                    AppendMetric(builder, "engine_secret_provenance", 1, ("integration", kvp.Key), ("source", source));
+                }
+            }
+        }
         if (!string.IsNullOrWhiteSpace(snapshot.SlippageModel))
         {
             AppendMetric(builder, "engine_slippage_model", 1, "model", snapshot.SlippageModel);
@@ -145,6 +163,31 @@ public static class EngineMetricsFormatter
             .Append(labelValue.Replace("\"", "\\\""))
             .Append("\"} ")
             .AppendFormat(CultureInfo.InvariantCulture, "{0}", value)
+            .Append('\n');
+    }
+
+    private static void AppendMetric(StringBuilder builder, string name, long value, params (string Name, string Value)[] labels)
+    {
+        if (labels is null || labels.Length == 0)
+        {
+            AppendMetric(builder, name, value);
+            return;
+        }
+
+        builder.Append(name).Append('{');
+        for (var i = 0; i < labels.Length; i++)
+        {
+            if (i > 0)
+            {
+                builder.Append(',');
+            }
+            builder.Append(labels[i].Name)
+                .Append("=\"")
+                .Append(labels[i].Value.Replace("\"", "\\\""))
+                .Append('"');
+        }
+        builder.Append("} ")
+            .Append(value)
             .Append('\n');
     }
 }

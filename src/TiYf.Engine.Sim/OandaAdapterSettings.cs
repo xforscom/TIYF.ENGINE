@@ -1,3 +1,4 @@
+using System;
 using System.Text.Json;
 
 namespace TiYf.Engine.Sim;
@@ -18,7 +19,7 @@ public sealed record OandaAdapterSettings(
     string PositionsEndpoint,
     string PendingOrdersEndpoint)
 {
-    public static OandaAdapterSettings FromJson(JsonElement adapterNode, string adapterType)
+    public static OandaAdapterSettings FromJson(JsonElement adapterNode, string adapterType, Action<string>? recordSecretSource = null)
     {
         var lower = adapterType?.ToLowerInvariant() ?? "oanda-demo";
         var defaults = DefaultsFor(lower);
@@ -26,7 +27,7 @@ public sealed record OandaAdapterSettings(
             ? settingsNode
             : adapterNode;
 
-        static string ResolveString(JsonElement node, string propertyName, string envVar, string fallback = "")
+        static string ResolveString(JsonElement node, string propertyName, string envVar, string fallback = "", Action<string>? recordSource = null)
         {
             if (node.TryGetProperty(propertyName, out var prop) && prop.ValueKind == JsonValueKind.String)
             {
@@ -34,14 +35,30 @@ public sealed record OandaAdapterSettings(
                 if (value.StartsWith("env:", StringComparison.OrdinalIgnoreCase))
                 {
                     var env = Environment.GetEnvironmentVariable(value[4..]);
-                    return string.IsNullOrWhiteSpace(env) ? fallback : env!;
+                    if (!string.IsNullOrWhiteSpace(env))
+                    {
+                        recordSource?.Invoke("env");
+                        return env!;
+                    }
+                    recordSource?.Invoke("missing");
+                    return fallback;
                 }
+                recordSource?.Invoke("config");
                 return value;
             }
             if (!string.IsNullOrWhiteSpace(envVar))
             {
                 var env = Environment.GetEnvironmentVariable(envVar);
-                if (!string.IsNullOrWhiteSpace(env)) return env!;
+                if (!string.IsNullOrWhiteSpace(env))
+                {
+                    recordSource?.Invoke("env");
+                    return env!;
+                }
+                recordSource?.Invoke("missing");
+            }
+            else
+            {
+                recordSource?.Invoke("default");
             }
             return fallback;
         }
@@ -89,8 +106,8 @@ public sealed record OandaAdapterSettings(
         }
 
         var baseUrl = ResolveString(cfgNode, "baseUrl", string.Empty, defaults.BaseUri.ToString());
-        var accessToken = ResolveString(cfgNode, "accessToken", lower == "oanda-live" ? "OANDA_LIVE_TOKEN" : "OANDA_PRACTICE_TOKEN", defaults.AccessToken);
-        var accountId = ResolveString(cfgNode, "accountId", lower == "oanda-live" ? "OANDA_LIVE_ACCOUNT_ID" : "OANDA_PRACTICE_ACCOUNT_ID", defaults.AccountId);
+        var accessToken = ResolveString(cfgNode, "accessToken", lower == "oanda-live" ? "OANDA_LIVE_TOKEN" : "OANDA_PRACTICE_TOKEN", defaults.AccessToken, recordSecretSource);
+        var accountId = ResolveString(cfgNode, "accountId", lower == "oanda-live" ? "OANDA_LIVE_ACCOUNT_ID" : "OANDA_PRACTICE_ACCOUNT_ID", defaults.AccountId, recordSecretSource);
 
         var useMockFallback = string.IsNullOrWhiteSpace(accessToken) ? true : defaults.UseMock;
         var useMock = ResolveBool(cfgNode, "useMock", useMockFallback);
