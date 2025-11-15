@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using TiYf.Engine.Core;
 using TiYf.Engine.Core.Text;
+using TiYf.Engine.Sim;
 
 namespace TiYf.Engine.Host;
 
@@ -66,6 +67,21 @@ public sealed class EngineHostState
     private bool _gvrsGateEnabled;
     private long _gvrsGateBlocksTotal;
     private DateTime? _gvrsGateLastBlockUtc;
+    private decimal? _riskBrokerDailyLossCapCcy;
+    private decimal _riskBrokerDailyLossUsedCcy;
+    private long _riskBrokerDailyLossViolationsTotal;
+    private long? _riskMaxPositionUnitsLimit;
+    private long _riskMaxPositionUnitsUsed;
+    private long _riskMaxPositionViolationsTotal;
+    private IReadOnlyDictionary<string, long>? _riskSymbolCapLimits;
+    private readonly Dictionary<string, long> _riskSymbolCapUsage = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, long> _riskSymbolCapViolations = new(StringComparer.OrdinalIgnoreCase);
+    private bool _riskCooldownEnabled;
+    private bool _riskCooldownActive;
+    private DateTime? _riskCooldownActiveUntilUtc;
+    private long _riskCooldownTriggersTotal;
+    private int? _riskCooldownConsecutiveLosses;
+    private int? _riskCooldownMinutes;
 
     public EngineHostState(string adapter, IEnumerable<string>? featureFlags)
     {
@@ -466,6 +482,43 @@ public sealed class EngineHostState
         }
     }
 
+    public void UpdateRiskRailsTelemetry(RiskRailTelemetrySnapshot? snapshot)
+    {
+        if (snapshot is null)
+        {
+            return;
+        }
+
+        lock (_sync)
+        {
+            _riskBrokerDailyLossCapCcy = snapshot.BrokerDailyLossCapCcy;
+            _riskBrokerDailyLossUsedCcy = snapshot.BrokerDailyLossUsedCcy;
+            _riskBrokerDailyLossViolationsTotal = snapshot.BrokerDailyLossViolationsTotal;
+            _riskMaxPositionUnitsLimit = snapshot.MaxPositionUnitsLimit;
+            _riskMaxPositionUnitsUsed = snapshot.MaxPositionUnitsUsed;
+            _riskMaxPositionViolationsTotal = snapshot.MaxPositionViolationsTotal;
+            _riskSymbolCapLimits = snapshot.SymbolUnitCaps is null
+                ? null
+                : new Dictionary<string, long>(snapshot.SymbolUnitCaps, StringComparer.OrdinalIgnoreCase);
+            _riskSymbolCapUsage.Clear();
+            foreach (var usage in snapshot.SymbolUnitUsage)
+            {
+                _riskSymbolCapUsage[usage.Key] = usage.Value;
+            }
+            _riskSymbolCapViolations.Clear();
+            foreach (var violation in snapshot.SymbolUnitViolations)
+            {
+                _riskSymbolCapViolations[violation.Key] = violation.Value;
+            }
+            _riskCooldownEnabled = snapshot.CooldownEnabled;
+            _riskCooldownActive = snapshot.CooldownActive;
+            _riskCooldownActiveUntilUtc = NormalizeNullableUtc(snapshot.CooldownActiveUntilUtc);
+            _riskCooldownTriggersTotal = snapshot.CooldownTriggersTotal;
+            _riskCooldownConsecutiveLosses = snapshot.CooldownConsecutiveLosses;
+            _riskCooldownMinutes = snapshot.CooldownMinutes;
+        }
+    }
+
     public void RegisterRiskGateEvent(string gate, bool throttled)
     {
         lock (_sync)
@@ -552,6 +605,7 @@ public sealed class EngineHostState
                 },
                 promotion = CreatePromotionHealthUnsafe(),
                 news = CreateNewsHealthUnsafe(),
+                risk_rails = CreateRiskRailsHealthUnsafe(),
                 secrets = CreateSecretsHealthUnsafe(),
                 reconciliation = CreateReconciliationHealthUnsafe()
             };
@@ -594,6 +648,21 @@ public sealed class EngineHostState
             _riskThrottlesTotal,
             new Dictionary<string, long>(_riskBlocksByGate, StringComparer.OrdinalIgnoreCase),
             new Dictionary<string, long>(_riskThrottlesByGate, StringComparer.OrdinalIgnoreCase),
+            _riskBrokerDailyLossCapCcy,
+            _riskBrokerDailyLossUsedCcy,
+            _riskBrokerDailyLossViolationsTotal,
+            _riskMaxPositionUnitsLimit,
+            _riskMaxPositionUnitsUsed,
+            _riskMaxPositionViolationsTotal,
+            new Dictionary<string, long>(_riskSymbolCapUsage, StringComparer.OrdinalIgnoreCase),
+            _riskSymbolCapLimits is null ? null : new Dictionary<string, long>(_riskSymbolCapLimits, StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, long>(_riskSymbolCapViolations, StringComparer.OrdinalIgnoreCase),
+            _riskCooldownEnabled,
+            _riskCooldownActive,
+            _riskCooldownActiveUntilUtc.HasValue ? (double)new DateTimeOffset(_riskCooldownActiveUntilUtc.Value).ToUnixTimeSeconds() : (double?)null,
+            _riskCooldownTriggersTotal,
+            _riskCooldownConsecutiveLosses,
+            _riskCooldownMinutes,
             new Dictionary<string, long>(_lastOrderUnitsBySymbol, StringComparer.OrdinalIgnoreCase),
             new Dictionary<string, long>(_idempotencyCacheSizes, StringComparer.OrdinalIgnoreCase),
             _idempotencyEvictionsTotal,
@@ -669,6 +738,34 @@ public sealed class EngineHostState
             blackout_window_start = _newsBlackoutWindowStart,
             blackout_window_end = _newsBlackoutWindowEnd,
             source_type = _newsFeedSourceType
+        };
+    }
+
+    private object CreateRiskRailsHealthUnsafe()
+    {
+        var symbolCaps = _riskSymbolCapLimits is null
+            ? null
+            : new Dictionary<string, long>(_riskSymbolCapLimits, StringComparer.OrdinalIgnoreCase);
+        return new
+        {
+            broker_daily_cap_ccy = _riskBrokerDailyLossCapCcy,
+            broker_daily_loss_used_ccy = _riskBrokerDailyLossUsedCcy,
+            broker_daily_loss_violations_total = _riskBrokerDailyLossViolationsTotal,
+            max_position_units = _riskMaxPositionUnitsLimit,
+            max_position_units_used = _riskMaxPositionUnitsUsed,
+            max_position_violations_total = _riskMaxPositionViolationsTotal,
+            symbol_caps = symbolCaps,
+            symbol_usage = new Dictionary<string, long>(_riskSymbolCapUsage, StringComparer.OrdinalIgnoreCase),
+            symbol_violations = new Dictionary<string, long>(_riskSymbolCapViolations, StringComparer.OrdinalIgnoreCase),
+            cooldown = new
+            {
+                enabled = _riskCooldownEnabled,
+                active = _riskCooldownActive,
+                active_until_utc = _riskCooldownActiveUntilUtc,
+                triggers_total = _riskCooldownTriggersTotal,
+                consecutive_losses = _riskCooldownConsecutiveLosses,
+                minutes = _riskCooldownMinutes
+            }
         };
     }
 

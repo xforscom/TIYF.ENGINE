@@ -14,6 +14,8 @@ internal sealed record RiskRailOutcome(bool Allowed, long Units, IReadOnlyList<R
     public static RiskRailOutcome Permitted(long units) => new(true, units, Array.Empty<RiskRailAlert>());
 }
 
+internal readonly record struct RiskPositionUnits(string Symbol, long Units);
+
 internal sealed class RiskRailRuntime
 {
     private readonly RiskConfig? _config;
@@ -34,13 +36,34 @@ internal sealed class RiskRailRuntime
     private decimal _totalUnrealizedPnl;
     private decimal _equityPeak;
     private decimal _currentEquity;
+    private readonly decimal? _brokerDailyLossCapCcy;
+    private readonly long? _maxPositionUnits;
+    private readonly IReadOnlyDictionary<string, long>? _symbolUnitCaps;
+    private readonly RiskCooldownConfig _cooldownConfig;
+    private readonly Action<RiskRailTelemetrySnapshot>? _telemetryCallback;
+    private readonly Func<DateTime> _clock;
+    private decimal _brokerDailyLossUsedCcy;
+    private long _brokerDailyLossViolations;
+    private long _maxPositionUnitsUsed;
+    private long _maxPositionViolations;
+    private readonly Dictionary<string, long> _symbolUnitUsage = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, long> _symbolUnitViolations = new(StringComparer.OrdinalIgnoreCase);
+    private DateTime? _cooldownActiveUntilUtc;
+    private long _cooldownTriggersTotal;
+    private DateTime? _cooldownLastTriggerUtc;
+    private int _cooldownLossStreak;
+    private int _lastCompletedTradesCount;
+    private bool _cooldownAlertPending;
+    private bool _cooldownActiveAlerted;
 
     public RiskRailRuntime(
         RiskConfig? config,
         string riskConfigHash,
         IReadOnlyList<NewsEvent> newsEvents,
         Action<string, bool>? gateCallback,
-        decimal startingEquity)
+        decimal startingEquity,
+        Action<RiskRailTelemetrySnapshot>? telemetryCallback = null,
+        Func<DateTime>? clock = null)
     {
         _config = config;
         _configHash = riskConfigHash ?? string.Empty;
@@ -49,6 +72,14 @@ internal sealed class RiskRailRuntime
         _startingEquity = startingEquity <= 0m ? 100_000m : startingEquity;
         _equityPeak = _startingEquity;
         _currentEquity = _startingEquity;
+        _brokerDailyLossCapCcy = config?.BrokerDailyLossCapCcy;
+        _maxPositionUnits = (config?.MaxPositionUnits is { } maxUnits && maxUnits > 0) ? maxUnits : null;
+        _symbolUnitCaps = config?.SymbolUnitCaps is { Count: > 0 } caps
+            ? new Dictionary<string, long>(caps, StringComparer.OrdinalIgnoreCase)
+            : null;
+        _cooldownConfig = config?.Cooldown ?? RiskCooldownConfig.Disabled;
+        _telemetryCallback = telemetryCallback;
+        _clock = clock ?? (() => DateTime.UtcNow);
     }
 
     public void ReplaceNewsEvents(IReadOnlyList<NewsEvent> events)
@@ -83,12 +114,26 @@ internal sealed class RiskRailRuntime
 
         _dailyRealizedPnl = ComputeDailyRealizedPnl(positions, dayAnchor);
         _dailyUnrealizedPnl = unrealized;
+        UpdateCooldownState(positions);
+        UpdateSymbolUsageFromPositions(positions);
+        UpdateBrokerDailyLossUsage();
+        PublishTelemetry();
     }
 
-    public RiskRailOutcome EvaluateNewEntry(string instrument, string timeframe, DateTime decisionUtc, long requestedUnits)
+    public RiskRailOutcome EvaluateNewEntry(
+        string instrument,
+        string timeframe,
+        DateTime decisionUtc,
+        long requestedUnits,
+        IReadOnlyCollection<RiskPositionUnits>? openPositions = null)
     {
+        UpdateSymbolUsageFromSnapshot(openPositions?.Select(p => (p.Symbol, p.Units)));
+        UpdateBrokerDailyLossUsage();
+        RefreshCooldownWindow();
+
         if (_config is null || requestedUnits <= 0)
         {
+            PublishTelemetry();
             return RiskRailOutcome.Permitted(requestedUnits);
         }
 
@@ -215,6 +260,8 @@ internal sealed class RiskRailRuntime
             }
         }
 
+        EvaluateTelemetryRails(instrument, timeframe, ts, requestedUnits, alerts);
+        PublishTelemetry();
         return new RiskRailOutcome(allowed, allowed ? units : 0, alerts);
     }
 
@@ -250,6 +297,298 @@ internal sealed class RiskRailRuntime
             }
         }
         return null;
+    }
+
+    /// <summary>
+    /// Evaluates telemetry-only rails (caps and cooldown) and emits soft alerts without blocking.
+    /// </summary>
+    private void EvaluateTelemetryRails(string instrument, string timeframe, DateTime ts, long requestedUnits, List<RiskRailAlert> alerts)
+    {
+        EvaluateBrokerDailyLossCap(instrument, timeframe, ts, alerts);
+        EvaluatePositionCaps(instrument, timeframe, ts, requestedUnits, alerts);
+        EvaluateCooldown(instrument, timeframe, ts, alerts);
+    }
+
+    /// <summary>
+    /// Emits a telemetry alert if the configured broker daily loss cap would be exceeded.
+    /// </summary>
+    private void EvaluateBrokerDailyLossCap(string instrument, string timeframe, DateTime ts, List<RiskRailAlert> alerts)
+    {
+        if (!_brokerDailyLossCapCcy.HasValue)
+        {
+            return;
+        }
+
+        if (_brokerDailyLossUsedCcy < _brokerDailyLossCapCcy.Value)
+        {
+            return;
+        }
+
+        var payload = new
+        {
+            instrument,
+            timeframe,
+            ts,
+            loss_used_ccy = _brokerDailyLossUsedCcy,
+            loss_cap_ccy = _brokerDailyLossCapCcy.Value,
+            config_hash = _configHash
+        };
+        alerts.Add(CreateAlert("ALERT_RISK_BROKER_DAILY_CAP_SOFT", payload, throttled: true));
+        _brokerDailyLossViolations++;
+    }
+
+    /// <summary>
+    /// Records telemetry for global and per-symbol caps without altering execution.
+    /// </summary>
+    private void EvaluatePositionCaps(string instrument, string timeframe, DateTime ts, long requestedUnits, List<RiskRailAlert> alerts)
+    {
+        var unitsAbs = Math.Abs(requestedUnits);
+        if (unitsAbs <= 0)
+        {
+            return;
+        }
+
+        if (_maxPositionUnits.HasValue)
+        {
+            var projected = _maxPositionUnitsUsed + unitsAbs;
+            if (projected > _maxPositionUnits.Value)
+            {
+                var payload = new
+                {
+                    instrument,
+                    timeframe,
+                    ts,
+                    projected_units = projected,
+                    max_units = _maxPositionUnits.Value,
+                    config_hash = _configHash
+                };
+                alerts.Add(CreateAlert("ALERT_RISK_MAX_POSITION_SOFT", payload, throttled: true));
+                _maxPositionViolations++;
+            }
+        }
+
+        if (_symbolUnitCaps is not { Count: > 0 })
+        {
+            return;
+        }
+
+        var symbolKey = instrument?.Trim();
+        if (string.IsNullOrWhiteSpace(symbolKey))
+        {
+            return;
+        }
+        if (_symbolUnitCaps.TryGetValue(symbolKey, out var cap) && cap > 0)
+        {
+            var current = _symbolUnitUsage.TryGetValue(symbolKey, out var usage) ? usage : 0;
+            var projected = current + unitsAbs;
+            if (projected > cap)
+            {
+                var payload = new
+                {
+                    instrument,
+                    timeframe,
+                    ts,
+                    projected_units = projected,
+                    cap_units = cap,
+                    config_hash = _configHash
+                };
+                alerts.Add(CreateAlert("ALERT_RISK_SYMBOL_CAP_SOFT", payload, throttled: true));
+                _symbolUnitViolations[symbolKey] = _symbolUnitViolations.TryGetValue(symbolKey, out var existing) ? existing + 1 : 1;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Emits telemetry describing cooldown state when the guard is active.
+    /// </summary>
+    private void EvaluateCooldown(string instrument, string timeframe, DateTime ts, List<RiskRailAlert> alerts)
+    {
+        if (!_cooldownConfig.Enabled)
+        {
+            return;
+        }
+
+        var active = IsCooldownActive();
+        if (!active)
+        {
+            _cooldownAlertPending = false;
+            _cooldownActiveAlerted = false;
+            return;
+        }
+
+        if (_cooldownAlertPending || !_cooldownActiveAlerted)
+        {
+            var payload = new
+            {
+                instrument,
+                timeframe,
+                ts,
+                cooldown_active_until = _cooldownActiveUntilUtc,
+                cooldown_minutes = _cooldownConfig.CooldownMinutes,
+                consecutive_losses = _cooldownConfig.ConsecutiveLosses,
+                config_hash = _configHash
+            };
+            alerts.Add(CreateAlert("ALERT_RISK_COOLDOWN_SOFT", payload, throttled: true));
+            _cooldownAlertPending = false;
+            _cooldownActiveAlerted = true;
+        }
+    }
+
+    private void UpdateSymbolUsageFromPositions(PositionTracker? positions)
+    {
+        if (positions is null)
+        {
+            UpdateSymbolUsageFromSnapshot(null);
+            return;
+        }
+
+        var snapshot = positions.SnapshotOpenPositions();
+        if (snapshot.Count == 0)
+        {
+            UpdateSymbolUsageFromSnapshot(Array.Empty<(string Symbol, long Units)>());
+            return;
+        }
+
+        UpdateSymbolUsageFromSnapshot(snapshot.Select(pos => (pos.Symbol, pos.Units)));
+    }
+
+    private long UpdateSymbolUsageFromSnapshot(IEnumerable<(string Symbol, long Units)>? snapshot)
+    {
+        _symbolUnitUsage.Clear();
+        if (snapshot is null)
+        {
+            _maxPositionUnitsUsed = 0;
+            return 0;
+        }
+
+        long total = 0;
+        foreach (var entry in snapshot.Where(e => !string.IsNullOrWhiteSpace(e.Symbol)))
+        {
+            var normalizedSymbol = entry.Symbol!.Trim();
+            if (string.IsNullOrWhiteSpace(normalizedSymbol))
+            {
+                continue;
+            }
+
+            var absUnits = Math.Abs(entry.Units);
+            if (absUnits <= 0)
+            {
+                continue;
+            }
+
+            total += absUnits;
+            _symbolUnitUsage[normalizedSymbol] = _symbolUnitUsage.TryGetValue(normalizedSymbol, out var existing) ? existing + absUnits : absUnits;
+        }
+
+        _maxPositionUnitsUsed = total;
+        return total;
+    }
+
+    private void UpdateBrokerDailyLossUsage()
+    {
+        var loss = -DailyPnl;
+        _brokerDailyLossUsedCcy = loss <= 0m ? 0m : decimal.Round(loss, 2, MidpointRounding.AwayFromZero);
+    }
+
+    private void UpdateCooldownState(PositionTracker? positions)
+    {
+        if (!_cooldownConfig.Enabled)
+        {
+            _cooldownLossStreak = 0;
+            _cooldownActiveUntilUtc = null;
+            return;
+        }
+
+        if (positions is not null)
+        {
+            var completed = positions.Completed;
+            if (completed.Count > _lastCompletedTradesCount)
+            {
+                for (var i = _lastCompletedTradesCount; i < completed.Count; i++)
+                {
+                    var trade = completed[i];
+                    if (trade.PnlCcy < 0m)
+                    {
+                        _cooldownLossStreak++;
+                        if (_cooldownConfig.ConsecutiveLosses.HasValue)
+                        {
+                            var consecutiveLosses = _cooldownConfig.ConsecutiveLosses.Value;
+                            if (consecutiveLosses > 0 && _cooldownLossStreak >= consecutiveLosses)
+                            {
+                                TriggerCooldown(trade.UtcTsClose);
+                                _cooldownLossStreak = 0;
+                            }
+                        }
+                    }
+                    else if (trade.PnlCcy > 0m)
+                    {
+                        _cooldownLossStreak = 0;
+                    }
+                }
+
+                _lastCompletedTradesCount = completed.Count;
+            }
+        }
+
+        RefreshCooldownWindow();
+    }
+
+    private void TriggerCooldown(DateTime triggerUtc)
+    {
+        if (!_cooldownConfig.Enabled || !_cooldownConfig.CooldownMinutes.HasValue || _cooldownConfig.CooldownMinutes.Value <= 0)
+        {
+            return;
+        }
+
+        var normalized = triggerUtc.Kind == DateTimeKind.Utc ? triggerUtc : DateTime.SpecifyKind(triggerUtc, DateTimeKind.Utc);
+        _cooldownActiveUntilUtc = normalized.AddMinutes(_cooldownConfig.CooldownMinutes.Value);
+        _cooldownTriggersTotal++;
+        _cooldownLastTriggerUtc = normalized;
+        _cooldownAlertPending = true;
+        _cooldownActiveAlerted = false;
+    }
+
+    private void RefreshCooldownWindow()
+    {
+        if (_cooldownActiveUntilUtc.HasValue && _clock() >= _cooldownActiveUntilUtc.Value)
+        {
+            _cooldownActiveUntilUtc = null;
+            _cooldownAlertPending = false;
+            _cooldownActiveAlerted = false;
+        }
+    }
+
+    private bool IsCooldownActive()
+    {
+        return _cooldownActiveUntilUtc.HasValue && _clock() < _cooldownActiveUntilUtc.Value;
+    }
+
+    private void PublishTelemetry()
+    {
+        if (_telemetryCallback is null)
+        {
+            return;
+        }
+
+        var symbolUsage = new Dictionary<string, long>(_symbolUnitUsage, StringComparer.OrdinalIgnoreCase);
+        var symbolViolations = new Dictionary<string, long>(_symbolUnitViolations, StringComparer.OrdinalIgnoreCase);
+        var snapshot = new RiskRailTelemetrySnapshot(
+            _brokerDailyLossCapCcy,
+            _brokerDailyLossUsedCcy,
+            _brokerDailyLossViolations,
+            _maxPositionUnits,
+            _maxPositionUnitsUsed,
+            _maxPositionViolations,
+            _symbolUnitCaps,
+            symbolUsage,
+            symbolViolations,
+            _cooldownConfig.Enabled,
+            IsCooldownActive(),
+            _cooldownActiveUntilUtc,
+            _cooldownTriggersTotal,
+            _cooldownConfig.Enabled ? _cooldownConfig.ConsecutiveLosses : null,
+            _cooldownConfig.Enabled ? _cooldownConfig.CooldownMinutes : null);
+        _telemetryCallback(snapshot);
     }
 
     public void ForceDrawdown(decimal limit)

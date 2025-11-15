@@ -33,6 +33,35 @@ public static class EngineMetricsFormatter
         {
             AppendMetric(builder, "engine_risk_throttles_total", kvp.Value, "gate", kvp.Key);
         }
+        if (snapshot.RiskBrokerDailyLossCapCcy.HasValue)
+        {
+            AppendMetric(builder, "engine_risk_broker_daily_cap_ccy", (double)snapshot.RiskBrokerDailyLossCapCcy.Value);
+        }
+        AppendMetric(builder, "engine_risk_broker_daily_loss_used_ccy", (double)snapshot.RiskBrokerDailyLossUsedCcy);
+        AppendMetric(builder, "engine_risk_broker_daily_cap_violations_total", snapshot.RiskBrokerDailyLossViolationsTotal);
+        if (snapshot.RiskMaxPositionUnitsLimit.HasValue)
+        {
+            AppendMetric(builder, "engine_risk_max_position_units_limit", snapshot.RiskMaxPositionUnitsLimit.Value);
+        }
+        AppendMetric(builder, "engine_risk_max_position_units_used", snapshot.RiskMaxPositionUnitsUsed);
+        AppendMetric(builder, "engine_risk_max_position_violations_total", snapshot.RiskMaxPositionViolationsTotal);
+        foreach (var usage in snapshot.RiskSymbolCapUsage)
+        {
+            AppendMetric(builder, "engine_risk_symbol_unit_cap_used", usage.Value, "instrument", usage.Key);
+        }
+        if (snapshot.RiskSymbolCapLimits is not null)
+        {
+            foreach (var cap in snapshot.RiskSymbolCapLimits)
+            {
+                AppendMetric(builder, "engine_risk_symbol_unit_cap_limit", cap.Value, "instrument", cap.Key);
+            }
+        }
+        foreach (var violation in snapshot.RiskSymbolCapViolations)
+        {
+            AppendMetric(builder, "engine_risk_symbol_unit_cap_violations_total", violation.Value, "instrument", violation.Key);
+        }
+        AppendMetric(builder, "engine_risk_cooldown_active", snapshot.RiskCooldownActive ? 1 : 0);
+        AppendMetric(builder, "engine_risk_cooldown_triggers_total", snapshot.RiskCooldownTriggersTotal);
         foreach (var kvp in snapshot.LastOrderSizeBySymbol)
         {
             AppendMetric(builder, "engine_last_order_size_units", kvp.Value, "instrument", kvp.Key);

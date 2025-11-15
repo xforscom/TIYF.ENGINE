@@ -10,6 +10,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\TiYf.Engine.Core\TiYf.Engine.Core.csproj" />
     <ProjectReference Include="..\..\src\TiYf.Engine.Sim\TiYf.Engine.Sim.csproj" />
+    <ProjectReference Include="..\..\src\TiYf.Engine.Host\TiYf.Engine.Host.csproj" />
   </ItemGroup>
 
 </Project>

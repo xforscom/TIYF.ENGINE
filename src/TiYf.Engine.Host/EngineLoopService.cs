@@ -300,6 +300,10 @@ internal sealed class EngineLoopService : BackgroundService
             newsEvents: newsEvents,
             timeframeLabels: _timeframeLabelByTicks,
             riskGateCallback: (gate, throttled) => _state.RegisterRiskGateEvent(gate, throttled),
+            riskRailsTelemetryCallback: snapshot =>
+            {
+                _state.UpdateRiskRailsTelemetry(snapshot);
+            },
             gvrsSnapshotCallback: snapshot => _state.SetGvrsSnapshot(snapshot),
             gvrsGateEnabled: gvrsGateConfig.Enabled,
             gvrsGateBlockOnVolatile: gvrsGateConfig.BlockOnVolatile,

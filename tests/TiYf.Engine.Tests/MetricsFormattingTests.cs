@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text.Json;
 using TiYf.Engine.Core;
 using TiYf.Engine.Host;
+using TiYf.Engine.Sim;
 
 namespace TiYf.Engine.Tests;
 
@@ -42,6 +43,32 @@ public class MetricsFormattingTests
         {
             ["oanda_demo"] = new[] { "env" }
         });
+        var cooldownUntil = DateTime.UtcNow.AddMinutes(10);
+        state.UpdateRiskRailsTelemetry(new RiskRailTelemetrySnapshot(
+            BrokerDailyLossCapCcy: 2500m,
+            BrokerDailyLossUsedCcy: 1250m,
+            BrokerDailyLossViolationsTotal: 1,
+            MaxPositionUnitsLimit: 500000,
+            MaxPositionUnitsUsed: 250000,
+            MaxPositionViolationsTotal: 2,
+            SymbolUnitCaps: new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["EURUSD"] = 300000
+            },
+            SymbolUnitUsage: new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["EURUSD"] = 150000
+            },
+            SymbolUnitViolations: new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["EURUSD"] = 1
+            },
+            CooldownEnabled: true,
+            CooldownActive: true,
+            CooldownActiveUntilUtc: cooldownUntil,
+            CooldownTriggersTotal: 3,
+            CooldownConsecutiveLosses: 4,
+            CooldownMinutes: 30));
 
         var snapshot = state.CreateMetricsSnapshot();
         var metricsText = EngineMetricsFormatter.Format(snapshot);
@@ -76,6 +103,16 @@ public class MetricsFormattingTests
         Assert.Contains("engine_news_last_event_ts", metricsText);
         Assert.Contains("engine_config_hash{hash=\"hash-demo\"} 1", metricsText);
         Assert.Contains("engine_risk_config_hash{hash=\"riskhash\"} 1", metricsText);
+        Assert.Contains("engine_risk_broker_daily_cap_ccy 2500", metricsText);
+        Assert.Contains("engine_risk_broker_daily_loss_used_ccy 1250", metricsText);
+        Assert.Contains("engine_risk_broker_daily_cap_violations_total 1", metricsText);
+        Assert.Contains("engine_risk_max_position_units_limit 500000", metricsText);
+        Assert.Contains("engine_risk_max_position_units_used 250000", metricsText);
+        Assert.Contains("engine_risk_symbol_unit_cap_limit{instrument=\"EURUSD\"} 300000", metricsText);
+        Assert.Contains("engine_risk_symbol_unit_cap_used{instrument=\"EURUSD\"} 150000", metricsText);
+        Assert.Contains("engine_risk_symbol_unit_cap_violations_total{instrument=\"EURUSD\"} 1", metricsText);
+        Assert.Contains("engine_risk_cooldown_active 1", metricsText);
+        Assert.Contains("engine_risk_cooldown_triggers_total 3", metricsText);
         Assert.Contains("engine_gvrs_gate_blocking_enabled 0", metricsText);
         Assert.Contains("engine_gvrs_gate_blocks_total 1", metricsText);
         Assert.Contains("engine_gvrs_gate_is_blocking{state=\"volatile\"} 0", metricsText);
@@ -115,6 +152,32 @@ public class MetricsFormattingTests
         {
             ["ctrader_demo"] = new[] { "env", "missing" }
         });
+        var cooldownUntil = DateTime.UtcNow.AddMinutes(20);
+        state.UpdateRiskRailsTelemetry(new RiskRailTelemetrySnapshot(
+            BrokerDailyLossCapCcy: 2000m,
+            BrokerDailyLossUsedCcy: 800m,
+            BrokerDailyLossViolationsTotal: 0,
+            MaxPositionUnitsLimit: 400000,
+            MaxPositionUnitsUsed: 100000,
+            MaxPositionViolationsTotal: 0,
+            SymbolUnitCaps: new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["GBPUSD"] = 150000
+            },
+            SymbolUnitUsage: new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["GBPUSD"] = 75000
+            },
+            SymbolUnitViolations: new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["GBPUSD"] = 0
+            },
+            CooldownEnabled: true,
+            CooldownActive: false,
+            CooldownActiveUntilUtc: cooldownUntil,
+            CooldownTriggersTotal: 1,
+            CooldownConsecutiveLosses: 3,
+            CooldownMinutes: 20));
         var payload = state.CreateHealthPayload();
         var json = JsonSerializer.Serialize(payload);
         using var document = JsonDocument.Parse(json);
@@ -166,6 +229,17 @@ public class MetricsFormattingTests
         var reconciliation = root.GetProperty("reconciliation");
         Assert.Equal(2, reconciliation.GetProperty("mismatches_total").GetInt64());
         Assert.Equal("mismatch", reconciliation.GetProperty("last_status").GetString());
+        var riskRails = root.GetProperty("risk_rails");
+        Assert.Equal(2000, riskRails.GetProperty("broker_daily_cap_ccy").GetDecimal());
+        Assert.Equal(800, riskRails.GetProperty("broker_daily_loss_used_ccy").GetDecimal());
+        Assert.Equal(400000, riskRails.GetProperty("max_position_units").GetInt64());
+        Assert.Equal(100000, riskRails.GetProperty("max_position_units_used").GetInt64());
+        var symbolCaps = riskRails.GetProperty("symbol_caps");
+        Assert.Equal(150000, symbolCaps.GetProperty("GBPUSD").GetInt64());
+        var cooldown = riskRails.GetProperty("cooldown");
+        Assert.True(cooldown.GetProperty("enabled").GetBoolean());
+        Assert.False(cooldown.GetProperty("active").GetBoolean());
+        Assert.Equal(1, cooldown.GetProperty("triggers_total").GetInt64());
         var persistence = root.GetProperty("idempotency_persistence");
         Assert.Equal(2, persistence.GetProperty("loaded_keys").GetInt32());
         Assert.Equal(1, persistence.GetProperty("expired_dropped").GetInt32());

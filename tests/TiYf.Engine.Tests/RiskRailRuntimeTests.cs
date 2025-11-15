@@ -129,4 +129,101 @@ public class RiskRailRuntimeTests
         Assert.Contains(outcome.Alerts, a => a.EventType == "ALERT_BLOCK_NEWS_BLACKOUT");
         Assert.Contains(gates, g => g.Gate == "news_blackout" && !g.Throttled);
     }
+
+    [Fact]
+    public void BrokerDailyLossCapEmitsSoftAlert()
+    {
+        var config = new RiskConfig
+        {
+            BrokerDailyLossCapCcy = 1_000m
+        };
+        var runtime = new RiskRailRuntime(config, "hash", Array.Empty<NewsEvent>(), null, 100_000m);
+        var tracker = new PositionTracker();
+        var openTs = BaseTimestamp.AddHours(-1);
+        tracker.OnFill(new ExecutionFill("BDL-01", "EURUSD", TradeSide.Buy, 1.0000m, 5_000, openTs), "schema", "hash", "adapter", null);
+        tracker.OnFill(new ExecutionFill("BDL-01", "EURUSD", TradeSide.Sell, 0.5000m, 5_000, openTs.AddMinutes(5)), "schema", "hash", "adapter", null);
+
+        var bar = new Bar(new InstrumentId("EURUSD"), BaseTimestamp.AddMinutes(-1), BaseTimestamp, 0.5m, 0.5m, 0.5m, 0.5m, 1m);
+        runtime.UpdateBar(bar, tracker);
+
+        var outcome = runtime.EvaluateNewEntry("EURUSD", "H1", BaseTimestamp, 100);
+
+        Assert.True(outcome.Allowed);
+        Assert.Contains(outcome.Alerts, a => a.EventType == "ALERT_RISK_BROKER_DAILY_CAP_SOFT");
+    }
+
+    [Fact]
+    public void MaxPositionUnitsEmitsSoftAlert()
+    {
+        var config = new RiskConfig
+        {
+            MaxPositionUnits = 200_000
+        };
+        var runtime = new RiskRailRuntime(config, "hash", Array.Empty<NewsEvent>(), null, 100_000m);
+        var openPositions = new[]
+        {
+            new RiskPositionUnits("EURUSD", 180_000)
+        };
+
+        var outcome = runtime.EvaluateNewEntry("EURUSD", "H1", BaseTimestamp, 30_000, openPositions);
+
+        Assert.True(outcome.Allowed);
+        Assert.Contains(outcome.Alerts, a => a.EventType == "ALERT_RISK_MAX_POSITION_SOFT");
+    }
+
+    [Fact]
+    public void SymbolUnitCapEmitsSoftAlert()
+    {
+        var config = new RiskConfig
+        {
+            SymbolUnitCaps = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["EURUSD"] = 100_000
+            }
+        };
+        var runtime = new RiskRailRuntime(config, "hash", Array.Empty<NewsEvent>(), null, 100_000m);
+        var openPositions = new[]
+        {
+            new RiskPositionUnits("eurusd", 80_000)
+        };
+
+        var outcome = runtime.EvaluateNewEntry("EURUSD", "H1", BaseTimestamp, 30_000, openPositions);
+
+        Assert.True(outcome.Allowed);
+        Assert.Contains(outcome.Alerts, a => a.EventType == "ALERT_RISK_SYMBOL_CAP_SOFT");
+    }
+
+    [Fact]
+    public void CooldownEmitsSoftAlertAfterLosses()
+    {
+        var cooldownConfig = new RiskCooldownConfig(true, 2, 30);
+        RiskRailTelemetrySnapshot? lastTelemetry = null;
+        var runtime = new RiskRailRuntime(
+            new RiskConfig { Cooldown = cooldownConfig },
+            "hash",
+            Array.Empty<NewsEvent>(),
+            null,
+            100_000m,
+            telemetryCallback: snapshot => lastTelemetry = snapshot,
+            clock: () => BaseTimestamp);
+        var tracker = new PositionTracker();
+
+        var firstOpen = BaseTimestamp.AddMinutes(-60);
+        tracker.OnFill(new ExecutionFill("CD-01", "EURUSD", TradeSide.Buy, 1.0000m, 1_000, firstOpen), "schema", "hash", "adapter", null);
+        tracker.OnFill(new ExecutionFill("CD-01", "EURUSD", TradeSide.Sell, 0.5000m, 1_000, firstOpen.AddMinutes(5)), "schema", "hash", "adapter", null);
+        runtime.UpdateBar(new Bar(new InstrumentId("EURUSD"), BaseTimestamp.AddMinutes(-2), BaseTimestamp.AddMinutes(-1), 0.5m, 0.5m, 0.5m, 0.5m, 1m), tracker);
+
+        var secondOpen = BaseTimestamp.AddMinutes(-30);
+        tracker.OnFill(new ExecutionFill("CD-02", "EURUSD", TradeSide.Buy, 1.0000m, 1_000, secondOpen), "schema", "hash", "adapter", null);
+        tracker.OnFill(new ExecutionFill("CD-02", "EURUSD", TradeSide.Sell, 0.4000m, 1_000, secondOpen.AddMinutes(5)), "schema", "hash", "adapter", null);
+        runtime.UpdateBar(new Bar(new InstrumentId("EURUSD"), BaseTimestamp.AddMinutes(-1), BaseTimestamp, 0.4m, 0.4m, 0.4m, 0.4m, 1m), tracker);
+
+        var outcome = runtime.EvaluateNewEntry("EURUSD", "H1", BaseTimestamp, 100);
+
+        Assert.True(outcome.Allowed);
+        Assert.Contains(outcome.Alerts, a => a.EventType == "ALERT_RISK_COOLDOWN_SOFT");
+        Assert.NotNull(lastTelemetry);
+        Assert.True(lastTelemetry!.CooldownActive);
+        Assert.Equal(1, lastTelemetry.CooldownTriggersTotal);
+    }
 }
