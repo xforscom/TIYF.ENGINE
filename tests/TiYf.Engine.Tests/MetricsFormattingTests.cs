@@ -236,6 +236,7 @@ public class MetricsFormattingTests
         Assert.Equal(100000, riskRails.GetProperty("max_position_units_used").GetInt64());
         var symbolCaps = riskRails.GetProperty("symbol_caps");
         Assert.Equal(150000, symbolCaps.GetProperty("GBPUSD").GetInt64());
+        Assert.Equal(1, riskRails.GetProperty("gvrs_gate_blocks_total").GetInt64());
         var cooldown = riskRails.GetProperty("cooldown");
         Assert.True(cooldown.GetProperty("enabled").GetBoolean());
         Assert.False(cooldown.GetProperty("active").GetBoolean());

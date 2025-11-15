@@ -340,11 +340,22 @@ public static class RiskConfigParser
             components.AddRange(GlobalVolatilityGateConfig.Disabled.EffectiveComponents);
         }
 
+        var liveMaxBucket = NormalizeLiveBucket(obj.TryGetProperty("live_max_bucket", out var bucketEl) && bucketEl.ValueKind == JsonValueKind.String
+            ? bucketEl.GetString()
+            : null);
+        decimal? liveMaxEwma = null;
+        if (TryNumber(obj, "live_max_ewma", out var liveEwma))
+        {
+            liveMaxEwma = liveEwma;
+        }
+
         return new GlobalVolatilityGateConfig(
             mode,
             entryThreshold,
             ewmaAlpha,
-            components);
+            components,
+            liveMaxBucket,
+            liveMaxEwma);
     }
 
     private static RiskCooldownConfig ParseCooldown(JsonElement parent)
@@ -379,6 +390,23 @@ public static class RiskConfigParser
             return ts;
         }
         throw new FormatException($"Invalid time of day '{raw}'. Expected HH:mm or HH:mm:ss.");
+    }
+
+    private static string? NormalizeLiveBucket(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        var normalized = raw.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "calm" => "calm",
+            "moderate" => "moderate",
+            "volatile" => "volatile",
+            _ => null
+        };
     }
 
     // --- parser-local helpers (promotion) ---

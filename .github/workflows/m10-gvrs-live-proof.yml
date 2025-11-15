@@ -1,7 +1,17 @@
-name: m10-gvrs-gate-proof
+name: m10-gvrs-live-proof
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/m10-gvrs-live-proof.yml'
+      - 'tools/GvrsGateProbe/**'
+      - 'proof/m10-gvrs-config.json'
+      - 'src/TiYf.Engine.Core/**'
+      - 'src/TiYf.Engine.Host/**'
+      - 'src/TiYf.Engine.Sim/**'
 
 jobs:
   proof:
@@ -10,7 +20,7 @@ jobs:
     permissions:
       contents: read
     concurrency:
-      group: m10-gvrs-gate-proof-${{ github.ref }}
+      group: m10-gvrs-live-proof-${{ github.ref }}
       cancel-in-progress: true
 
     steps:
@@ -38,33 +48,32 @@ jobs:
       - name: Build
         run: dotnet build --configuration Release --no-restore
 
-      - name: Run GVRS gate probe
+      - name: Run GVRS live gate proof
         run: |
           set -euo pipefail
-          out="proof-artifacts/m10-gvrs-gate"
+          out="proof-artifacts/m10-gvrs-live"
           mkdir -p "$out"
           dotnet run --project tools/GvrsGateProbe/GvrsGateProbe.csproj --configuration Release -- --config proof/m10-gvrs-config.json --output "$out" --now 2025-08-01T00:00:00Z
 
       - name: Verify proof artifacts
         run: |
           set -euo pipefail
-          ls proof-artifacts/m10-gvrs-gate
-          grep -F "engine_gvrs_gate_blocks_total 1" proof-artifacts/m10-gvrs-gate/metrics.txt
-          grep -F 'engine_gvrs_gate_is_blocking{state="volatile"} 1' proof-artifacts/m10-gvrs-gate/metrics.txt
-          grep -F 'engine_gvrs_gate_blocking_enabled 1' proof-artifacts/m10-gvrs-gate/metrics.txt
+          ls proof-artifacts/m10-gvrs-live
+          grep -F "ALERT_BLOCK_GVRS_GATE" proof-artifacts/m10-gvrs-live/events.csv
+          grep -F "engine_gvrs_gate_blocks_total 1" proof-artifacts/m10-gvrs-live/metrics.txt
+          grep -F "gvrs_gate_blocks_total" proof-artifacts/m10-gvrs-live/health.json
           python3 - <<'PY'
-          import json, sys
-          data = json.load(open("proof-artifacts/m10-gvrs-gate/health.json"))
-          gate = data.get("gvrs_gate") or {}
-          if not gate.get("last_block_utc"):
-              raise SystemExit("missing gvrs_gate.last_block_utc")
+          import json
+          data = json.load(open("proof-artifacts/m10-gvrs-live/health.json"))
+          rails = data.get("risk_rails") or {}
+          if rails.get("gvrs_gate_blocks_total", 0) < 1:
+              raise SystemExit("risk_rails.gvrs_gate_blocks_total missing or zero")
           PY
-          cat proof-artifacts/m10-gvrs-gate/summary.txt
-          grep -F "blocking_enabled=true" proof-artifacts/m10-gvrs-gate/summary.txt
+          cat proof-artifacts/m10-gvrs-live/summary.txt
 
       - name: Upload proof artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: m10-gvrs-gate-proof-${{ steps.vars.outputs.safe_ref }}
-          path: proof-artifacts/m10-gvrs-gate
+          name: m10-gvrs-live-proof-${{ steps.vars.outputs.safe_ref }}
+          path: proof-artifacts/m10-gvrs-live

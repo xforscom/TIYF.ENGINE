@@ -1,50 +1,61 @@
-## M10 – GVRS Live Gate (Phase A: Telemetry Only)
+## M10 – GVRS Live Gate (Phase A: Demo Enforcement)
 
 ### Scope
 
-- Surface GVRS gate readiness in telemetry without affecting executions.
-- Record would-be gate triggers (bucket = Volatile) as alerts and counters.
-- Keep demo configs file-backed; no runtime blocking or provider wiring.
+- Drive GVRS decisions from `risk.global_volatility_gate` and allow demo configs to block new entries when the regime is too volatile.
+- Exits always flow; only fresh entries are suppressed.
+- Keep enforcement demo-only. Real-money configs remain on `enabled_mode="shadow"`.
 
 ### Gate Conditions
 
-- Reuses existing GVRS bucket computation.
-- When config `gvrs_gate.enabled` is `true` **and** the bucket is `Volatile`, emit `ALERT_BLOCK_GVRS_GATE` plus metrics/health counters.
-- Orders are still allowed during this phase; the alert is telemetry-only.
+- GVRS is already seeded by the existing MarketContextService.
+- When `global_volatility_gate.enabled_mode` is `"live"`:
+  - Optional `live_max_bucket` constrains the highest bucket allowed (e.g. `"moderate"` blocks `"volatile"` regimes).
+  - Optional `live_max_ewma` clamps the EWMA threshold.
+  - If either threshold triggers, the engine emits `ALERT_BLOCK_GVRS_GATE` and skips the entry.
+- If GVRS has not produced a snapshot (`HasValue=false`), the gate remains idle (no blocking).
 
-### Config Surface
+### Config Surface (demo only)
 
 ```json
-"gvrs_gate": {
-  "enabled": false,
-  "block_on_volatile": false
+"risk": {
+  "global_volatility_gate": {
+    "enabled_mode": "live",
+    "entry_threshold": 0.0,
+    "ewma_alpha": 0.3,
+    "live_max_bucket": "moderate",
+    "components": [
+      { "name": "fx_atr_percentile", "weight": 0.6 },
+      { "name": "risk_proxy_z", "weight": 0.4 }
+    ]
+  }
 }
 ```
 
-- `enabled` controls telemetry + alerting.
-- `block_on_volatile` opts into live blocking; defaults to false, so existing telemetry-only deployments are unchanged.
-- Demo/sample configs keep both values false.
+- Demo configs (`sample-config.demo-oanda.json`, `sample-config.demo-ctrader.json`) ship with the snippet above.
+- All other configs (sample, production, etc.) keep `enabled_mode` at `"shadow"` or `"disabled"`.
 
-### Telemetry Additions
+### Telemetry
 
 - `/metrics`
-  - `engine_gvrs_gate_blocks_total` – cumulative would-be blocks.
-  - `engine_gvrs_gate_is_blocking{state="volatile"}` – `1` when bucket is volatile and gate enabled, else `0`.
+  - `engine_gvrs_gate_blocks_total` – actual blocks witnessed during the run.
+  - `engine_risk_blocks_total{gate="gvrs_live_gate"}` – risk rail roll-up.
 - `/health`
-  - `gvrs_gate` block: `{ bucket, blocking_enabled, last_block_utc }`.
-- Risk alerts: `ALERT_BLOCK_GVRS_GATE` appended alongside existing risk rail alerts when bucket=Volatile.
+  - `risk_rails.gvrs_gate_blocks_total` – cumulative count suitable for daily-monitor / proofs.
+  - Existing `gvrs_gate` block still reports the last bucket + last block timestamp.
+- Daily monitor: when GVRS blocks are non-zero, the summary line appends `gvrs_gate_blocks=<value>`.
 
-### Proof (m10-gvrs-gate-proof)
+### Proof (m10-gvrs-live-proof)
 
-- Runs `tools/GvrsGateProbe` with `proof/m10-gvrs-config.json`.
-- Forces GVRS snapshot to `Volatile`, triggers the telemetry path, and captures:
-  - `summary.txt` (human-readable gate report).
-  - `metrics.txt` containing the new gauges.
-  - `health.json` showing `gvrs_gate.last_block_utc`.
-- Workflow location: `.github/workflows/m10-gvrs-gate-proof.yml`.
+- Workflow: `.github/workflows/m10-gvrs-live-proof.yml`.
+- Runs `tools/GvrsGateProbe` with `proof/m10-gvrs-config.json`, which seeds GVRS into `"Volatile"` and exercises the live gate.
+- Verifies:
+  - `events.csv` includes `ALERT_BLOCK_GVRS_GATE`.
+  - `metrics.txt`/`health.json` carry the new counters.
+  - `summary.txt` records the live mode posture.
 
 ### Non-Scope
 
-- No runtime blocking or kill-switch activation yet.
-- No changes to GVRS EWMA logic, smoothing, or alert thresholds.
-- No live-provider wiring (FMP, etc.) and no demo config flips.
+- No UI, kill switch toggles, or size modulation.
+- GVRS math (ATR/proxy smoothing) is unchanged.
+- No real-money config changes until a future M-stage flips them intentionally.

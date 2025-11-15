@@ -59,3 +59,7 @@ Phase 2 keeps promotion logic in telemetry-only mode but surfaces the config eve
 - `daily-monitor` appends `promotion_candidates`, `promotion_probation_days`, and `promotion_min_trades` to the verdict line and archives the same block in `daily-monitor-health/health.json`.
 - `tools/PromotionProbe` plus `m7-promotion-proof.yml` provide deterministic evidence by loading the sample configs, emitting `/health`, `/metrics`, and summary artifacts, and grepping for the new fields.
 - Demo configs continue to ship with `promotion.enabled=true` purely so telemetry stays populated; no runtime promotion/demotion takes place until Phase 3.
+
+## Interaction with GVRS Live Gate
+
+- Demo configs now flip `risk.global_volatility_gate.enabled_mode` to `"live"` with a conservative `live_max_bucket`. When GVRS deems the regime “Volatile”, new entries are temporarily blocked (exits continue). Promotion telemetry remains unaffected—the GVRS gate simply reduces order flow during extreme volatility before promotions graduate to the next phase.

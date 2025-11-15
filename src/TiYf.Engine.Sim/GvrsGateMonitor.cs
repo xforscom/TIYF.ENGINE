@@ -9,26 +9,24 @@ internal readonly record struct GvrsGateResult(RiskRailAlert Alert, bool Blocked
 
 internal sealed class GvrsGateMonitor
 {
-    private readonly bool _enabled;
-    private readonly bool _blockOnVolatile;
+    private readonly GlobalVolatilityGateConfig _config;
+    private readonly int? _maxBucketRank;
+    private readonly decimal? _maxEwma;
     private readonly Action<DateTime>? _onBlock;
 
-    public GvrsGateMonitor(bool enabled, bool blockOnVolatile, Action<DateTime>? onBlock)
+    public GvrsGateMonitor(GlobalVolatilityGateConfig config, Action<DateTime>? onBlock)
     {
-        _enabled = enabled;
-        _blockOnVolatile = blockOnVolatile;
+        _config = config ?? GlobalVolatilityGateConfig.Disabled;
+        _maxBucketRank = string.IsNullOrWhiteSpace(_config.LiveMaxBucket)
+            ? null
+            : BucketRank(_config.LiveMaxBucket!);
+        _maxEwma = _config.LiveMaxEwma;
         _onBlock = onBlock;
     }
 
-    public GvrsGateResult? Evaluate(string? bucket, decimal raw, decimal ewma, string symbol, string timeframe, DateTime decisionUtc)
+    public GvrsGateResult? Evaluate(string? bucket, decimal raw, decimal ewma, bool hasValue, string symbol, string timeframe, DateTime decisionUtc)
     {
-        if (!_enabled)
-        {
-            return null;
-        }
-
-        var normalizedBucket = BucketNormalizer.Normalize(bucket);
-        if (!string.Equals(normalizedBucket, "volatile", StringComparison.OrdinalIgnoreCase))
+        if (!_config.LiveModeEnabled || !hasValue)
         {
             return null;
         }
@@ -36,6 +34,14 @@ internal sealed class GvrsGateMonitor
         if (decisionUtc.Kind != DateTimeKind.Utc)
         {
             throw new ArgumentException("GVRS gate decisions must be UTC", nameof(decisionUtc));
+        }
+
+        var normalizedBucket = BucketNormalizer.Normalize(bucket) ?? "unknown";
+        var shouldBlockBucket = _maxBucketRank.HasValue && BucketRank(normalizedBucket) > _maxBucketRank.Value;
+        var shouldBlockEwma = _maxEwma.HasValue && ewma > _maxEwma.Value;
+        if (!(shouldBlockBucket || shouldBlockEwma))
+        {
+            return null;
         }
 
         _onBlock?.Invoke(decisionUtc);
@@ -47,10 +53,22 @@ internal sealed class GvrsGateMonitor
             gvrs_bucket = normalizedBucket,
             gvrs_raw = raw,
             gvrs_ewma = ewma,
-            blocking_enabled = _blockOnVolatile
+            live_max_bucket = _config.LiveMaxBucket,
+            live_max_ewma = _config.LiveMaxEwma
         });
         var alert = new RiskRailAlert("ALERT_BLOCK_GVRS_GATE", payload, false);
-        var blocked = _blockOnVolatile;
-        return new GvrsGateResult(alert, blocked);
+        return new GvrsGateResult(alert, Blocked: true);
+    }
+
+    private static int BucketRank(string? bucket)
+    {
+        var normalized = BucketNormalizer.Normalize(bucket)?.ToLowerInvariant();
+        return normalized switch
+        {
+            "calm" => 0,
+            "moderate" => 1,
+            "volatile" => 2,
+            _ => 3
+        };
     }
 }
