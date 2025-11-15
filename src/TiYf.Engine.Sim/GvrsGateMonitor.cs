@@ -60,9 +60,10 @@ internal sealed class GvrsGateMonitor
         return new GvrsGateResult(alert, Blocked: true);
     }
 
-    private static int BucketRank(string bucket)
+    private static int BucketRank(string? bucket)
     {
-        return bucket.ToLowerInvariant() switch
+        var normalized = BucketNormalizer.Normalize(bucket)?.ToLowerInvariant();
+        return normalized switch
         {
             "calm" => 0,
             "moderate" => 1,

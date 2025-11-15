@@ -240,10 +240,38 @@ jobs:
           $heartbeatFormatted = ('{0:0.0}' -f $heartbeatAge)
           $streamHeartbeatFormatted = ('{0:0.0}' -f $streamHeartbeatAge)
           $barLagString = $barLag.ToString([System.Globalization.CultureInfo]::InvariantCulture)
-          $line = "daily-monitor: adapter={0} connected={1} last_heartbeat_utc={2} heartbeat_age={3}s stream_connected={4} stream_heartbeat_age={5}s bar_lag_ms={6} open_positions={7} active_orders={8} risk_events_total={9} alerts_total={10} last_decision_utc={11} timeframes_active={12} decisions_total={13} loop_iterations_total={14} risk_config_hash={15} risk_blocks_total={16} risk_throttles_total={17} order_rejects_total={18} gvrs_raw={19} gvrs_ewma={20} gvrs_bucket={21} promotion_candidates={22} promotion_probation_days={23} promotion_min_trades={24}" -f $adapter, $connected, $heartbeatIso, $heartbeatFormatted, $streamConnected, $streamHeartbeatFormatted, $barLagString, $openPositions, $activeOrders, $riskEvents, $alertsTotal, $lastDecisionIso, $timeframes, $decisionsTotal, $loopIterations, $riskConfigHash, $riskBlocksTotal, $riskThrottlesTotal, $orderRejectsTotal, $gvrsRawFormatted, $gvrsEwmaFormatted, $gvrsBucket, $promotionCandidates, $promotionProbationDays, $promotionMinTrades
+          $fields = @(
+            "daily-monitor:"
+            "adapter=$adapter"
+            "connected=$connected"
+            "last_heartbeat_utc=$heartbeatIso"
+            "heartbeat_age=${heartbeatFormatted}s"
+            "stream_connected=$streamConnected"
+            "stream_heartbeat_age=${streamHeartbeatFormatted}s"
+            "bar_lag_ms=$barLagString"
+            "open_positions=$openPositions"
+            "active_orders=$activeOrders"
+            "risk_events_total=$riskEvents"
+            "alerts_total=$alertsTotal"
+            "last_decision_utc=$lastDecisionIso"
+            "timeframes_active=$timeframes"
+            "decisions_total=$decisionsTotal"
+            "loop_iterations_total=$loopIterations"
+            "risk_config_hash=$riskConfigHash"
+            "risk_blocks_total=$riskBlocksTotal"
+            "risk_throttles_total=$riskThrottlesTotal"
+            "order_rejects_total=$orderRejectsTotal"
+            "gvrs_raw=$gvrsRawFormatted"
+            "gvrs_ewma=$gvrsEwmaFormatted"
+            "gvrs_bucket=$gvrsBucket"
+            "promotion_candidates=$promotionCandidates"
+            "promotion_probation_days=$promotionProbationDays"
+            "promotion_min_trades=$promotionMinTrades"
+          )
           if ($gvrsGateBlocks -gt 0) {
-            $line = "{0} gvrs_gate_blocks={1}" -f $line, $gvrsGateBlocks
+            $fields += "gvrs_gate_blocks=$gvrsGateBlocks"
           }
+          $line = $fields -join ' '
           Write-Host $line
           Set-Content -Path (Join-Path 'scratch' 'summary.txt') -Value $line -Encoding UTF8
           Add-Content -Encoding UTF8 -Path $env:GITHUB_STEP_SUMMARY -Value "## daily-monitor verdict"

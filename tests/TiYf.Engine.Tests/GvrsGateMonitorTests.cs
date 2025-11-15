@@ -25,9 +25,10 @@ public class GvrsGateMonitorTests
         var monitor = new GvrsGateMonitor(LiveConfig("moderate"), _ => { });
         var result = monitor.Evaluate("volatile", 0.9m, 0.8m, hasValue: true, "EURUSD", "H1", DateTime.UtcNow);
 
-        Assert.NotNull(result);
-        Assert.True(result!.Value.Blocked);
-        Assert.Equal("ALERT_BLOCK_GVRS_GATE", result.Value.Alert.EventType);
+        Assert.True(result.HasValue);
+        var value = result.Value;
+        Assert.True(value.Blocked);
+        Assert.Equal("ALERT_BLOCK_GVRS_GATE", value.Alert.EventType);
     }
 
     [Fact]
@@ -45,8 +46,9 @@ public class GvrsGateMonitorTests
         var monitor = new GvrsGateMonitor(LiveConfig(null, 0.4m), _ => { });
         var result = monitor.Evaluate("moderate", 0.8m, 0.5m, hasValue: true, "EURUSD", "H1", DateTime.UtcNow);
 
-        Assert.NotNull(result);
-        Assert.True(result!.Value.Blocked);
+        Assert.True(result.HasValue);
+        var value = result.Value;
+        Assert.True(value.Blocked);
     }
 
     [Fact]
