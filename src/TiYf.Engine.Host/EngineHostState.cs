@@ -193,6 +193,9 @@ public sealed class EngineHostState
         {
             _gvrsGateBlocksTotal++;
             _gvrsGateLastBlockUtc = NormalizeUtc(utc);
+            _riskBlocksTotal++;
+            const string gateName = "gvrs_live_gate";
+            _riskBlocksByGate[gateName] = _riskBlocksByGate.TryGetValue(gateName, out var existing) ? existing + 1 : 1;
         }
     }
 
@@ -757,6 +760,7 @@ public sealed class EngineHostState
             symbol_caps = symbolCaps,
             symbol_usage = new Dictionary<string, long>(_riskSymbolCapUsage, StringComparer.OrdinalIgnoreCase),
             symbol_violations = new Dictionary<string, long>(_riskSymbolCapViolations, StringComparer.OrdinalIgnoreCase),
+            gvrs_gate_blocks_total = _gvrsGateBlocksTotal,
             cooldown = new
             {
                 enabled = _riskCooldownEnabled,

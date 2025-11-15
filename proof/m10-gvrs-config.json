@@ -6,8 +6,16 @@
   "InstrumentFile": "sample-instruments.csv",
   "InputTicksFile": "sample-ticks.csv",
   "JournalRoot": "journals",
-  "gvrs_gate": {
-    "enabled": true,
-    "block_on_volatile": true
+  "risk": {
+    "global_volatility_gate": {
+      "enabled_mode": "live",
+      "entry_threshold": 0.0,
+      "ewma_alpha": 0.3,
+      "live_max_bucket": "moderate",
+      "components": [
+        { "name": "fx_atr_percentile", "weight": 0.6 },
+        { "name": "risk_proxy_z", "weight": 0.4 }
+      ]
+    }
   }
 }

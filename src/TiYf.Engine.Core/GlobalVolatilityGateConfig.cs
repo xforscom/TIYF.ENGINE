@@ -9,7 +9,9 @@ public sealed record GlobalVolatilityGateConfig(
     string EnabledMode,
     decimal EntryThreshold,
     decimal EwmaAlpha,
-    IReadOnlyList<GlobalVolatilityComponentConfig> Components)
+    IReadOnlyList<GlobalVolatilityComponentConfig> Components,
+    string? LiveMaxBucket = null,
+    decimal? LiveMaxEwma = null)
 {
     private static readonly GlobalVolatilityComponentConfig[] DefaultComponents =
     {
@@ -21,11 +23,16 @@ public sealed record GlobalVolatilityGateConfig(
         "disabled",
         0m,
         0.3m,
-        DefaultComponents);
+        DefaultComponents,
+        null,
+        null);
 
     public bool IsEnabled =>
         !string.Equals(EnabledMode, "disabled", StringComparison.OrdinalIgnoreCase);
 
     public IReadOnlyList<GlobalVolatilityComponentConfig> EffectiveComponents =>
         Components is { Count: > 0 } ? Components : DefaultComponents;
+
+    public bool LiveModeEnabled =>
+        string.Equals(EnabledMode, "live", StringComparison.OrdinalIgnoreCase);
 }

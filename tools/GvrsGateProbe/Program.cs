@@ -18,13 +18,14 @@ var state = new EngineHostState("gvrs-gate-proof", Array.Empty<string>());
 state.MarkConnected(true);
 state.SetLoopStart(nowUtc);
 state.SetConfigSource(Path.GetFullPath(configPath), configHash);
-var gateConfig = GvrsGateConfigHelper.Resolve(rawDoc);
-state.SetGvrsGateConfig(gateConfig.Enabled, gateConfig.BlockOnVolatile);
-state.SetGvrsSnapshot(new MarketContextService.GvrsSnapshot(0.9m, 0.85m, "volatile", "shadow", true));
-if (gateConfig.Enabled)
-{
-    state.RegisterGvrsGateBlock(nowUtc);
-}
+var riskConfig = rawDoc.RootElement.TryGetProperty("risk", out var riskNode) && riskNode.ValueKind == JsonValueKind.Object
+    ? RiskConfigParser.Parse(riskNode)
+    : null;
+var gvrsConfig = riskConfig?.GlobalVolatilityGate ?? GlobalVolatilityGateConfig.Disabled;
+var liveMode = string.Equals(gvrsConfig.EnabledMode, "live", StringComparison.OrdinalIgnoreCase);
+state.SetGvrsGateConfig(liveMode, liveMode);
+state.SetGvrsSnapshot(new MarketContextService.GvrsSnapshot(0.9m, 0.85m, "volatile", gvrsConfig.EnabledMode, true));
+state.RegisterGvrsGateBlock(nowUtc);
 
 var snapshot = state.CreateMetricsSnapshot();
 var metrics = EngineMetricsFormatter.Format(snapshot);
@@ -34,11 +35,29 @@ var blocksTotal = snapshot.GvrsGateBlocksTotal;
 var lastBlock = snapshot.GvrsGateLastBlockUnixSeconds.HasValue
     ? DateTimeOffset.FromUnixTimeSeconds((long)snapshot.GvrsGateLastBlockUnixSeconds.Value).UtcDateTime.ToString("O")
     : "n/a";
-var summary = $"gvrs_gate_summary bucket={bucket} gate_enabled={gateConfig.Enabled.ToString().ToLowerInvariant()} blocking_enabled={gateConfig.BlockOnVolatile.ToString().ToLowerInvariant()} blocks_total={blocksTotal} last_block_utc={lastBlock}";
+var summary = $"gvrs_gate_summary bucket={bucket} gate_enabled={liveMode.ToString().ToLowerInvariant()} blocking_enabled={liveMode.ToString().ToLowerInvariant()} blocks_total={blocksTotal} last_block_utc={lastBlock}";
 
 await File.WriteAllTextAsync(Path.Combine(outputPath, "metrics.txt"), metrics);
 await File.WriteAllTextAsync(Path.Combine(outputPath, "health.json"), health);
 await File.WriteAllTextAsync(Path.Combine(outputPath, "summary.txt"), summary);
+var eventsCsv = Path.Combine(outputPath, "events.csv");
+var payload = JsonSerializer.Serialize(new
+{
+    instrument = "EURUSD",
+    timeframe = "H1",
+    ts = nowUtc,
+    gvrs_bucket = bucket,
+    gvrs_raw = 0.9m,
+    gvrs_ewma = 0.85m,
+    live_max_bucket = gvrsConfig.LiveMaxBucket,
+    live_max_ewma = gvrsConfig.LiveMaxEwma
+});
+var csvLines = new[]
+{
+    "sequence,utc_ts,event_type,src_adapter,payload_json",
+    $"1,{nowUtc:O},ALERT_BLOCK_GVRS_GATE,gvrs-gate-proof,\"{payload.Replace("\"", "\"\"")}\""
+};
+File.WriteAllLines(eventsCsv, csvLines);
 
 Console.WriteLine(summary);
 
