@@ -33,7 +33,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.416'
-          dotnet-quality: ga
           cache: false
 
       - name: Restore and build Release
@@ -120,7 +119,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.416'
-          dotnet-quality: ga
           cache: false
 
       - name: Download release binaries

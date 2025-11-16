@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Print a daily-monitor style summary of the local engine’s /health endpoint.
+# Usage: copy or symlink this script into /usr/local/bin/tiyf-status on the VPS.
+# Returns a one-line summary (similar to daily-monitor) and exits non-zero when
+# the /health endpoint is unreachable or reports a disconnected stream.
+set -euo pipefail
+
+HEALTH_URL=${TIYF_HEALTH_URL:-http://127.0.0.1:8080/health}
+
+usage() {
+  cat <<'EOF'
+tiyf-status - print a one-line health summary from /health
+
+Environment:
+  TIYF_HEALTH_URL  Override the health URL (default http://127.0.0.1:8080/health)
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage
+      exit 64
+      ;;
+  esac
+done
+
+if ! command -v jq >/dev/null 2>&1; then
+  echo "jq is required for tiyf-status" >&2
+  exit 99
+fi
+
+health_json=$(curl -sf "$HEALTH_URL") || {
+  echo "tiyf-status: ERROR unable to reach $HEALTH_URL" >&2
+  exit 1
+}
+
+jq_field() {
+  jq -r "$1 // $2" <<<"$health_json"
+}
+
+adapter=$(jq_field '.adapter' '"unknown"')
+connected=$(jq_field '.connected' 'false')
+last_decision=$(jq_field '.last_decision_utc' '"none"')
+gvrs_bucket=$(jq_field '.gvrs_bucket' '"unknown"')
+gvrs_raw=$(jq_field '.gvrs_raw' '"n/a"')
+gvrs_ewma=$(jq_field '.gvrs_ewma' '"n/a"')
+promotion_candidates=$(jq_field '.promotion.candidates' '0')
+promotion_probation=$(jq_field '.promotion.probation_days' '0')
+promotion_min_trades=$(jq_field '.promotion.min_trades' '0')
+risk_events_total=$(jq_field '.risk_events_total' '0')
+risk_blocks_total=$(jq_field '.risk_blocks_total' '0')
+order_rejects_total=$(jq_field '.order_rejects_total' '0')
+stream_connected=$(jq_field '.stream_connected' '0')
+
+printf 'tiyf-status: adapter=%s connected=%s last_decision_utc=%s gvrs_bucket=%s gvrs_raw=%s gvrs_ewma=%s promotion_candidates=%s promotion_probation_days=%s promotion_min_trades=%s risk_events_total=%s risk_blocks_total=%s order_rejects_total=%s\n' \
+  "$adapter" "$connected" "$last_decision" "$gvrs_bucket" "$gvrs_raw" "$gvrs_ewma" \
+  "$promotion_candidates" "$promotion_probation" "$promotion_min_trades" \
+  "$risk_events_total" "$risk_blocks_total" "$order_rejects_total"
+
+if [[ "$connected" != "true" || "$stream_connected" != "1" ]]; then
+  exit 2
+fi

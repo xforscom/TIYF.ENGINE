@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Print a filtered view of /metrics focusing on risk, GVRS, and promotion gauges.
+# Usage: install under /usr/local/bin/tiyf-rails-snapshot on the VPS.
+# Prints a filtered view of /metrics focusing on risk, GVRS, and promotion fields.
+set -euo pipefail
+
+METRICS_URL=${TIYF_METRICS_URL:-http://127.0.0.1:8080/metrics}
+
+usage() {
+  cat <<'EOF'
+tiyf-rails-snapshot - show risk/GVRS/promotion metrics from /metrics
+
+Environment:
+  TIYF_METRICS_URL  Override the metrics URL (default http://127.0.0.1:8080/metrics)
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage
+      exit 64
+      ;;
+  esac
+done
+
+metrics_output=$(curl -sf "$METRICS_URL") || {
+  echo "tiyf-rails-snapshot: ERROR unable to reach $METRICS_URL" >&2
+  exit 1
+}
+
+echo "$metrics_output" | grep -E '^(engine_risk|engine_gvrs|engine_promotion)' || {
+  echo "tiyf-rails-snapshot: no matching metrics found" >&2
+  exit 2
+}
