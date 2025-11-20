@@ -39,6 +39,7 @@ public static class RiskConfigParser
         long? maxPositionUnits = TryLong(riskEl, "max_position_units", out var maxUnits) && maxUnits > 0 ? maxUnits : null;
         var symbolUnitCaps = ParseSymbolUnitCaps(riskEl);
         var cooldown = ParseCooldown(riskEl);
+        var riskRailsMode = ParseRiskRailsMode(riskEl);
         return new RiskConfig
         {
             RealLeverageCap = Num("real_leverage_cap", 20m),
@@ -64,6 +65,7 @@ public static class RiskConfigParser
             MaxPositionUnits = maxPositionUnits,
             SymbolUnitCaps = symbolUnitCaps,
             Cooldown = cooldown,
+            RiskRailsMode = riskRailsMode,
             RiskConfigHash = TryCanonicalHash(riskEl)
         };
     }
@@ -121,6 +123,21 @@ public static class RiskConfigParser
             promotionThreshold,
             demotionThreshold,
             hash);
+    }
+
+    private static string ParseRiskRailsMode(JsonElement riskEl)
+    {
+        var mode = "telemetry";
+        if (TryString(riskEl, "risk_rails_mode", out var value) && !string.IsNullOrWhiteSpace(value))
+        {
+            mode = value.Trim();
+        }
+        else if (TryString(riskEl, "riskRailsMode", out var camel) && !string.IsNullOrWhiteSpace(camel))
+        {
+            mode = camel.Trim();
+        }
+
+        return mode.ToLowerInvariant();
     }
 
     private static bool TryNumber(JsonElement parent, string snake, out decimal value)
