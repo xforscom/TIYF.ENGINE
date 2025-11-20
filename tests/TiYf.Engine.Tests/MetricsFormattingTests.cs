@@ -63,6 +63,12 @@ public class MetricsFormattingTests
             {
                 ["EURUSD"] = 1
             },
+            BrokerCapBlocksTotal: 2,
+            BrokerCapBlocksByGate: new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["daily_loss"] = 1,
+                ["symbol_units:EURUSD"] = 1
+            },
             CooldownEnabled: true,
             CooldownActive: true,
             CooldownActiveUntilUtc: cooldownUntil,
@@ -111,6 +117,8 @@ public class MetricsFormattingTests
         Assert.Contains("engine_risk_symbol_unit_cap_limit{instrument=\"EURUSD\"} 300000", metricsText);
         Assert.Contains("engine_risk_symbol_unit_cap_used{instrument=\"EURUSD\"} 150000", metricsText);
         Assert.Contains("engine_risk_symbol_unit_cap_violations_total{instrument=\"EURUSD\"} 1", metricsText);
+        Assert.Contains("engine_broker_cap_blocks_total 2", metricsText);
+        Assert.Contains("engine_broker_cap_blocks_total{gate=\"daily_loss\"} 1", metricsText);
         Assert.Contains("engine_risk_cooldown_active 1", metricsText);
         Assert.Contains("engine_risk_cooldown_triggers_total 3", metricsText);
         Assert.Contains("engine_gvrs_gate_blocking_enabled 0", metricsText);
@@ -171,6 +179,11 @@ public class MetricsFormattingTests
             SymbolUnitViolations: new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase)
             {
                 ["GBPUSD"] = 0
+            },
+            BrokerCapBlocksTotal: 1,
+            BrokerCapBlocksByGate: new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["global_units"] = 1
             },
             CooldownEnabled: true,
             CooldownActive: false,

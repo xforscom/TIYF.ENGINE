@@ -15,6 +15,8 @@ namespace TiYf.Engine.Sim;
 /// <param name="SymbolUnitCaps">Configured per-symbol unit caps (null if none).</param>
 /// <param name="SymbolUnitUsage">Current open units per symbol.</param>
 /// <param name="SymbolUnitViolations">Telemetry violation counters per symbol.</param>
+/// <param name="BrokerCapBlocksTotal">Total broker guardrail evaluations that detected a breach.</param>
+/// <param name="BrokerCapBlocksByGate">Per-gate broker guardrail counts (daily loss/global units/per-symbol).</param>
 /// <param name="CooldownEnabled">Whether the cooldown guard is configured.</param>
 /// <param name="CooldownActive">Whether a cooldown is currently active.</param>
 /// <param name="CooldownActiveUntilUtc">UTC timestamp when the cooldown will expire (if active).</param>
@@ -31,6 +33,8 @@ public sealed record RiskRailTelemetrySnapshot(
     IReadOnlyDictionary<string, long>? SymbolUnitCaps,
     IReadOnlyDictionary<string, long> SymbolUnitUsage,
     IReadOnlyDictionary<string, long> SymbolUnitViolations,
+    long BrokerCapBlocksTotal,
+    IReadOnlyDictionary<string, long> BrokerCapBlocksByGate,
     bool CooldownEnabled,
     bool CooldownActive,
     DateTime? CooldownActiveUntilUtc,

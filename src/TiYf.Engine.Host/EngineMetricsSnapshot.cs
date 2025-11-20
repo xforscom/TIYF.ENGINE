@@ -19,6 +19,8 @@ public readonly record struct EngineMetricsSnapshot(
     long RiskThrottlesTotal,
     IReadOnlyDictionary<string, long> RiskBlocksByGate,
     IReadOnlyDictionary<string, long> RiskThrottlesByGate,
+    long RiskBrokerCapBlocksTotal,
+    IReadOnlyDictionary<string, long> RiskBrokerCapBlocksByGate,
     decimal? RiskBrokerDailyLossCapCcy,
     decimal RiskBrokerDailyLossUsedCcy,
     long RiskBrokerDailyLossViolationsTotal,

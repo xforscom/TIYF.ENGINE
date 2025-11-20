@@ -27,6 +27,7 @@ var riskConfig = RiskConfigParser.Parse(riskNode);
 var canonical = JsonCanonicalizer.Canonicalize(riskNode);
 var riskConfigHash = riskConfig.RiskConfigHash ?? ConfigHash.Compute(canonical);
 var scenario = Scenario.Parse(scenarioNode);
+var brokerCaps = ParseBrokerCaps(root);
 
 RiskRailTelemetrySnapshot? telemetrySnapshot = null;
 var gateCounts = new Dictionary<string, (int blocks, int throttles)>(StringComparer.OrdinalIgnoreCase);
@@ -45,7 +46,8 @@ var runtime = new RiskRailRuntime(
     },
     scenario.StartingEquity,
     telemetryCallback: snapshot => telemetrySnapshot = snapshot,
-    clock: () => scenario.DecisionUtc);
+    clock: () => scenario.DecisionUtc,
+    brokerCaps: brokerCaps);
 
 var tracker = new PositionTracker();
 ApplyTrades(tracker, scenario.Trades);
@@ -79,6 +81,8 @@ var telemetry = telemetrySnapshot ?? new RiskRailTelemetrySnapshot(
     0,
     null,
     new Dictionary<string, long>(),
+    new Dictionary<string, long>(),
+    0,
     new Dictionary<string, long>(),
     false,
     false,
@@ -137,6 +141,37 @@ static Dictionary<string, string> ParseArgs(string[] rawArgs)
     return map;
 }
 
+static BrokerCaps? ParseBrokerCaps(JsonElement root)
+{
+    if (!root.TryGetProperty("broker_caps", out var node) || node.ValueKind != JsonValueKind.Object)
+    {
+        return null;
+    }
+
+    decimal? dailyCap = TryDecimal(node, "daily_loss_cap_ccy");
+    long? maxUnits = TryLong(node, "max_units");
+    IReadOnlyDictionary<string, long>? symbolCaps = null;
+    if (node.TryGetProperty("broker_symbol_unit_caps", out var capsNode) && capsNode.ValueKind == JsonValueKind.Object)
+    {
+        var caps = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        foreach (var prop in capsNode.EnumerateObject())
+        {
+            if (prop.Value.ValueKind == JsonValueKind.Number && prop.Value.TryGetInt64(out var v))
+            {
+                caps[prop.Name] = v;
+            }
+        }
+        symbolCaps = caps.Count > 0 ? caps : null;
+    }
+
+    if (!dailyCap.HasValue && !maxUnits.HasValue && symbolCaps is null)
+    {
+        return null;
+    }
+
+    return new BrokerCaps(dailyCap, maxUnits, symbolCaps);
+}
+
 static void ApplyTrades(PositionTracker tracker, IReadOnlyList<ScenarioTrade> trades)
 {
     foreach (var trade in trades)
@@ -164,7 +199,40 @@ static string BuildSummary(RiskRailOutcome outcome, RiskRailTelemetrySnapshot te
     var symbolCaps = outcome.Alerts.Count(a => a.EventType == "ALERT_RISK_SYMBOL_CAP_SOFT");
     var cooldownAlert = outcome.Alerts.Any(a => a.EventType == "ALERT_RISK_COOLDOWN_SOFT") ? 1 : 0;
     var hardBlocks = outcome.Alerts.Count(a => a.EventType.EndsWith("_HARD", StringComparison.OrdinalIgnoreCase));
-    return $"risk_rails_summary allowed={outcome.Allowed} broker_cap_hit={brokerCap} max_position_hit={maxPosition} symbol_caps_hit={symbolCaps} cooldown_alert={cooldownAlert} hard_blocks={hardBlocks} cooldown_triggers={telemetry.CooldownTriggersTotal}";
+    var brokerBlocks = telemetry.BrokerCapBlocksTotal;
+    return $"risk_rails_summary allowed={outcome.Allowed} broker_cap_hit={brokerCap} max_position_hit={maxPosition} symbol_caps_hit={symbolCaps} cooldown_alert={cooldownAlert} hard_blocks={hardBlocks} broker_cap_blocks={brokerBlocks} cooldown_triggers={telemetry.CooldownTriggersTotal}";
+}
+
+static decimal? TryDecimal(JsonElement node, string propertyName)
+{
+    if (node.TryGetProperty(propertyName, out var el))
+    {
+        if (el.ValueKind == JsonValueKind.Number && el.TryGetDecimal(out var value))
+        {
+            return value;
+        }
+        if (el.ValueKind == JsonValueKind.String && decimal.TryParse(el.GetString(), out value))
+        {
+            return value;
+        }
+    }
+    return null;
+}
+
+static long? TryLong(JsonElement node, string propertyName)
+{
+    if (node.TryGetProperty(propertyName, out var el))
+    {
+        if (el.ValueKind == JsonValueKind.Number && el.TryGetInt64(out var value))
+        {
+            return value;
+        }
+        if (el.ValueKind == JsonValueKind.String && long.TryParse(el.GetString(), out value))
+        {
+            return value;
+        }
+    }
+    return null;
 }
 
 internal sealed record Scenario(

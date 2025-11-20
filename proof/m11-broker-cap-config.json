@@ -1,0 +1,24 @@
+{
+  "risk": {
+    "risk_rails_mode": "live"
+  },
+  "broker_caps": {
+    "daily_loss_cap_ccy": 1000,
+    "max_units": 100000,
+    "broker_symbol_unit_caps": {
+      "EURUSD": 60000
+    }
+  },
+  "scenario": {
+    "instrument": "EURUSD",
+    "timeframe": "H1",
+    "decision_utc": "2025-03-01T00:00:00Z",
+    "requested_units": 50000,
+    "bar_price": 1.1000,
+    "starting_equity": 100000,
+    "trades": [],
+    "open_positions": [
+      { "symbol": "EURUSD", "units": 60000 }
+    ]
+  }
+}

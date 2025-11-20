@@ -50,7 +50,7 @@ public class RiskRailsLiveTests
         var outcome = runtime.EvaluateNewEntry("EURUSD", "H1", DateTime.UtcNow, 1_000, Array.Empty<RiskPositionUnits>());
 
         Assert.False(outcome.Allowed);
-        Assert.Contains(outcome.Alerts, a => a.EventType == "ALERT_RISK_BROKER_DAILY_CAP_HARD");
+        Assert.Contains(outcome.Alerts, a => a.EventType == "ALERT_RISK_BROKER_CAP_HARD");
     }
 
     [Fact]

@@ -10,6 +10,9 @@ public sealed record OandaAdapterSettings(
     string AccessToken,
     bool UseMock,
     long MaxOrderUnits,
+    decimal? BrokerDailyLossCapCcy,
+    long? BrokerMaxUnits,
+    IReadOnlyDictionary<string, long>? BrokerSymbolUnitCaps,
     TimeSpan RequestTimeout,
     TimeSpan RetryInitialDelay,
     TimeSpan RetryMaxDelay,
@@ -87,6 +90,16 @@ public sealed record OandaAdapterSettings(
             return fallback;
         }
 
+        static decimal? ResolveDecimal(JsonElement node, string propertyName, decimal? fallback)
+        {
+            if (node.TryGetProperty(propertyName, out var prop))
+            {
+                if (prop.ValueKind == JsonValueKind.Number && prop.TryGetDecimal(out var value)) return value;
+                if (prop.ValueKind == JsonValueKind.String && decimal.TryParse(prop.GetString(), out var parsed)) return parsed;
+            }
+            return fallback;
+        }
+
         static TimeSpan ResolveTimeSpan(JsonElement node, string propertyName, TimeSpan fallback)
         {
             if (node.TryGetProperty(propertyName, out var prop))
@@ -112,6 +125,36 @@ public sealed record OandaAdapterSettings(
         var useMockFallback = string.IsNullOrWhiteSpace(accessToken) ? true : defaults.UseMock;
         var useMock = ResolveBool(cfgNode, "useMock", useMockFallback);
         var maxUnits = ResolveLong(cfgNode, "maxOrderUnits", defaults.MaxOrderUnits);
+        var brokerDailyLossCap = ResolveDecimal(cfgNode, "brokerDailyLossCapCcy", defaults.BrokerDailyLossCapCcy);
+        long? brokerMaxUnits = defaults.BrokerMaxUnits;
+        if (cfgNode.TryGetProperty("brokerMaxUnits", out var brokerMaxNode))
+        {
+            if (brokerMaxNode.ValueKind == JsonValueKind.Number && brokerMaxNode.TryGetInt64(out var parsed))
+            {
+                brokerMaxUnits = parsed;
+            }
+            else if (brokerMaxNode.ValueKind == JsonValueKind.String && long.TryParse(brokerMaxNode.GetString(), out var parsedString))
+            {
+                brokerMaxUnits = parsedString;
+            }
+            else
+            {
+                brokerMaxUnits = null;
+            }
+        }
+        IReadOnlyDictionary<string, long>? brokerSymbolCaps = defaults.BrokerSymbolUnitCaps;
+        if (cfgNode.TryGetProperty("brokerSymbolUnitCaps", out var capNode) && capNode.ValueKind == JsonValueKind.Object)
+        {
+            var caps = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            foreach (var prop in capNode.EnumerateObject())
+            {
+                if (prop.Value.ValueKind == JsonValueKind.Number && prop.Value.TryGetInt64(out var v))
+                {
+                    caps[prop.Name] = v;
+                }
+            }
+            if (caps.Count > 0) brokerSymbolCaps = caps;
+        }
         var timeout = ResolveTimeSpan(cfgNode, "requestTimeoutSeconds", defaults.RequestTimeout);
         var retryInitial = ResolveTimeSpan(cfgNode, "retryInitialDelaySeconds", defaults.RetryInitialDelay);
         var retryMax = ResolveTimeSpan(cfgNode, "retryMaxDelaySeconds", defaults.RetryMaxDelay);
@@ -128,6 +171,9 @@ public sealed record OandaAdapterSettings(
             accessToken,
             useMock,
             maxUnits,
+            brokerDailyLossCap,
+            brokerMaxUnits,
+            brokerSymbolCaps,
             timeout <= TimeSpan.Zero ? defaults.RequestTimeout : timeout,
             retryInitial <= TimeSpan.Zero ? defaults.RetryInitialDelay : retryInitial,
             retryMax <= TimeSpan.Zero ? defaults.RetryMaxDelay : retryMax,
@@ -152,6 +198,13 @@ public sealed record OandaAdapterSettings(
             AccessToken: string.Empty,
             UseMock: false,
             MaxOrderUnits: 100_000,
+            BrokerDailyLossCapCcy: live ? null : 5_000m,
+            BrokerMaxUnits: live ? null : 200_000,
+            BrokerSymbolUnitCaps: live ? null : new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["EURUSD"] = 100_000,
+                ["XAUUSD"] = 10_000
+            },
             RequestTimeout: TimeSpan.FromSeconds(10),
             RetryInitialDelay: TimeSpan.FromMilliseconds(200),
             RetryMaxDelay: TimeSpan.FromSeconds(2),

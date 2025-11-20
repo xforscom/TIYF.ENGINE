@@ -82,6 +82,8 @@ public sealed class EngineHostState
     private long? _riskMaxPositionUnitsLimit;
     private long _riskMaxPositionUnitsUsed;
     private long _riskMaxPositionViolationsTotal;
+    private long _riskBrokerCapBlocksTotal;
+    private readonly Dictionary<string, long> _riskBrokerCapBlocksByGate = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyDictionary<string, long>? _riskSymbolCapLimits;
     private readonly Dictionary<string, long> _riskSymbolCapUsage = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, long> _riskSymbolCapViolations = new(StringComparer.OrdinalIgnoreCase);
@@ -526,6 +528,12 @@ public sealed class EngineHostState
             _riskMaxPositionUnitsLimit = snapshot.MaxPositionUnitsLimit;
             _riskMaxPositionUnitsUsed = snapshot.MaxPositionUnitsUsed;
             _riskMaxPositionViolationsTotal = snapshot.MaxPositionViolationsTotal;
+            _riskBrokerCapBlocksTotal = snapshot.BrokerCapBlocksTotal;
+            _riskBrokerCapBlocksByGate.Clear();
+            foreach (var kvp in snapshot.BrokerCapBlocksByGate)
+            {
+                _riskBrokerCapBlocksByGate[kvp.Key] = kvp.Value;
+            }
             _riskSymbolCapLimits = snapshot.SymbolUnitCaps is null
                 ? null
                 : new Dictionary<string, long>(snapshot.SymbolUnitCaps, StringComparer.OrdinalIgnoreCase);
@@ -677,6 +685,8 @@ public sealed class EngineHostState
             _riskThrottlesTotal,
             new Dictionary<string, long>(_riskBlocksByGate, StringComparer.OrdinalIgnoreCase),
             new Dictionary<string, long>(_riskThrottlesByGate, StringComparer.OrdinalIgnoreCase),
+            _riskBrokerCapBlocksTotal,
+            new Dictionary<string, long>(_riskBrokerCapBlocksByGate, StringComparer.OrdinalIgnoreCase),
             _riskBrokerDailyLossCapCcy,
             _riskBrokerDailyLossUsedCcy,
             _riskBrokerDailyLossViolationsTotal,
@@ -800,6 +810,8 @@ public sealed class EngineHostState
             broker_daily_cap_ccy = _riskBrokerDailyLossCapCcy,
             broker_daily_loss_used_ccy = _riskBrokerDailyLossUsedCcy,
             broker_daily_loss_violations_total = _riskBrokerDailyLossViolationsTotal,
+            broker_cap_blocks_total = _riskBrokerCapBlocksTotal,
+            broker_cap_blocks_by_gate = new Dictionary<string, long>(_riskBrokerCapBlocksByGate, StringComparer.OrdinalIgnoreCase),
             max_position_units = _riskMaxPositionUnitsLimit,
             max_position_units_used = _riskMaxPositionUnitsUsed,
             max_position_violations_total = _riskMaxPositionViolationsTotal,

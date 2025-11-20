@@ -33,6 +33,11 @@ public static class EngineMetricsFormatter
         {
             AppendMetric(builder, "engine_risk_throttles_total", kvp.Value, "gate", kvp.Key);
         }
+        AppendMetric(builder, "engine_broker_cap_blocks_total", snapshot.RiskBrokerCapBlocksTotal);
+        foreach (var kvp in snapshot.RiskBrokerCapBlocksByGate)
+        {
+            AppendMetric(builder, "engine_broker_cap_blocks_total", kvp.Value, "gate", kvp.Key);
+        }
         if (snapshot.RiskBrokerDailyLossCapCcy.HasValue)
         {
             AppendMetric(builder, "engine_risk_broker_daily_cap_ccy", (double)snapshot.RiskBrokerDailyLossCapCcy.Value);
