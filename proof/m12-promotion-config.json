@@ -1,0 +1,21 @@
+{
+  "risk": {
+    "promotion": {
+      "enabled": true,
+      "shadow_candidates": ["strategyA", "strategyB"],
+      "probation_days": 30,
+      "min_trades": 5,
+      "promotion_threshold": 0.6,
+      "demotion_threshold": 0.4
+    }
+  },
+  "scenario": {
+    "trades": [
+      { "decision_id": "PROMO-1", "symbol": "EURUSD", "side": "buy", "units": 10000, "entry_price": 1.0, "exit_price": 1.1, "open_utc": "2025-02-01T00:00:00Z", "close_utc": "2025-02-01T01:00:00Z" },
+      { "decision_id": "PROMO-2", "symbol": "EURUSD", "side": "buy", "units": 10000, "entry_price": 1.0, "exit_price": 1.2, "open_utc": "2025-02-01T01:00:00Z", "close_utc": "2025-02-01T02:00:00Z" },
+      { "decision_id": "PROMO-3", "symbol": "EURUSD", "side": "buy", "units": 10000, "entry_price": 1.0, "exit_price": 1.05, "open_utc": "2025-02-01T02:00:00Z", "close_utc": "2025-02-01T03:00:00Z" },
+      { "decision_id": "PROMO-4", "symbol": "EURUSD", "side": "buy", "units": 10000, "entry_price": 1.0, "exit_price": 0.9, "open_utc": "2025-02-01T03:00:00Z", "close_utc": "2025-02-01T04:00:00Z" },
+      { "decision_id": "PROMO-5", "symbol": "EURUSD", "side": "buy", "units": 10000, "entry_price": 1.0, "exit_price": 1.15, "open_utc": "2025-02-01T04:00:00Z", "close_utc": "2025-02-01T05:00:00Z" }
+    ]
+  }
+}

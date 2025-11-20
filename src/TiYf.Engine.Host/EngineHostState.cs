@@ -30,6 +30,15 @@ public sealed class EngineHostState
     private string _riskConfigHash = string.Empty;
     private string _promotionConfigHash = string.Empty;
     private PromotionTelemetrySnapshot? _promotionTelemetry;
+    private int _promotionShadowPromotions;
+    private int _promotionShadowDemotions;
+    private int _promotionShadowTradeCount;
+    private decimal _promotionShadowWinRatio;
+    private int _promotionShadowProbationDays;
+    private int _promotionShadowMinTrades;
+    private decimal _promotionShadowPromotionThreshold;
+    private decimal _promotionShadowDemotionThreshold;
+    private string[] _promotionShadowCandidates = Array.Empty<string>();
     private long _riskBlocksTotal;
     private long _riskThrottlesTotal;
     private readonly Dictionary<string, long> _riskBlocksByGate = new(StringComparer.OrdinalIgnoreCase);
@@ -485,6 +494,23 @@ public sealed class EngineHostState
         }
     }
 
+    public void UpdatePromotionShadow(PromotionShadowSnapshot snapshot)
+    {
+        if (snapshot is null) return;
+        lock (_sync)
+        {
+            _promotionShadowPromotions = snapshot.PromotionsTotal;
+            _promotionShadowDemotions = snapshot.DemotionsTotal;
+            _promotionShadowTradeCount = snapshot.TradeCount;
+            _promotionShadowWinRatio = snapshot.WinRatio;
+            _promotionShadowProbationDays = snapshot.ProbationDays;
+            _promotionShadowMinTrades = snapshot.MinTrades;
+            _promotionShadowPromotionThreshold = snapshot.PromotionThreshold;
+            _promotionShadowDemotionThreshold = snapshot.DemotionThreshold;
+            _promotionShadowCandidates = snapshot.Candidates ?? Array.Empty<string>();
+        }
+    }
+
     public void UpdateRiskRailsTelemetry(RiskRailTelemetrySnapshot? snapshot)
     {
         if (snapshot is null)
@@ -688,6 +714,14 @@ public sealed class EngineHostState
             _riskConfigHash,
             _promotionConfigHash,
             _promotionTelemetry,
+            _promotionShadowPromotions,
+            _promotionShadowDemotions,
+            _promotionShadowTradeCount,
+            _promotionShadowWinRatio,
+            _promotionShadowProbationDays,
+            _promotionShadowMinTrades,
+            _promotionShadowPromotionThreshold,
+            _promotionShadowDemotionThreshold,
             _reconciliationMismatchesTotal,
             _lastReconciliationUtc.HasValue ? new DateTimeOffset(_lastReconciliationUtc.Value).ToUnixTimeSeconds() : (double?)null,
             _lastReconciliationStatus.ToString().ToLowerInvariant(),
@@ -718,7 +752,19 @@ public sealed class EngineHostState
             probation_days = promotion.ProbationDays,
             min_trades = promotion.MinTrades,
             promotion_threshold = promotion.PromotionThreshold,
-            demotion_threshold = promotion.DemotionThreshold
+            demotion_threshold = promotion.DemotionThreshold,
+            shadow = new
+            {
+                promotions_total = _promotionShadowPromotions,
+                demotions_total = _promotionShadowDemotions,
+                trades_total = _promotionShadowTradeCount,
+                win_ratio = _promotionShadowWinRatio,
+                probation_days = _promotionShadowProbationDays,
+                min_trades = _promotionShadowMinTrades,
+                promotion_threshold = _promotionShadowPromotionThreshold,
+                demotion_threshold = _promotionShadowDemotionThreshold,
+                candidates = _promotionShadowCandidates
+            }
         };
     }
 
