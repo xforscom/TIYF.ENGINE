@@ -4,6 +4,10 @@ using TiYf.Engine.Core;
 
 namespace TiYf.Engine.Sim;
 
+/// <summary>
+/// Snapshot of promotion shadow evaluation used for telemetry and proofs.
+/// Incremented only when newer trades within the probation window meet thresholds; no live routing changes.
+/// </summary>
 public sealed record PromotionShadowSnapshot(
     int PromotionsTotal,
     int DemotionsTotal,
@@ -17,7 +21,8 @@ public sealed record PromotionShadowSnapshot(
 
 /// <summary>
 /// Shadow-only promotion evaluator that tracks promotion/demotion readiness over a probation window
-/// without affecting live routing. Counters increment only when newer trades are observed.
+/// without affecting live routing. Counters increment when newer trades within the window satisfy thresholds;
+/// exits and sizing remain untouched.
 /// </summary>
 public sealed class PromotionShadowRuntime
 {

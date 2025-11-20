@@ -58,8 +58,8 @@ static PromotionShadowSnapshot? RunScenario(RiskConfig riskConfig, JsonElement s
     {
         foreach (var trade in tradesEl.EnumerateArray())
         {
-            var symbol = trade.GetProperty("symbol").GetString() ?? "EURUSD";
-            var side = ParseSide(trade.GetProperty("side").GetString() ?? "buy");
+            var symbol = trade.GetProperty("symbol").GetString() ?? throw new InvalidOperationException("symbol required");
+            var side = ParseSide(trade.GetProperty("side").GetString() ?? throw new InvalidOperationException("side required"));
             var units = trade.GetProperty("units").GetInt64();
             var entry = trade.GetProperty("entry_price").GetDecimal();
             var exit = trade.GetProperty("exit_price").GetDecimal();
@@ -69,7 +69,7 @@ static PromotionShadowSnapshot? RunScenario(RiskConfig riskConfig, JsonElement s
             {
                 latestClose = closeUtc;
             }
-            var decisionId = trade.GetProperty("decision_id").GetString() ?? Guid.NewGuid().ToString("N");
+            var decisionId = trade.GetProperty("decision_id").GetString() ?? throw new InvalidOperationException("decision_id required");
             tracker.OnFill(new ExecutionFill(decisionId, symbol, side, entry, units, openUtc), Schema.Version, riskConfig.RiskConfigHash ?? string.Empty, "promotion-probe", null);
             var exitSide = side == TradeSide.Buy ? TradeSide.Sell : TradeSide.Buy;
             tracker.OnFill(new ExecutionFill(decisionId, symbol, exitSide, exit, units, closeUtc), Schema.Version, riskConfig.RiskConfigHash ?? string.Empty, "promotion-probe", null);
@@ -137,7 +137,9 @@ static void WriteSummary(string path, string configPath, PromotionConfig promoti
     var candidatesList = hasPromotion ? string.Join(',', shadowCandidates) : "n/a";
     var line = string.Format(
         CultureInfo.InvariantCulture,
-        "promotion-proof: config={0} hash={1} promotion_candidates={2} probation_days={3} min_trades={4} promotion_threshold={5} demotion_threshold={6} candidates=[{7}] promotions_total={8} demotions_total={9} trades_total={10} win_ratio={11:0.###}",
+        "promotion-proof: config={0} hash={1} promotion_candidates={2} "
+        + "probation_days={3} min_trades={4} promotion_threshold={5} demotion_threshold={6} "
+        + "candidates=[{7}] promotions_total={8} demotions_total={9} trades_total={10} win_ratio={11:0.###}",
         Path.GetFileName(configPath),
         hasPromotion ? promotion!.ConfigHash : "n/a",
         hasPromotion ? candidateCount.ToString(CultureInfo.InvariantCulture) : "n/a",

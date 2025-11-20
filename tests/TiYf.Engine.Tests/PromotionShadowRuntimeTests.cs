@@ -35,7 +35,7 @@ public class PromotionShadowRuntimeTests
         Assert.Equal(1, snapshot.PromotionsTotal);
         Assert.Equal(0, snapshot.DemotionsTotal);
         Assert.Equal(3, snapshot.TradeCount);
-        Assert.True(snapshot.WinRatio >= 0.66m);
+        Assert.Equal(2m / 3m, snapshot.WinRatio, 3);
     }
 
     [Fact]
