@@ -10,6 +10,7 @@ on:
       - 'tools/RiskRailsProbe/**'
       - 'proof/m11-risk-config.json'
       - 'proof/m11-risk-config-live.json'
+      - 'proof/m11-broker-cap-config.json'
       - 'docs/M11-Risk-Rails-Plan.md'
       - 'src/TiYf.Engine.Core/**'
       - 'src/TiYf.Engine.Host/**'
@@ -54,22 +55,33 @@ jobs:
         run: |
           set -euo pipefail
           out="proof-artifacts/m11-risk-rails"
-          mkdir -p "$out/telemetry" "$out/live"
-          dotnet run --project tools/RiskRailsProbe/RiskRailsProbe.csproj --configuration Release -- --config proof/m11-risk-config.json --output "$out/telemetry"
-          dotnet run --project tools/RiskRailsProbe/RiskRailsProbe.csproj --configuration Release -- --config proof/m11-risk-config-live.json --output "$out/live"
+          mkdir -p "$out/telemetry" "$out/live" "$out/broker"
+          probe_proj="tools/RiskRailsProbe/RiskRailsProbe.csproj"
+          probe="dotnet run --project ${probe_proj}"
+          probe="$probe --configuration Release --"
+          $probe --config proof/m11-risk-config.json \
+            --output "$out/telemetry"
+          $probe --config proof/m11-risk-config-live.json \
+            --output "$out/live"
+          $probe --config proof/m11-broker-cap-config.json \
+            --output "$out/broker"
 
       - name: Verify proof artifacts (telemetry)
         run: |
           set -euo pipefail
-          ls proof-artifacts/m11-risk-rails/telemetry
-          grep -F "risk_rails_summary" proof-artifacts/m11-risk-rails/telemetry/summary.txt
-          grep -F "engine_risk_broker_daily_loss_used_ccy" proof-artifacts/m11-risk-rails/telemetry/metrics.txt
-          grep -F "engine_risk_max_position_units_used" proof-artifacts/m11-risk-rails/telemetry/metrics.txt
-          grep -F "engine_risk_symbol_unit_cap_violations_total" proof-artifacts/m11-risk-rails/telemetry/metrics.txt
-          grep -F "engine_risk_cooldown_triggers_total" proof-artifacts/m11-risk-rails/telemetry/metrics.txt
+          tele_dir="proof-artifacts/m11-risk-rails/telemetry"
+          tele_metrics="$tele_dir/metrics.txt"
+          tele_health="$tele_dir/health.json"
+          ls "$tele_dir"
+          grep -F "risk_rails_summary" "$tele_dir/summary.txt"
+          grep -F "engine_risk_broker_daily_loss_used_ccy" "$tele_metrics"
+          grep -F "engine_risk_max_position_units_used" "$tele_metrics"
+          grep -F "engine_risk_symbol_unit_cap_violations_total" "$tele_metrics"
+          grep -F "engine_risk_cooldown_triggers_total" "$tele_metrics"
+          export TELE_HEALTH="$tele_health"
           python3 - <<'PY'
-          import json
-          data = json.load(open('proof-artifacts/m11-risk-rails/telemetry/health.json'))
+          import json, os
+          data = json.load(open(os.environ["TELE_HEALTH"]))
           if 'risk_rails' not in data:
               raise SystemExit('missing risk_rails health block')
           rails = data['risk_rails']
@@ -80,15 +92,38 @@ jobs:
       - name: Verify proof artifacts (live)
         run: |
           set -euo pipefail
-          ls proof-artifacts/m11-risk-rails/live
-          grep -F "hard_blocks=" proof-artifacts/m11-risk-rails/live/summary.txt
-          grep -F "engine_risk_blocks_total" proof-artifacts/m11-risk-rails/live/metrics.txt
-          grep -F "ALERT_RISK_" proof-artifacts/m11-risk-rails/live/events.csv
-          value=$(awk '/^engine_risk_blocks_total[ {]/{print $NF; exit}' proof-artifacts/m11-risk-rails/live/metrics.txt)
+          live_dir="proof-artifacts/m11-risk-rails/live"
+          live_metrics="$live_dir/metrics.txt"
+          ls "$live_dir"
+          grep -F "hard_blocks=" "$live_dir/summary.txt"
+          grep -F "engine_risk_blocks_total" "$live_metrics"
+          grep -F "ALERT_RISK_" "$live_dir/events.csv"
+          value=$(awk '/^engine_risk_blocks_total[ {]/{print $NF; exit}' \
+            "$live_metrics")
           if [ -z "$value" ] || [ "$value" -lt 1 ]; then
             echo "expected engine_risk_blocks_total >= 1, got '${value:-empty}'"
             exit 1
           fi
+
+      - name: Verify proof artifacts (broker caps)
+        run: |
+          set -euo pipefail
+          broker_dir="proof-artifacts/m11-risk-rails/broker"
+          broker_metrics="$broker_dir/metrics.txt"
+          broker_health="$broker_dir/health.json"
+          ls "$broker_dir"
+          grep -F "broker_cap_blocks=" "$broker_dir/summary.txt"
+          grep -F "ALERT_RISK_BROKER_CAP_HARD" "$broker_dir/events.csv"
+          grep -F "engine_broker_cap_blocks_total" "$broker_metrics"
+          export BROKER_HEALTH="$broker_health"
+          python3 - <<'PY'
+          import json, os
+          data = json.load(open(os.environ["BROKER_HEALTH"]))
+          rails = data.get('risk_rails', {})
+          blocks_total = rails.get('broker_cap_blocks_total')
+          if blocks_total is None or blocks_total < 1:
+              raise SystemExit(f"bad broker_cap_blocks_total: {blocks_total}")
+          PY
 
       - name: Upload proof artifacts
         if: always()

@@ -16,6 +16,12 @@
       "retryMaxAttempts": 5,
       "handshakeEndpoint": "/accounts/{accountId}/summary",
       "orderEndpoint": "/accounts/{accountId}/orders",
+      "brokerDailyLossCapCcy": 1000,
+      "brokerMaxUnits": 500000,
+      "brokerSymbolUnitCaps": {
+        "EURUSD": 200000,
+        "GBPUSD": 200000
+      },
       "useMock": false,
       "stream": {
         "enable": true,

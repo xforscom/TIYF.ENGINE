@@ -29,9 +29,9 @@ Telemetry-only rails that remain non-blocking: promotion counters, secret proven
 - **Cooldown:** Start timer when trigger condition met; only entry suppression occurs during the cooldown window.
 
 ### Telemetry Reuse
-- Continue to populate `RiskRailTelemetrySnapshot` and push into `EngineHostState`. Add booleans/values (`*.blocking_active`) instead of new structures.
-- `/metrics` already exposes `engine_risk_*` gauges; add `*_blocking` versions if necessary but under the same prefix.
-- `/health.risk_rails` should add a concise `blocking` flag per rail (e.g. `"max_position": {"limit": 100000, "used": 95000, "blocking": false}`) to keep automation simple.
+- Continue to populate `RiskRailTelemetrySnapshot` and push into `EngineHostState`. Add booleans/values (`*.blocking_active`) instead of new structures; broker guardrail counters surface via the same snapshot.
+- `/metrics` already exposes `engine_risk_*` gauges; add `engine_broker_cap_blocks_total{gate="..."}` for broker guardrail hits alongside existing `engine_risk_blocks_total`.
+- `/health.risk_rails` should add a concise `blocking` flag per rail (e.g. `"max_position": {"limit": 100000, "used": 95000, "blocking": false}`) and a `broker_cap_blocks_total`/`broker_cap_blocks_by_gate` section for Ops grep.
 
 ### Alerts & Counters
 - Alerts (`RiskRailAlert`) should have deterministic event types:  
@@ -39,19 +39,19 @@ Telemetry-only rails that remain non-blocking: promotion counters, secret proven
   - `ALERT_RISK_MAX_POSITION_HARD`  
   - `ALERT_RISK_SYMBOL_CAP_HARD` (include `symbol` in payload)  
   - `ALERT_RISK_COOLDOWN_HARD`
-- Counters: extend `engine_risk_blocks_total{rail="..."}`
+- Counters: extend `engine_risk_blocks_total{rail="..."};` and `engine_broker_cap_blocks_total{gate="daily_loss|global_units|symbol_units:<sym>"}`.
 - Daily-monitor: append `risk_blocks_total` (existing) and, when non-zero, a tail such as `risk_blocks_breakdown=broker:1,symbol:2,cooldown:0`.
 
 ### Acceptance Criteria
 1. **Alerts:** Each blocking scenario must emit one alert per decision with payload fields: `decision_id`, `rail`, `limit`, `used`, `config_hash`.
 2. **/metrics:**  
-   - `engine_risk_blocks_total{rail="broker_daily"}` increments on cap hits.  
+   - `engine_broker_cap_blocks_total` and `engine_broker_cap_blocks_total{gate="..."}` increment on guardrail hits.  
    - `engine_risk_cooldown_active` (0/1) reflects cooldown state.  
    - `engine_risk_symbol_unit_cap_used{symbol="EURUSD"}` matches live exposure.
 3. **/health:** `risk_rails` block shows config + used + `blocking` booleans; cooldown includes `active_until_utc`.
 4. **Proof:** Extend `tools/RiskRailsProbe` to feed deterministic trade sequences forcing each rail to block at least once. Workflow (`m11-risk-rails-proof`) must:  
-   - Inspect `summary.txt` for `risk_blocks=broker:1,max_position:1,symbol:2,cooldown:1`.  
-   - `metrics.txt` lines for every `engine_risk_blocks_total{rail=...}` label > 0.  
+   - Inspect `summary.txt` for broker and rail blocks (e.g., `broker_cap_blocks=1 risk_blocks=...`).  
+   - `metrics.txt` lines for every `engine_risk_blocks_total{rail=...}` label > 0 and `engine_broker_cap_blocks_total` > 0.  
    - `health.json` entries matching the new blocking flags.
 5. **Daily-monitor:** Summaries include a tail `risk_blocks_total=X` and optional `risk_blocks_breakdown=...` when X>0.
 

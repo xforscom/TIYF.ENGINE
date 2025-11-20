@@ -272,6 +272,7 @@ internal sealed class EngineLoopService : BackgroundService
         var strategyStart = AlignToMinute(DateTime.UtcNow);
         var strategy = new DeterministicScriptStrategy(clock, instruments.All(), strategyStart);
         var riskEnforcer = new RiskEnforcer(riskFormulas, basketAggregator, schemaVersion, _configuration.ConfigHash);
+        var brokerCaps = BuildBrokerCaps();
 
         _engineLoop = new EngineLoop(
             clock,
@@ -304,6 +305,7 @@ internal sealed class EngineLoopService : BackgroundService
             {
                 _state.UpdateRiskRailsTelemetry(snapshot);
             },
+            brokerCaps: brokerCaps,
             promotionShadowCallback: snapshot => _state.UpdatePromotionShadow(snapshot),
             gvrsSnapshotCallback: snapshot => _state.SetGvrsSnapshot(snapshot),
             gvrsGateCallback: utc =>
@@ -946,6 +948,19 @@ internal sealed class EngineLoopService : BackgroundService
 
         var root = _configDirectory ?? Directory.GetCurrentDirectory();
         return Path.GetFullPath(Path.Combine(root, relativeOrAbsolute));
+    }
+
+    private BrokerCaps? BuildBrokerCaps()
+    {
+        if (_adapterSettings is null)
+        {
+            return null;
+        }
+
+        return new BrokerCaps(
+            _adapterSettings.BrokerDailyLossCapCcy,
+            _adapterSettings.BrokerMaxUnits,
+            _adapterSettings.BrokerSymbolUnitCaps);
     }
 
     private static DateTime AlignToMinute(DateTime utc)

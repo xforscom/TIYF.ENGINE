@@ -23,6 +23,11 @@ internal enum RiskRailsMode
 
 internal readonly record struct RiskPositionUnits(string Symbol, long Units);
 
+public readonly record struct BrokerCaps(
+    decimal? DailyLossCapCcy,
+    long? MaxUnits,
+    IReadOnlyDictionary<string, long>? SymbolUnitCaps);
+
 internal sealed class RiskRailRuntime
 {
     private readonly RiskConfig? _config;
@@ -46,6 +51,7 @@ internal sealed class RiskRailRuntime
     private readonly decimal? _brokerDailyLossCapCcy;
     private readonly long? _maxPositionUnits;
     private readonly IReadOnlyDictionary<string, long>? _symbolUnitCaps;
+    private readonly BrokerCaps? _brokerCaps;
     private readonly RiskCooldownConfig _cooldownConfig;
     private readonly Action<RiskRailTelemetrySnapshot>? _telemetryCallback;
     private readonly Func<DateTime> _clock;
@@ -55,6 +61,8 @@ internal sealed class RiskRailRuntime
     private long _maxPositionViolations;
     private readonly Dictionary<string, long> _symbolUnitUsage = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, long> _symbolUnitViolations = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, long> _brokerCapBlocksByGate = new(StringComparer.OrdinalIgnoreCase);
+    private long _brokerCapBlocksTotal;
     private DateTime? _cooldownActiveUntilUtc;
     private long _cooldownTriggersTotal;
     private DateTime? _cooldownLastTriggerUtc;
@@ -71,7 +79,8 @@ internal sealed class RiskRailRuntime
         Action<string, bool>? gateCallback,
         decimal startingEquity,
         Action<RiskRailTelemetrySnapshot>? telemetryCallback = null,
-        Func<DateTime>? clock = null)
+        Func<DateTime>? clock = null,
+        BrokerCaps? brokerCaps = null)
     {
         _config = config;
         _configHash = riskConfigHash ?? string.Empty;
@@ -85,6 +94,7 @@ internal sealed class RiskRailRuntime
         _symbolUnitCaps = config?.SymbolUnitCaps is { Count: > 0 } caps
             ? new Dictionary<string, long>(caps, StringComparer.OrdinalIgnoreCase)
             : null;
+        _brokerCaps = brokerCaps;
         _cooldownConfig = config?.Cooldown ?? RiskCooldownConfig.Disabled;
         _telemetryCallback = telemetryCallback;
         _clock = clock ?? (() => DateTime.UtcNow);
@@ -283,6 +293,7 @@ internal sealed class RiskRailRuntime
         {
             EvaluateTelemetryRails(instrument, timeframe, ts, requestedUnits, alerts);
         }
+        EvaluateBrokerGuardrail(instrument, timeframe, ts, requestedUnits, alerts, ref allowed);
         PublishTelemetry();
         return new RiskRailOutcome(allowed, allowed ? units : 0, alerts);
     }
@@ -344,6 +355,90 @@ internal sealed class RiskRailRuntime
         }
         // Always emit telemetry so metrics/health remain populated.
         EvaluateTelemetryRails(instrument, timeframe, ts, requestedUnits, alerts);
+    }
+
+    private void EvaluateBrokerGuardrail(string instrument, string timeframe, DateTime ts, long requestedUnits, List<RiskRailAlert> alerts, ref bool allowed)
+    {
+        if (requestedUnits <= 0 || _brokerCaps is null)
+        {
+            return;
+        }
+
+        var caps = _brokerCaps.Value;
+        var dailyCap = caps.DailyLossCapCcy ?? _brokerDailyLossCapCcy;
+        var maxUnits = caps.MaxUnits ?? _maxPositionUnits;
+        var symbolCaps = caps.SymbolUnitCaps ?? _symbolUnitCaps;
+
+        string? gate = null;
+        JsonElement payload = default;
+
+        if (dailyCap.HasValue && _brokerDailyLossUsedCcy >= dailyCap.Value)
+        {
+            gate = "daily_loss";
+            payload = JsonSerializer.SerializeToElement(new
+            {
+                instrument,
+                timeframe,
+                ts,
+                loss_used_ccy = _brokerDailyLossUsedCcy,
+                loss_cap_ccy = dailyCap.Value,
+                config_hash = _configHash
+            }, _jsonOptions);
+        }
+
+        var unitsAbs = Math.Abs(requestedUnits);
+        if (gate is null && maxUnits.HasValue)
+        {
+            var projectedGlobal = _symbolUnitUsage.Values.Sum() + unitsAbs;
+            if (projectedGlobal > maxUnits.Value)
+            {
+                gate = "global_units";
+                payload = JsonSerializer.SerializeToElement(new
+                {
+                    instrument,
+                    timeframe,
+                    ts,
+                    used_units = projectedGlobal,
+                    max_units = maxUnits.Value,
+                    config_hash = _configHash
+                }, _jsonOptions);
+            }
+        }
+
+        if (gate is null && symbolCaps is not null && symbolCaps.TryGetValue(instrument, out var symCap))
+        {
+            var current = _symbolUnitUsage.TryGetValue(instrument, out var v) ? v : 0L;
+            var projectedSymbol = current + unitsAbs;
+            if (projectedSymbol > symCap)
+            {
+                gate = $"symbol_units:{instrument}";
+                payload = JsonSerializer.SerializeToElement(new
+                {
+                    instrument,
+                    timeframe,
+                    ts,
+                    used_units = projectedSymbol,
+                    max_units = symCap,
+                    config_hash = _configHash
+                }, _jsonOptions);
+            }
+        }
+
+        if (gate is null)
+        {
+            return;
+        }
+
+        alerts.Add(CreateAlert("ALERT_RISK_BROKER_CAP_SOFT", payload, throttled: true));
+        _brokerCapBlocksTotal++;
+        _brokerCapBlocksByGate[gate] = _brokerCapBlocksByGate.TryGetValue(gate, out var existing) ? existing + 1 : 1;
+
+        if (_mode == RiskRailsMode.Live && allowed)
+        {
+            alerts.Add(CreateAlert("ALERT_RISK_BROKER_CAP_HARD", payload, throttled: false));
+            _gateCallback?.Invoke(gate, false);
+            allowed = false;
+        }
     }
 
     /// <summary>
@@ -733,6 +828,8 @@ internal sealed class RiskRailRuntime
             _symbolUnitCaps,
             symbolUsage,
             symbolViolations,
+            _brokerCapBlocksTotal,
+            new Dictionary<string, long>(_brokerCapBlocksByGate, StringComparer.OrdinalIgnoreCase),
             _cooldownConfig.Enabled,
             IsCooldownActive(),
             _cooldownActiveUntilUtc,

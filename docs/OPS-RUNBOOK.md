@@ -92,15 +92,15 @@ _Environment assumptions:_ OANDA practice account (`demo-oanda`), VPS `tiyf-vps-
 ## Scenario 5 – Risk Rails Block Orders (Demo Live Mode)
 
 ### How to Detect
-- `/metrics`: `engine_risk_blocks_total` and `engine_risk_blocks_total{gate="..."}`
-- `/health.risk_rails`: violation counters and cooldown block indicators.
+- `/metrics`: `engine_risk_blocks_total{gate="..."}` and broker guardrail counters `engine_broker_cap_blocks_total{gate="daily_loss|global_units|symbol_units:..."}`
+- `/health.risk_rails`: violation counters, cooldown block indicators, and `broker_cap_blocks_total`/`broker_cap_blocks_by_gate`.
 - Daily-monitor: `risk_blocks_total` (optional breakdown if appended).
 - Journal/events: `ALERT_RISK_*_HARD` entries.
 
 ### What to Do
-1. `curl -s http://127.0.0.1:8080/metrics | rg 'engine_risk_blocks_total'`.
-2. Check `/health.risk_rails` for which gate triggered (broker_daily, max_position, symbol caps, cooldown).
-3. If blocks align with demo caps (expected), no action required; entries resume when rails clear.
+1. `curl -s http://127.0.0.1:8080/metrics | rg 'engine_risk_blocks_total|engine_broker_cap_blocks_total'`.
+2. Check `/health.risk_rails` for which gate triggered (broker_daily, global_units, symbol caps, cooldown) and whether `blocking_enabled` is true (demo only).
+3. If blocks align with demo caps (expected), no action required; entries resume when rails clear. Exits are always allowed.
 4. If blocks appear on non-demo configs (should not happen), stop engine and escalate.
 
 ### When to Escalate

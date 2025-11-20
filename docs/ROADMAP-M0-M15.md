@@ -3,7 +3,7 @@
 ## Current Position (Nov 2025)
 - The VPS host (`tiyf-vps-uk-01`) runs the demo OANDA service (H1/H4) with GVRS live gating enabled only for **entries**; exits always proceed.
 - News feeds remain file-backed by default; HTTP adapters exist but are disabled unless explicitly configured.
-- M11 Phase‑A risk rails (broker daily cap, global units, symbol caps, cooldown) are telemetry-only: alerts/counters surface through `/metrics`, `/health`, daily-monitor, and proof artifacts, but there is no runtime blocking yet.
+- M11 risk rails: Phase‑A telemetry is complete; Phase‑B live gating is enabled on demo configs only (broker/global/symbol/cooldown), with exits always allowed and real-money configs still telemetry-only.
 - Promotion framework Phases 1–2 (config hashing, telemetry, NewsProbe integration) are active, yet promotion decisions are not enforced; they remain observability-only.
 - No real-money trading is running; all enforcement is scoped to the demo environment, and any live blocking requires an explicit config flip plus proof.
 
@@ -145,14 +145,14 @@
 - **Tracking issue(s):** (New) Roadmap doc + future Phase‑B tracking TBD
 
 ### M11-B — Risk Rails Live Blocking
-**Status:** Done — live enforcement on demo configs only; exits always allowed.
+**Status:** In progress — live broker/global/symbol/cooldown gates on demo configs; exits always allowed; real-money configs remain telemetry-only until Ops approves cutover.
 
-**Summary:** Broker/global/symbol/cooldown rails now block entries when caps are breached; telemetry and alerts remain compatible with Phase A. Real-money configs stay telemetry-only.
+**Summary:** Broker guardrail (daily loss/global/symbol caps) and existing rails block new entries in live mode, emitting `ALERT_RISK_*_HARD` while retaining Phase‑A telemetry. Demo configs carry live caps; real-money remains telemetry/disabled.
 
 **Evidence**
-- **Tag(s):** `v1.11.1-m11b-risk-rails-live`
-- **Key PR(s):** #122
-- **Proof workflow(s):** `m11-risk-rails-proof` – [run 19529773407](https://github.com/xforscom/TIYF.ENGINE/actions/runs/19529773407)
+- **Tag(s):** Pending (post-merge)
+- **Key PR(s):** #122 + follow-ups (broker guardrail)
+- **Proof workflow(s):** `m11-risk-rails-proof` (branch and main runs)
 - **Tracking issue(s):** #117
 
 ### M12 — Promotion Runtime
