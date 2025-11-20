@@ -51,6 +51,8 @@ static PromotionShadowSnapshot? RunScenario(RiskConfig riskConfig, JsonElement s
 {
     var runtime = new PromotionShadowRuntime(riskConfig.Promotion);
     var tracker = new PositionTracker();
+    DateTime evaluationUtc = DateTime.UtcNow;
+    DateTime? latestClose = null;
 
     if (scenarioEl.TryGetProperty("trades", out var tradesEl) && tradesEl.ValueKind == JsonValueKind.Array)
     {
@@ -63,6 +65,10 @@ static PromotionShadowSnapshot? RunScenario(RiskConfig riskConfig, JsonElement s
             var exit = trade.GetProperty("exit_price").GetDecimal();
             var openUtc = ParseUtc(trade.GetProperty("open_utc").GetString() ?? throw new InvalidOperationException("open_utc required"));
             var closeUtc = ParseUtc(trade.GetProperty("close_utc").GetString() ?? throw new InvalidOperationException("close_utc required"));
+            if (!latestClose.HasValue || closeUtc > latestClose.Value)
+            {
+                latestClose = closeUtc;
+            }
             var decisionId = trade.GetProperty("decision_id").GetString() ?? Guid.NewGuid().ToString("N");
             tracker.OnFill(new ExecutionFill(decisionId, symbol, side, entry, units, openUtc), Schema.Version, riskConfig.RiskConfigHash ?? string.Empty, "promotion-probe", null);
             var exitSide = side == TradeSide.Buy ? TradeSide.Sell : TradeSide.Buy;
@@ -70,7 +76,12 @@ static PromotionShadowSnapshot? RunScenario(RiskConfig riskConfig, JsonElement s
         }
     }
 
-    return runtime.Evaluate(tracker);
+    if (latestClose.HasValue)
+    {
+        evaluationUtc = latestClose.Value;
+    }
+
+    return runtime.Evaluate(tracker, evaluationUtc);
 }
 
 static TradeSide ParseSide(string value)

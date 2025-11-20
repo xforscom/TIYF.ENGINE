@@ -708,7 +708,7 @@ public sealed class EngineLoop
                     _riskRails?.UpdateBar(bar, _positions);
                     if (_promotionRuntime is not null)
                     {
-                        var snapshot = _promotionRuntime.Evaluate(_positions);
+                        var snapshot = _promotionRuntime.Evaluate(_positions, bar.EndUtc);
                         _onPromotionShadow?.Invoke(snapshot);
                     }
 

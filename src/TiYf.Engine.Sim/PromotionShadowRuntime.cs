@@ -20,31 +20,39 @@ public sealed class PromotionShadowRuntime
     private readonly PromotionConfig _config;
     private int _promotions;
     private int _demotions;
-    private int _lastProcessedTradeCount;
+    private DateTime _lastProcessedCloseUtc = DateTime.MinValue;
 
     public PromotionShadowRuntime(PromotionConfig config)
     {
         _config = config ?? PromotionConfig.Default;
     }
 
-    public PromotionShadowSnapshot Evaluate(PositionTracker? positions)
+    public PromotionShadowSnapshot Evaluate(PositionTracker? positions, DateTime evaluationUtc)
     {
         if (_config is null || !_config.Enabled)
         {
             return new PromotionShadowSnapshot(0, 0, 0, 0m, _config?.ProbationDays ?? 0, _config?.MinTrades ?? 0, _config?.PromotionThreshold ?? 0m, _config?.DemotionThreshold ?? 0m, _config?.ShadowCandidates.ToArray() ?? Array.Empty<string>());
         }
 
+        var normalizedEval = evaluationUtc.Kind == DateTimeKind.Utc ? evaluationUtc : DateTime.SpecifyKind(evaluationUtc, DateTimeKind.Utc);
+        var cutoff = _config.ProbationDays > 0 ? normalizedEval.AddDays(-_config.ProbationDays) : DateTime.MinValue;
         var trades = positions?.Completed ?? Array.Empty<CompletedTrade>();
-        var tradeCount = trades.Count;
+        var filtered = trades
+            .Where(t => DateTime.SpecifyKind(t.UtcTsClose, DateTimeKind.Utc) >= cutoff)
+            .OrderBy(t => t.UtcTsClose)
+            .ToList();
+        var tradeCount = filtered.Count;
         decimal winRatio = 0m;
         if (tradeCount > 0)
         {
-            var wins = trades.Count(t => t.PnlCcy > 0m);
+            var wins = filtered.Count(t => t.PnlCcy > 0m);
             winRatio = (decimal)wins / tradeCount;
         }
 
-        var hasNewTrades = tradeCount > _lastProcessedTradeCount;
-        if (hasNewTrades && tradeCount >= _config.MinTrades)
+        var newestClose = tradeCount > 0 ? DateTime.SpecifyKind(filtered[^1].UtcTsClose, DateTimeKind.Utc) : (DateTime?)null;
+        var hasNewerClose = newestClose.HasValue && newestClose.Value > _lastProcessedCloseUtc;
+        var eligible = tradeCount >= _config.MinTrades && hasNewerClose;
+        if (eligible)
         {
             if (winRatio >= _config.PromotionThreshold)
             {
@@ -54,7 +62,7 @@ public sealed class PromotionShadowRuntime
             {
                 _demotions++;
             }
-            _lastProcessedTradeCount = tradeCount;
+            _lastProcessedCloseUtc = newestClose!.Value;
         }
 
         return new PromotionShadowSnapshot(
