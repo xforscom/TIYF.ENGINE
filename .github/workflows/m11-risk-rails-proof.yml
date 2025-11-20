@@ -84,17 +84,11 @@ jobs:
           grep -F "hard_blocks=" proof-artifacts/m11-risk-rails/live/summary.txt
           grep -F "engine_risk_blocks_total" proof-artifacts/m11-risk-rails/live/metrics.txt
           grep -F "ALERT_RISK_" proof-artifacts/m11-risk-rails/live/events.csv
-          python3 - <<'PY'
-          import re
-          metrics = open('proof-artifacts/m11-risk-rails/live/metrics.txt').read().splitlines()
-          total = 0
-          for line in metrics:
-            m = re.match(r'engine_risk_blocks_total(?:\\{.*\\})?\\s+(\\d+)', line.strip())
-            if m:
-              total = max(total, int(m.group(1)))
-          if total < 1:
-            raise SystemExit('expected engine_risk_blocks_total >= 1 in live scenario')
-          PY
+          value=$(awk '/^engine_risk_blocks_total[ {]/{print $NF; exit}' proof-artifacts/m11-risk-rails/live/metrics.txt)
+          if [ -z "$value" ] || [ "$value" -lt 1 ]; then
+            echo "expected engine_risk_blocks_total >= 1, got '${value:-empty}'"
+            exit 1
+          fi
 
       - name: Upload proof artifacts
         if: always()
