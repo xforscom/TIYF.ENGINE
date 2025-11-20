@@ -134,6 +134,10 @@ jobs:
           $riskEventsTotal = if ($health.PSObject.Properties.Name -contains 'risk_events_total') { [int64]$health.risk_events_total } else { 0 }
           $alertsTotal = if ($health.PSObject.Properties.Name -contains 'alerts_total') { [int64]$health.alerts_total } else { 0 }
           $riskConfigHash = if ($health.PSObject.Properties.Name -contains 'risk_config_hash') { [string]$health.risk_config_hash } else { '' }
+          $configId = ''
+          if ($health.PSObject.Properties.Name -contains 'config') {
+            $configId = [string]$health.config.id
+          }
           $riskBlocksTotal = if ($health.PSObject.Properties.Name -contains 'risk_blocks_total') { [int64]$health.risk_blocks_total } else { 0 }
           $riskThrottlesTotal = if ($health.PSObject.Properties.Name -contains 'risk_throttles_total') { [int64]$health.risk_throttles_total } else { 0 }
           $orderRejectsTotal = if ($health.PSObject.Properties.Name -contains 'order_rejects_total') { [int64]$health.order_rejects_total } else { 0 }
@@ -270,6 +274,9 @@ jobs:
           )
           if ($gvrsGateBlocks -gt 0) {
             $fields += "gvrs_gate_blocks=$gvrsGateBlocks"
+          }
+          if (-not [string]::IsNullOrWhiteSpace($configId)) {
+            $fields += "config_id=$configId"
           }
           $line = $fields -join ' '
           Write-Host $line

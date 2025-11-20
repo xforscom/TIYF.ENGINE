@@ -213,6 +213,26 @@ _Environment assumptions:_ OANDA practice account (`demo-oanda`), VPS `tiyf-vps-
 ### When to Escalate
 - If secrets fail to load even though env conf is correct.
 
+## Scenario 12 – News Blackout Looks Wrong (Demo Only)
+
+### How to Detect
+- `/health.news.blackout_active` stuck true/false or `events_fetched_total` not increasing.
+- `/metrics` missing `engine_news_events_fetched_total`, `engine_news_blackout_windows_total`, or `engine_news_source{type="file"}`.
+- Daily-monitor tail lacks news fields or shows stale `news.last_event_utc`.
+
+### What to Do
+1. Confirm config identity: `/health.config.id` matches the demo config id; news source type remains `file` unless intentionally testing HTTP.
+2. Inspect `/health.news` window_start/window_end and `last_event_utc`; compare to the expected fixture (proof/m9-news-events.json) if running the proof harness.
+3. If events_fetched_total is 0 while the stub file exists:
+   - SSH to VPS and `ls -l /opt/tiyf/news-stub/today.json`; ensure readable.
+   - Restart the engine only after the file is present (see Scenario 7).
+4. If blackout_active toggles unexpectedly, replace the fixture with the known-good proof file and restart.
+
+### When to Escalate
+- `/health.news` fails to load after restart.
+- News source flips to `http` without an explicit config change.
+- Blackout timestamps are garbage or news metrics disappear from `/metrics`.
+
 ---
 
 _Remember: demo environment only. When in doubt, stop the engine, gather logs (`journalctl`, `/health`, daily-monitor run IDs), and alert the dev on-call._ 

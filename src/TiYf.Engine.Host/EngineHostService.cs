@@ -13,6 +13,7 @@ public sealed class EngineHostService : BackgroundService
     private readonly IServiceProvider _services;
     private readonly ILogger<EngineHostService> _logger;
     private readonly TimeSpan _heartbeatInterval;
+    private readonly bool _enableLoop;
     private IConnectableExecutionAdapter? _executionAdapter;
 
     public EngineHostService(
@@ -30,6 +31,7 @@ public sealed class EngineHostService : BackgroundService
             heartbeat = TimeSpan.FromSeconds(30);
         }
         _heartbeatInterval = heartbeat;
+        _enableLoop = options?.Value.EnableContinuousLoop ?? true;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -64,7 +66,7 @@ public sealed class EngineHostService : BackgroundService
 
         _logger.LogInformation("EngineHostService starting (adapter={Adapter})", _state.Adapter);
 
-        if (_executionAdapter != null)
+        if (_executionAdapter != null && _enableLoop)
         {
             try
             {
@@ -83,7 +85,15 @@ public sealed class EngineHostService : BackgroundService
         else
         {
             _state.MarkConnected(true);
-            _logger.LogInformation("host: connected adapter={Adapter} broker_mode=stub", _state.Adapter);
+            var brokerMode = cTraderSettings is not null ? "ctrader" : oandaSettings is not null ? "oanda" : "stub";
+            if (!_enableLoop)
+            {
+                _logger.LogInformation("host: loop disabled; skipping adapter connect (adapter={Adapter} broker_mode={Mode})", _state.Adapter, brokerMode);
+            }
+            else
+            {
+                _logger.LogInformation("host: connected adapter={Adapter} broker_mode=stub", _state.Adapter);
+            }
         }
 
         while (!stoppingToken.IsCancellationRequested)

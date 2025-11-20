@@ -33,6 +33,8 @@ public static class RiskConfigParser
         decimal? legacyDrawdown = TryNumber(riskEl, "max_run_drawdown_ccy", out var dd) ? dd : null;
         var maxRunDrawdown = globalDrawdown?.MaxDrawdown ?? legacyDrawdown;
         var newsBlackout = ParseNewsBlackout(riskEl);
+        var newsProviderRaw = TryString(riskEl, "news_provider", out var provider) ? provider : null;
+        var newsProvider = string.IsNullOrWhiteSpace(newsProviderRaw) ? "file" : NewsSourceTypeHelper.Normalize(newsProviderRaw);
         var globalVolatilityGate = ParseGlobalVolatilityGate(riskEl);
         var promotion = ParsePromotionConfig(riskEl);
         decimal? brokerDailyLossCap = TryNumber(riskEl, "broker_daily_loss_cap_ccy", out var brokerCap) && brokerCap > 0 ? brokerCap : null;
@@ -59,6 +61,7 @@ public static class RiskConfigParser
             DailyCap = dailyCap,
             GlobalDrawdown = globalDrawdown ?? (legacyDrawdown.HasValue ? new GlobalDrawdownConfig(legacyDrawdown.Value) : null),
             NewsBlackout = newsBlackout,
+            NewsProvider = newsProvider,
             Promotion = promotion,
             GlobalVolatilityGate = globalVolatilityGate,
             BrokerDailyLossCapCcy = brokerDailyLossCap,

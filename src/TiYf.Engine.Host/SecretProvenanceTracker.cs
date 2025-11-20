@@ -59,6 +59,7 @@ internal sealed class SecretProvenanceTracker
         {
             "env" => "env",
             "config" => "config",
+            "config_ignored" => "config",
             "missing" => "missing",
             "default" => "default",
             _ => "unknown"

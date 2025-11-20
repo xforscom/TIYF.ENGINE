@@ -28,7 +28,7 @@ public class BarV1EmissionTests
         sb.AppendLine($"{aligned.AddMinutes(1):O},101.2,1");
         File.WriteAllText(tickFile, sb.ToString());
         var journalRoot = Path.Combine(root, "out");
-        var cfg = new EngineConfig("1.1.0", "RUN", "inst.csv", "ticks.csv", journalRoot, "BAR_V1", "sequence", Instruments: new[] { "I1" }, Intervals: new[] { "1m" });
+        var cfg = new EngineConfig("1.1.0", "RUN", "barv1-test", "inst.csv", "ticks.csv", journalRoot, "BAR_V1", "sequence", Instruments: new[] { "I1" }, Intervals: new[] { "1m" });
 
         // Build runtime pieces manually (avoid needing external config file)
         var (config, configHash, _) = (cfg, ConfigHash.Compute(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(cfg)), (System.Text.Json.JsonDocument?)null);
@@ -41,6 +41,8 @@ public class BarV1EmissionTests
         var interval = new BarInterval(TimeSpan.FromMinutes(1));
         var builders = new Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> { { (new InstrumentId("I1"), interval), new IntervalBarBuilder(interval) } };
         var loop = new EngineLoop(clock, builders, tracker, journalWriter, ticks, cfg.BarOutputEventType, schemaVersion: cfg.SchemaVersion);
+        var barEventField = typeof(EngineLoop).GetField("_barEventType", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        Assert.Equal("BAR_V1", barEventField?.GetValue(loop));
         await loop.RunAsync();
         await journalWriter.DisposeAsync();
 

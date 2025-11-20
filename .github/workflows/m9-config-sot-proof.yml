@@ -66,10 +66,16 @@ jobs:
       - name: Verify config + secret telemetry
         run: |
           set -euo pipefail
-          jq -e '.config.path != null and .config.hash != ""' proof-artifacts/m9-config-sot/health.json > /dev/null
+          jq -e '.config.path != null and .config.hash != "" and .config.id == \"demo-oanda-v1\"' proof-artifacts/m9-config-sot/health.json > /dev/null
           jq -e '.secrets | has("oanda_demo")' proof-artifacts/m9-config-sot/health.json > /dev/null
           grep -F 'engine_config_hash' proof-artifacts/m9-config-sot/metrics.txt
+          grep -F 'engine_config_id{config_id=\"demo-oanda-v1\"} 1' proof-artifacts/m9-config-sot/metrics.txt
           grep -F 'engine_secret_provenance{integration="oanda_demo",source="env"} 1' proof-artifacts/m9-config-sot/metrics.txt
+          if grep -F 'demo-token' proof-artifacts/m9-config-sot/host.log; then
+            echo "leaked secret token in logs"
+            exit 1
+          fi
+          grep -F 'secret_provenance integration=oanda_demo sources=env' proof-artifacts/m9-config-sot/host.log
           jq -r '.config.path' proof-artifacts/m9-config-sot/health.json > proof-artifacts/m9-config-sot/summary.txt
 
       - name: Stop host

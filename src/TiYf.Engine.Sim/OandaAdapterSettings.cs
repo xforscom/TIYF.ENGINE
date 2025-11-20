@@ -66,6 +66,45 @@ public sealed record OandaAdapterSettings(
             return fallback;
         }
 
+        static string ResolveSecret(JsonElement node, string propertyName, string envVar, string fallback = "", Action<string>? recordSource = null)
+        {
+            if (node.TryGetProperty(propertyName, out var prop) && prop.ValueKind == JsonValueKind.String)
+            {
+                var value = prop.GetString() ?? string.Empty;
+                if (value.StartsWith("env:", StringComparison.OrdinalIgnoreCase))
+                {
+                    var env = Environment.GetEnvironmentVariable(value[4..]);
+                    if (!string.IsNullOrWhiteSpace(env))
+                    {
+                        recordSource?.Invoke("env");
+                        return env!;
+                    }
+                    recordSource?.Invoke("missing");
+                    return fallback;
+                }
+
+                recordSource?.Invoke("config_ignored");
+                return fallback;
+            }
+
+            if (!string.IsNullOrWhiteSpace(envVar))
+            {
+                var env = Environment.GetEnvironmentVariable(envVar);
+                if (!string.IsNullOrWhiteSpace(env))
+                {
+                    recordSource?.Invoke("env");
+                    return env!;
+                }
+                recordSource?.Invoke("missing");
+            }
+            else
+            {
+                recordSource?.Invoke("default");
+            }
+
+            return fallback;
+        }
+
         static bool ResolveBool(JsonElement node, string propertyName, bool fallback)
         {
             if (node.TryGetProperty(propertyName, out var prop))
@@ -119,7 +158,7 @@ public sealed record OandaAdapterSettings(
         }
 
         var baseUrl = ResolveString(cfgNode, "baseUrl", string.Empty, defaults.BaseUri.ToString());
-        var accessToken = ResolveString(cfgNode, "accessToken", lower == "oanda-live" ? "OANDA_LIVE_TOKEN" : "OANDA_PRACTICE_TOKEN", defaults.AccessToken, recordSecretSource);
+        var accessToken = ResolveSecret(cfgNode, "accessToken", lower == "oanda-live" ? "OANDA_LIVE_TOKEN" : "OANDA_PRACTICE_TOKEN", defaults.AccessToken, recordSecretSource);
         var accountId = ResolveString(cfgNode, "accountId", lower == "oanda-live" ? "OANDA_LIVE_ACCOUNT_ID" : "OANDA_PRACTICE_ACCOUNT_ID", defaults.AccountId, recordSecretSource);
 
         var useMockFallback = string.IsNullOrWhiteSpace(accessToken) ? true : defaults.UseMock;

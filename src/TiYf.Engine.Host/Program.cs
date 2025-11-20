@@ -16,8 +16,14 @@ var configPath = ResolveConfigPath(args);
 var (engineConfig, configHash, rawConfig) = EngineConfigLoader.Load(configPath);
 var secretTracker = new SecretProvenanceTracker();
 var adapterContext = ResolveAdapterContext(engineConfig, rawConfig, secretTracker);
-adapterContext.State.SetConfigSource(configPath, configHash);
-adapterContext.State.UpdateSecretProvenance(secretTracker.CreateSnapshot());
+adapterContext.State.SetConfigSource(configPath, configHash, engineConfig.ConfigId);
+var initialSecretSnapshot = secretTracker.CreateSnapshot();
+adapterContext.State.UpdateSecretProvenance(initialSecretSnapshot);
+foreach (var kvp in initialSecretSnapshot)
+{
+    var sources = string.Join(",", kvp.Value ?? Array.Empty<string>());
+    Console.WriteLine($"secret_provenance integration={kvp.Key} sources={sources}");
+}
 
 var builder = WebApplication.CreateBuilder(args);
 var portEnv = Environment.GetEnvironmentVariable("ENGINE_HOST_PORT");
@@ -262,4 +268,3 @@ internal sealed record AdapterContext(string SourceAdapter, CTraderAdapterSettin
 internal sealed record EngineHostConfiguration(string ConfigPath, string ConfigHash);
 
 public partial class Program;
-

@@ -20,6 +20,7 @@ public sealed record GvrsGateConfig(bool Enabled = false);
 public sealed record EngineConfig(
     string SchemaVersion,
     string RunId,
+    [property: JsonPropertyName("config_id")] string ConfigId,
     string InstrumentFile,
     string InputTicksFile,
     string JournalRoot,
@@ -43,7 +44,28 @@ public static class EngineConfigLoader
         var hash = ConfigHash.Compute(rawBytes);
         var doc = JsonDocument.Parse(rawBytes);
         var cfg = doc.Deserialize<EngineConfig>() ?? throw new InvalidOperationException("Invalid config");
+        if (string.IsNullOrWhiteSpace(cfg.ConfigId))
+        {
+            var root = doc.RootElement;
+            var id = TryGetString(root, "config_id") ?? TryGetString(root, "config_version") ?? TryGetString(root, "configId");
+            if (!string.IsNullOrWhiteSpace(id))
+            {
+                cfg = cfg with { ConfigId = id };
+            }
+            else
+            {
+                var fileName = Path.GetFileNameWithoutExtension(path);
+                cfg = cfg with { ConfigId = string.IsNullOrWhiteSpace(fileName) ? "unknown" : fileName };
+            }
+        }
         return (cfg, hash, doc);
+    }
+
+    private static string? TryGetString(JsonElement el, string name)
+    {
+        return el.TryGetProperty(name, out var prop) && prop.ValueKind == JsonValueKind.String
+            ? prop.GetString()
+            : null;
     }
 }
 
