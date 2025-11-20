@@ -44,14 +44,17 @@ jobs:
           dotnet run --project src/TiYf.Engine.Host/TiYf.Engine.Host.csproj --configuration Release -- --config sample-config.demo-oanda.json > host.log 2>&1 &
           HOST_PID=$!
           echo $HOST_PID > host.pid
-          for _ in $(seq 1 30); do
-            if curl -fsS "http://localhost:8095/health" > /dev/null; then
+          ready=0
+          for _ in $(seq 1 40); do
+            if curl -fsS "http://localhost:8095/health" > /dev/null 2>&1; then
+              ready=1
               break
             fi
             sleep 1
           done
-          if ! kill -0 "$HOST_PID" 2>/dev/null; then
-            cat host.log
+          if [ $ready -ne 1 ]; then
+            echo "host not reachable after wait" >&2
+            cat host.log || true
             exit 1
           fi
 
@@ -66,7 +69,7 @@ jobs:
       - name: Verify config + secret telemetry
         run: |
           set -euo pipefail
-          jq -e '.config.path != null and .config.hash != "" and .config.id == \"demo-oanda-v1\"' proof-artifacts/m9-config-sot/health.json > /dev/null
+          jq -e '.config.path != null and .config.hash != "" and .config.id == "demo-oanda-v1"' proof-artifacts/m9-config-sot/health.json > /dev/null
           jq -e '.secrets | has("oanda_demo")' proof-artifacts/m9-config-sot/health.json > /dev/null
           grep -F 'engine_config_hash' proof-artifacts/m9-config-sot/metrics.txt
           grep -F 'engine_config_id{config_id=\"demo-oanda-v1\"} 1' proof-artifacts/m9-config-sot/metrics.txt
@@ -91,5 +94,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: m9-config-sot-proof-${{ github.ref_name }}
+          name: m9-config-sot-proof
           path: proof-artifacts/m9-config-sot
