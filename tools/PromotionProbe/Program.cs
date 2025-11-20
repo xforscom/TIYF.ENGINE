@@ -51,7 +51,7 @@ static PromotionShadowSnapshot? RunScenario(RiskConfig riskConfig, JsonElement s
 {
     var runtime = new PromotionShadowRuntime(riskConfig.Promotion);
     var tracker = new PositionTracker();
-    DateTime evaluationUtc = DateTime.UtcNow;
+    DateTime evaluationUtc = DateTime.SpecifyKind(new DateTime(2025, 1, 1, 0, 0, 0), DateTimeKind.Utc);
     DateTime? latestClose = null;
 
     if (scenarioEl.TryGetProperty("trades", out var tradesEl) && tradesEl.ValueKind == JsonValueKind.Array)

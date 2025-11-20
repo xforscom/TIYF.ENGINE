@@ -15,6 +15,10 @@ public sealed record PromotionShadowSnapshot(
     decimal DemotionThreshold,
     string[] Candidates);
 
+/// <summary>
+/// Shadow-only promotion evaluator that tracks promotion/demotion readiness over a probation window
+/// without affecting live routing. Counters increment only when newer trades are observed.
+/// </summary>
 public sealed class PromotionShadowRuntime
 {
     private readonly PromotionConfig _config;

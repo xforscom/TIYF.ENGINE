@@ -22,14 +22,15 @@ public class PromotionShadowRuntimeTests
             ConfigHash: "hash");
         var runtime = new PromotionShadowRuntime(promo);
         var tracker = new PositionTracker();
-        tracker.OnFill(new ExecutionFill("P1", "EURUSD", TradeSide.Buy, 1.0m, 10_000, DateTime.UtcNow.AddHours(-3)), Schema.Version, "hash", "test", null);
-        tracker.OnFill(new ExecutionFill("P1", "EURUSD", TradeSide.Sell, 1.1m, 10_000, DateTime.UtcNow.AddHours(-2)), Schema.Version, "hash", "test", null);
-        tracker.OnFill(new ExecutionFill("P2", "EURUSD", TradeSide.Buy, 1.0m, 10_000, DateTime.UtcNow.AddHours(-2)), Schema.Version, "hash", "test", null);
-        tracker.OnFill(new ExecutionFill("P2", "EURUSD", TradeSide.Sell, 1.2m, 10_000, DateTime.UtcNow.AddHours(-1)), Schema.Version, "hash", "test", null);
-        tracker.OnFill(new ExecutionFill("P3", "EURUSD", TradeSide.Buy, 1.0m, 10_000, DateTime.UtcNow.AddHours(-1)), Schema.Version, "hash", "test", null);
-        tracker.OnFill(new ExecutionFill("P3", "EURUSD", TradeSide.Sell, 0.9m, 10_000, DateTime.UtcNow.AddMinutes(-30)), Schema.Version, "hash", "test", null);
+        var now = new DateTime(2025, 2, 1, 12, 0, 0, DateTimeKind.Utc);
+        tracker.OnFill(new ExecutionFill("P1", "EURUSD", TradeSide.Buy, 1.0m, 10_000, now.AddHours(-3)), Schema.Version, "hash", "test", null);
+        tracker.OnFill(new ExecutionFill("P1", "EURUSD", TradeSide.Sell, 1.1m, 10_000, now.AddHours(-2)), Schema.Version, "hash", "test", null);
+        tracker.OnFill(new ExecutionFill("P2", "EURUSD", TradeSide.Buy, 1.0m, 10_000, now.AddHours(-2)), Schema.Version, "hash", "test", null);
+        tracker.OnFill(new ExecutionFill("P2", "EURUSD", TradeSide.Sell, 1.2m, 10_000, now.AddHours(-1)), Schema.Version, "hash", "test", null);
+        tracker.OnFill(new ExecutionFill("P3", "EURUSD", TradeSide.Buy, 1.0m, 10_000, now.AddHours(-1)), Schema.Version, "hash", "test", null);
+        tracker.OnFill(new ExecutionFill("P3", "EURUSD", TradeSide.Sell, 0.9m, 10_000, now.AddMinutes(-30)), Schema.Version, "hash", "test", null);
 
-        var snapshot = runtime.Evaluate(tracker, DateTime.UtcNow);
+        var snapshot = runtime.Evaluate(tracker, now);
 
         Assert.Equal(1, snapshot.PromotionsTotal);
         Assert.Equal(0, snapshot.DemotionsTotal);
@@ -50,12 +51,13 @@ public class PromotionShadowRuntimeTests
             ConfigHash: "hash");
         var runtime = new PromotionShadowRuntime(promo);
         var tracker = new PositionTracker();
-        tracker.OnFill(new ExecutionFill("P1", "EURUSD", TradeSide.Buy, 1.0m, 10_000, DateTime.UtcNow.AddHours(-2)), Schema.Version, "hash", "test", null);
-        tracker.OnFill(new ExecutionFill("P1", "EURUSD", TradeSide.Sell, 0.8m, 10_000, DateTime.UtcNow.AddHours(-1)), Schema.Version, "hash", "test", null);
-        tracker.OnFill(new ExecutionFill("P2", "EURUSD", TradeSide.Buy, 1.0m, 10_000, DateTime.UtcNow.AddHours(-1)), Schema.Version, "hash", "test", null);
-        tracker.OnFill(new ExecutionFill("P2", "EURUSD", TradeSide.Sell, 0.9m, 10_000, DateTime.UtcNow.AddMinutes(-30)), Schema.Version, "hash", "test", null);
+        var now = new DateTime(2025, 2, 1, 12, 0, 0, DateTimeKind.Utc);
+        tracker.OnFill(new ExecutionFill("P1", "EURUSD", TradeSide.Buy, 1.0m, 10_000, now.AddHours(-2)), Schema.Version, "hash", "test", null);
+        tracker.OnFill(new ExecutionFill("P1", "EURUSD", TradeSide.Sell, 0.8m, 10_000, now.AddHours(-1)), Schema.Version, "hash", "test", null);
+        tracker.OnFill(new ExecutionFill("P2", "EURUSD", TradeSide.Buy, 1.0m, 10_000, now.AddHours(-1)), Schema.Version, "hash", "test", null);
+        tracker.OnFill(new ExecutionFill("P2", "EURUSD", TradeSide.Sell, 0.9m, 10_000, now.AddMinutes(-30)), Schema.Version, "hash", "test", null);
 
-        var snapshot = runtime.Evaluate(tracker, DateTime.UtcNow);
+        var snapshot = runtime.Evaluate(tracker, now);
 
         Assert.Equal(0, snapshot.PromotionsTotal);
         Assert.Equal(1, snapshot.DemotionsTotal);
@@ -64,7 +66,7 @@ public class PromotionShadowRuntimeTests
     [Fact]
     public void ShadowRuntime_Ignores_Trades_Outside_Probation_Window()
     {
-        var now = DateTime.UtcNow;
+        var now = new DateTime(2025, 2, 1, 12, 0, 0, DateTimeKind.Utc);
         var promo = new PromotionConfig(
             Enabled: true,
             ShadowCandidates: new[] { "A" },
@@ -89,5 +91,6 @@ public class PromotionShadowRuntimeTests
         Assert.Equal(2, snapshot.TradeCount); // only recent trades considered
         Assert.Equal(1, snapshot.PromotionsTotal); // promotion triggered on recent wins
         Assert.Equal(0, snapshot.DemotionsTotal);
+        Assert.Equal(1.0m, snapshot.WinRatio);
     }
 }
