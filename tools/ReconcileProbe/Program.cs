@@ -29,8 +29,8 @@ var summary = $"reconcile_summary mismatches={mismatches} unknown={unknown} brok
 var state = new EngineHostState("reconcile-proof", Array.Empty<string>());
 state.MarkConnected(true);
 state.RecordReconciliationTelemetry(
-    mismatches > 0 ? ReconciliationStatus.Mismatch : ReconciliationStatus.Match,
-    mismatches,
+    (mismatches > 0 || brokerOrphans > 0) ? ReconciliationStatus.Mismatch : ReconciliationStatus.Match,
+    mismatches + brokerOrphans,
     utcNow);
 
 var metrics = EngineMetricsFormatter.Format(state.CreateMetricsSnapshot());

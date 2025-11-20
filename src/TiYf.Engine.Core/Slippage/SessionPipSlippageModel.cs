@@ -33,8 +33,8 @@ public sealed class SessionPipSlippageModel : ISlippageModel
             return intendedPrice;
         }
 
-        var pipValue = intendedPrice / 10_000m;
-        var delta = pipValue * pips;
+        var pipSize = ResolvePipSize(instrumentId);
+        var delta = pipSize * pips;
         var direction = isBuy ? 1m : -1m;
         return intendedPrice + (delta * direction);
     }
@@ -53,6 +53,22 @@ public sealed class SessionPipSlippageModel : ISlippageModel
         }
 
         return _defaultPips;
+    }
+
+    private static decimal ResolvePipSize(string instrumentId)
+    {
+        if (string.IsNullOrWhiteSpace(instrumentId))
+        {
+            return 0.0001m;
+        }
+
+        var upper = instrumentId.ToUpperInvariant();
+        if (upper.Contains("JPY"))
+        {
+            return 0.01m;
+        }
+
+        return 0.0001m;
     }
 
     private static string ResolveSessionBucket(DateTime utcNow)

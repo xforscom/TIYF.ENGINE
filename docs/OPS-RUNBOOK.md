@@ -161,6 +161,18 @@ _Environment assumptions:_ OANDA practice account (`demo-oanda`), VPS `tiyf-vps-
 - `/health` shows data but daily-monitor consistently omits it (indicates workflow bug).
 
 ## Scenario 9 – Adapter Feed Credentials / Secrets
+### How to Detect
+- `/health.secrets` contains provenance labels (`env`, `missing`).
+- Metrics: `engine_secret_provenance{integration="...",source="..."}`.
+
+### What to Do
+1. Verify env vars are set (e.g., `echo $OANDA_PRACTICE_TOKEN`).
+2. If secrets missing, set env or restart after injecting via CI/Secrets.
+3. Do not hardcode secrets in configs.
+
+### When to Escalate
+- Secrets unavailable on VPS and cannot be restored quickly.
+- Suspicion of leaked/rotated secrets without audit trail.
 
 ## Scenario 10 – Reconciliation Drift
 
