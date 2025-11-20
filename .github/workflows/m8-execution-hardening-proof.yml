@@ -28,8 +28,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure .NET install dir
+      - name: Compute safe ref name
         id: vars
+        run: |
+          set -euo pipefail
+          safe_ref="${GITHUB_REF_NAME//\//-}"
+          echo "safe_ref=$safe_ref" >> "$GITHUB_OUTPUT"
+
+      - name: Configure .NET install dir
         uses: ./.github/actions/configure-dotnet
 
       - name: Setup .NET
