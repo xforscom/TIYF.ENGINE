@@ -304,6 +304,7 @@ internal sealed class EngineLoopService : BackgroundService
             {
                 _state.UpdateRiskRailsTelemetry(snapshot);
             },
+            promotionShadowCallback: snapshot => _state.UpdatePromotionShadow(snapshot),
             gvrsSnapshotCallback: snapshot => _state.SetGvrsSnapshot(snapshot),
             gvrsGateCallback: utc =>
             {

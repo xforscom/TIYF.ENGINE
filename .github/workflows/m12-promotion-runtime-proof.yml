@@ -1,0 +1,80 @@
+---
+name: m12-promotion-runtime-proof
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/m12-promotion-runtime-proof.yml'
+      - 'tools/PromotionProbe/**'
+      - 'proof/m12-promotion-config.json'
+      - 'src/TiYf.Engine.Core/**'
+      - 'src/TiYf.Engine.Host/**'
+      - 'src/TiYf.Engine.Sim/**'
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure .NET install dir
+        uses: ./.github/actions/configure-dotnet
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.416'
+          cache: false
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Run promotion runtime proof
+        run: |
+          set -euo pipefail
+          out="proof-artifacts/m12-promotion-runtime"
+          mkdir -p "$out"
+          dotnet run --project tools/PromotionProbe/PromotionProbe.csproj \
+            --configuration Release -- \
+            --config proof/m12-promotion-config.json \
+            --output "$out"
+
+      - name: Verify promotion artifacts
+        run: |
+          set -euo pipefail
+          ls proof-artifacts/m12-promotion-runtime
+          grep -F "promotion-proof:" proof-artifacts/m12-promotion-runtime/summary.txt
+          grep -F "engine_promotion_shadow_promotions_total" proof-artifacts/m12-promotion-runtime/metrics.txt
+          python3 - <<'PY'
+          import json, sys, pathlib
+          path = pathlib.Path('proof-artifacts/m12-promotion-runtime/health.json')
+          data = json.load(path.open())
+          promo = data.get('promotion') or {}
+          shadow = promo.get('shadow') or {}
+          promotions = shadow.get('promotions_total', 0)
+          if promotions < 1:
+              print(f"health.json:\n{json.dumps(data, indent=2)}", file=sys.stderr)
+              raise SystemExit('expected at least one shadow promotion in proof scenario')
+          PY
+
+      - name: Upload proof artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m12-promotion-runtime-proof
+          path: proof-artifacts/m12-promotion-runtime

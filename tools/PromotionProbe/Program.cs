@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Text.Json;
 using TiYf.Engine.Core;
 using TiYf.Engine.Host;
+using TiYf.Engine.Sim;
+using TiYf.Engine.Core.Infrastructure;
 
 var options = ParseArgs(args);
 try
@@ -33,18 +35,75 @@ static void RunProbe(CliOptions options)
     }
 
     var riskConfig = RiskConfigParser.Parse(riskEl);
+    PromotionShadowSnapshot? shadowSnapshot = null;
 
-    WriteHealth(Path.Combine(outputDir, "health.json"), riskConfig);
-    WriteMetrics(Path.Combine(outputDir, "metrics.txt"), riskConfig);
-    WriteSummary(Path.Combine(outputDir, "summary.txt"), configPath, riskConfig.Promotion);
+    if (doc.RootElement.TryGetProperty("scenario", out var scenarioEl))
+    {
+        shadowSnapshot = RunScenario(riskConfig, scenarioEl);
+    }
+
+    WriteHealth(Path.Combine(outputDir, "health.json"), riskConfig, shadowSnapshot);
+    WriteMetrics(Path.Combine(outputDir, "metrics.txt"), riskConfig, shadowSnapshot);
+    WriteSummary(Path.Combine(outputDir, "summary.txt"), configPath, riskConfig.Promotion, shadowSnapshot);
 }
 
-static void WriteHealth(string path, RiskConfig riskConfig)
+static PromotionShadowSnapshot? RunScenario(RiskConfig riskConfig, JsonElement scenarioEl)
+{
+    var runtime = new PromotionShadowRuntime(riskConfig.Promotion);
+    var tracker = new PositionTracker();
+    DateTime evaluationUtc = DateTime.SpecifyKind(new DateTime(2025, 1, 1, 0, 0, 0), DateTimeKind.Utc);
+    DateTime? latestClose = null;
+
+    if (scenarioEl.TryGetProperty("trades", out var tradesEl) && tradesEl.ValueKind == JsonValueKind.Array)
+    {
+        foreach (var trade in tradesEl.EnumerateArray())
+        {
+            var symbol = trade.GetProperty("symbol").GetString() ?? throw new InvalidOperationException("symbol required");
+            var side = ParseSide(trade.GetProperty("side").GetString() ?? throw new InvalidOperationException("side required"));
+            var units = trade.GetProperty("units").GetInt64();
+            var entry = trade.GetProperty("entry_price").GetDecimal();
+            var exit = trade.GetProperty("exit_price").GetDecimal();
+            var openUtc = ParseUtc(trade.GetProperty("open_utc").GetString() ?? throw new InvalidOperationException("open_utc required"));
+            var closeUtc = ParseUtc(trade.GetProperty("close_utc").GetString() ?? throw new InvalidOperationException("close_utc required"));
+            if (!latestClose.HasValue || closeUtc > latestClose.Value)
+            {
+                latestClose = closeUtc;
+            }
+            var decisionId = trade.GetProperty("decision_id").GetString() ?? throw new InvalidOperationException("decision_id required");
+            tracker.OnFill(new ExecutionFill(decisionId, symbol, side, entry, units, openUtc), Schema.Version, riskConfig.RiskConfigHash ?? string.Empty, "promotion-probe", null);
+            var exitSide = side == TradeSide.Buy ? TradeSide.Sell : TradeSide.Buy;
+            tracker.OnFill(new ExecutionFill(decisionId, symbol, exitSide, exit, units, closeUtc), Schema.Version, riskConfig.RiskConfigHash ?? string.Empty, "promotion-probe", null);
+        }
+    }
+
+    if (latestClose.HasValue)
+    {
+        evaluationUtc = latestClose.Value;
+    }
+
+    return runtime.Evaluate(tracker, evaluationUtc);
+}
+
+static TradeSide ParseSide(string value)
+{
+    return value.Equals("buy", StringComparison.OrdinalIgnoreCase) ? TradeSide.Buy : TradeSide.Sell;
+}
+
+static DateTime ParseUtc(string value)
+{
+    if (!DateTime.TryParse(value, null, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var dt))
+    {
+        throw new InvalidOperationException($"Invalid UTC timestamp: {value}");
+    }
+    return DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+}
+
+static void WriteHealth(string path, RiskConfig riskConfig, PromotionShadowSnapshot? shadow)
 {
     var payload = new
     {
         promotion_config_hash = riskConfig.PromotionConfigHash,
-        promotion = BuildPromotionBlock(riskConfig.Promotion)
+        promotion = BuildPromotionBlock(riskConfig.Promotion, shadow)
     };
 
     var options = new JsonSerializerOptions { WriteIndented = true };
@@ -52,17 +111,21 @@ static void WriteHealth(string path, RiskConfig riskConfig)
     File.WriteAllText(path, json + Environment.NewLine);
 }
 
-static void WriteMetrics(string path, RiskConfig riskConfig)
+static void WriteMetrics(string path, RiskConfig riskConfig, PromotionShadowSnapshot? shadow)
 {
     var state = new EngineHostState("promotion-probe", Array.Empty<string>());
     state.SetRiskConfigHash(riskConfig.RiskConfigHash ?? string.Empty);
     state.SetPromotionConfig(riskConfig.Promotion);
+    if (shadow is not null)
+    {
+        state.UpdatePromotionShadow(shadow);
+    }
     var snapshot = state.CreateMetricsSnapshot();
     var metrics = EngineMetricsFormatter.Format(snapshot);
     File.WriteAllText(path, metrics);
 }
 
-static void WriteSummary(string path, string configPath, PromotionConfig promotion)
+static void WriteSummary(string path, string configPath, PromotionConfig promotion, PromotionShadowSnapshot? shadow)
 {
     var hasPromotion = promotion is not null && !string.IsNullOrWhiteSpace(promotion.ConfigHash);
     var shadowCandidates = promotion?.ShadowCandidates ?? Array.Empty<string>();
@@ -74,7 +137,9 @@ static void WriteSummary(string path, string configPath, PromotionConfig promoti
     var candidatesList = hasPromotion ? string.Join(',', shadowCandidates) : "n/a";
     var line = string.Format(
         CultureInfo.InvariantCulture,
-        "promotion-proof: config={0} hash={1} promotion_candidates={2} probation_days={3} min_trades={4} promotion_threshold={5} demotion_threshold={6} candidates=[{7}]",
+        "promotion-proof: config={0} hash={1} promotion_candidates={2} "
+        + "probation_days={3} min_trades={4} promotion_threshold={5} demotion_threshold={6} "
+        + "candidates=[{7}] promotions_total={8} demotions_total={9} trades_total={10} win_ratio={11:0.###}",
         Path.GetFileName(configPath),
         hasPromotion ? promotion!.ConfigHash : "n/a",
         hasPromotion ? candidateCount.ToString(CultureInfo.InvariantCulture) : "n/a",
@@ -82,12 +147,16 @@ static void WriteSummary(string path, string configPath, PromotionConfig promoti
         minTrades?.ToString(CultureInfo.InvariantCulture) ?? "n/a",
         FormatDecimal(promotionThreshold),
         FormatDecimal(demotionThreshold),
-        candidatesList);
+        candidatesList,
+        shadow?.PromotionsTotal ?? 0,
+        shadow?.DemotionsTotal ?? 0,
+        shadow?.TradeCount ?? 0,
+        shadow?.WinRatio ?? 0m);
 
     File.WriteAllText(path, line + Environment.NewLine);
 }
 
-static object? BuildPromotionBlock(PromotionConfig promotion)
+static object? BuildPromotionBlock(PromotionConfig promotion, PromotionShadowSnapshot? shadow)
 {
     if (promotion is null || string.IsNullOrWhiteSpace(promotion.ConfigHash))
     {
@@ -100,7 +169,16 @@ static object? BuildPromotionBlock(PromotionConfig promotion)
         probation_days = promotion.ProbationDays,
         min_trades = promotion.MinTrades,
         promotion_threshold = promotion.PromotionThreshold,
-        demotion_threshold = promotion.DemotionThreshold
+        demotion_threshold = promotion.DemotionThreshold,
+        shadow = shadow is null
+            ? null
+            : new
+            {
+                promotions_total = shadow.PromotionsTotal,
+                demotions_total = shadow.DemotionsTotal,
+                trades_total = shadow.TradeCount,
+                win_ratio = shadow.WinRatio
+            }
     };
 }
 

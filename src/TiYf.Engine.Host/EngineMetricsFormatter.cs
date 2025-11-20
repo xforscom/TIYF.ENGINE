@@ -128,6 +128,10 @@ public static class EngineMetricsFormatter
             AppendMetric(builder, "engine_promotion_threshold", (double)promotion.PromotionThreshold);
             AppendMetric(builder, "engine_demotion_threshold", (double)promotion.DemotionThreshold);
         }
+        AppendMetric(builder, "engine_promotion_shadow_promotions_total", snapshot.PromotionShadowPromotionsTotal);
+        AppendMetric(builder, "engine_promotion_shadow_demotions_total", snapshot.PromotionShadowDemotionsTotal);
+        AppendMetric(builder, "engine_promotion_shadow_trades_total", snapshot.PromotionShadowTradesTotal);
+        AppendMetric(builder, "engine_promotion_shadow_win_ratio", (double)snapshot.PromotionShadowWinRatio);
         AppendMetric(builder, "engine_reconcile_mismatches_total", snapshot.ReconciliationMismatchesTotal);
         if (snapshot.ReconciliationLastUnixSeconds.HasValue)
         {

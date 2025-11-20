@@ -662,11 +662,11 @@ else if (sourceAdapter.StartsWith("oanda", StringComparison.Ordinal))
 // Extract risk config + equity from raw JSON (tolerant: defaults if missing)
 decimal equity = 100_000m; // fallback
 RiskConfig riskConfig = new();
+var riskBlocks = new List<JsonElement>();
 try
 {
     if (raw.RootElement.TryGetProperty("equity", out var eqEl) && eqEl.ValueKind == JsonValueKind.Number) equity = eqEl.GetDecimal();
     // Accept both legacy "risk" and newer "riskConfig" blocks, later entries override earlier ones
-    var riskBlocks = new List<JsonElement>();
     if (raw.RootElement.TryGetProperty("risk", out var legacyRisk) && legacyRisk.ValueKind == JsonValueKind.Object) riskBlocks.Add(legacyRisk);
     if (raw.RootElement.TryGetProperty("riskConfig", out var rcBlock) && rcBlock.ValueKind == JsonValueKind.Object) riskBlocks.Add(rcBlock);
     if (riskBlocks.Count > 0)
@@ -778,15 +778,32 @@ var riskFormulas = new RiskFormulas();
 var basketAgg = new BasketRiskAggregator();
 var enforcer = new RiskEnforcer(riskFormulas, basketAgg, cfg.SchemaVersion ?? TiYf.Engine.Core.Infrastructure.Schema.Version, cfgHash);
 TiYf.Engine.Core.RiskMode parsedRiskModeEnum = TiYf.Engine.Core.RiskMode.Off;
+bool riskFlagSet = false;
 try
 {
     if (raw.RootElement.TryGetProperty("featureFlags", out var ffNode2))
     {
         var node2 = System.Text.Json.Nodes.JsonNode.Parse(ffNode2.GetRawText());
+        if (ffNode2.ValueKind == JsonValueKind.Object)
+        {
+            if (ffNode2.TryGetProperty("risk", out var rProp) && rProp.ValueKind == JsonValueKind.String)
+            {
+                riskFlagSet = true;
+            }
+            if (ffNode2.TryGetProperty("riskMode", out var rmProp) && rmProp.ValueKind == JsonValueKind.String)
+            {
+                riskFlagSet = true;
+            }
+        }
         parsedRiskModeEnum = TiYf.Engine.Core.RiskParsing.ParseRiskMode(node2);
     }
 }
 catch { }
+if (!riskFlagSet && parsedRiskModeEnum == TiYf.Engine.Core.RiskMode.Off && riskBlocks.Count > 0)
+{
+    // Default to shadow if a risk config is present but no explicit risk feature flag was set.
+    parsedRiskModeEnum = TiYf.Engine.Core.RiskMode.Shadow;
+}
 var parsedRiskMode = parsedRiskModeEnum switch { TiYf.Engine.Core.RiskMode.Active => "active", TiYf.Engine.Core.RiskMode.Shadow => "shadow", _ => "off" };
 Console.WriteLine($"RUN_ID={runId}");
 // Penalty feature flag parse (shadow scaffold) + debug echo when verbose/diagnose

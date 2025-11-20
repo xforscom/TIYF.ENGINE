@@ -145,25 +145,25 @@
 - **Tracking issue(s):** (New) Roadmap doc + future Phase‑B tracking TBD
 
 ### M11-B — Risk Rails Live Blocking
-**Status:** Not started – design only (see `docs/M11-M12-DESIGN.md`).
+**Status:** Done — live enforcement on demo configs only; exits always allowed.
 
-**Summary:** Will turn selected risk rails into blocking gates while keeping telemetry parity.
+**Summary:** Broker/global/symbol/cooldown rails now block entries when caps are breached; telemetry and alerts remain compatible with Phase A. Real-money configs stay telemetry-only.
 
 **Evidence**
-- **Tag(s):** N/A
-- **Key PR(s):** N/A
-- **Proof workflow(s):** (Planned) Extensions to `m11-risk-rails-proof`
-- **Tracking issue(s):** To be opened after Ops go-ahead
+- **Tag(s):** `v1.11.1-m11b-risk-rails-live`
+- **Key PR(s):** #122
+- **Proof workflow(s):** `m11-risk-rails-proof` – [run 19529773407](https://github.com/xforscom/TIYF.ENGINE/actions/runs/19529773407)
+- **Tracking issue(s):** #117
 
 ### M12 — Promotion Runtime
-**Status:** Not started – design ready for shadow-only enforcement (see `docs/M11-M12-DESIGN.md`).
+**Status:** In progress — shadow promotion runtime + proof on branch (no live routing yet).
 
-**Summary:** Will convert promotion telemetry into runtime routing (shadow-to-live) with deterministic proofs.
+**Summary:** Converts promotion telemetry into a shadow runtime that evaluates promotion/demotion readiness and surfaces metrics/health; live routing remains disabled.
 
 **Evidence**
-- **Tag(s):** N/A
-- **Key PR(s):** N/A
-- **Proof workflow(s):** (Planned) Promotion runtime proof
+- **Tag(s):** N/A (shadow-only stage)
+- **Key PR(s):** #123 (open)
+- **Proof workflow(s):** `m12-promotion-runtime-proof` (branch runs)
 - **Tracking issue(s):** Upcoming
 
 ### M13 — Config Source of Truth / Secret Provenance hardening
