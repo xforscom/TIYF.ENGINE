@@ -354,15 +354,19 @@ internal sealed class RiskRailRuntime
 
     private void EvaluateBrokerGuardrail(string instrument, string timeframe, DateTime ts, long requestedUnits, List<RiskRailAlert> alerts, ref bool allowed)
     {
-        if (requestedUnits <= 0 || _brokerCaps is null)
+        if (requestedUnits <= 0)
         {
             return;
         }
 
-        var caps = _brokerCaps.Value;
-        var dailyCap = caps.DailyLossCapCcy ?? _brokerDailyLossCapCcy;
-        var maxUnits = caps.MaxUnits ?? _maxPositionUnits;
-        var symbolCaps = caps.SymbolUnitCaps ?? _symbolUnitCaps;
+        var dailyCap = _brokerCaps?.DailyLossCapCcy ?? _brokerDailyLossCapCcy;
+        var maxUnits = _brokerCaps?.MaxUnits ?? _maxPositionUnits;
+        var symbolCaps = _brokerCaps?.SymbolUnitCaps ?? _symbolUnitCaps;
+
+        if (!dailyCap.HasValue && maxUnits is null && symbolCaps is null)
+        {
+            return;
+        }
 
         string? gate = null;
         JsonElement payload = default;

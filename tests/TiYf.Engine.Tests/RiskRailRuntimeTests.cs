@@ -149,7 +149,7 @@ public class RiskRailRuntimeTests
         var outcome = runtime.EvaluateNewEntry("EURUSD", "H1", BaseTimestamp, 100);
 
         Assert.True(outcome.Allowed);
-        Assert.Contains(outcome.Alerts, a => a.EventType == "ALERT_RISK_BROKER_DAILY_CAP_SOFT");
+        Assert.Contains(outcome.Alerts, a => a.EventType == "ALERT_RISK_BROKER_CAP_SOFT");
     }
 
     [Fact]
