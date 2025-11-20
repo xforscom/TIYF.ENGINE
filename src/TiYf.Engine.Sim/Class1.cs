@@ -683,18 +683,6 @@ public sealed class EngineLoop
                     var json = JsonSerializer.SerializeToElement(enriched);
                     await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, _barEventType, _sourceAdapter, json), ct);
 
-                    // CI penalty scaffold emission: Only when ci scaffold enabled AND penalty feature flags set AND forcePenalty true.
-                    // Additionally: if sentiment is enabled (shadow/active) we defer penalty until after sentiment chain to preserve ordering expectations.
-                    bool sentimentEnabled = _sentimentConfig is { Enabled: true, Mode: var sm } && (sm.Equals("shadow", StringComparison.OrdinalIgnoreCase) || sm.Equals("active", StringComparison.OrdinalIgnoreCase));
-                    if (!_penaltyEmitted && _ciPenaltyScaffold && _forcePenalty && (_penaltyMode == "shadow" || _penaltyMode == "active") && !sentimentEnabled)
-                    {
-                        _penaltyEmitted = true;
-                        var penSymbol = bar.InstrumentId.Value;
-                        decimal orig = 200m; decimal adj = Math.Max(1, Math.Floor(orig * 0.5m));
-                        var penaltyPayload = JsonSerializer.SerializeToElement(new { symbol = penSymbol, ts = bar.EndUtc, reason = "drawdown_guard", original_units = orig, adjusted_units = adj, penalty_scalar = (orig == 0 ? 0m : (adj / orig)) });
-                        await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "PENALTY_APPLIED_V1", _sourceAdapter, penaltyPayload), ct);
-                    }
-
                     // Sentiment volatility guard (shadow or active) after bar emission, before strategy trade execution
                     bool barClamp = false; decimal? lastOriginalUnits = null; long? lastAdjustedUnits = null; string? lastAppliedSymbol = null; DateTime? lastAppliedTs = null;
                     if (_sentimentConfig is { Enabled: true, Mode: var modeVal } sg && (modeVal.Equals("shadow", StringComparison.OrdinalIgnoreCase) || modeVal.Equals("active", StringComparison.OrdinalIgnoreCase)))
@@ -996,7 +984,7 @@ public sealed class EngineLoop
                     }
 
                     // Deferred penalty emission path: if sentiment was enabled we emit penalty AFTER sentiment chain but before probe/trades (once only)
-                    if (!_penaltyEmitted && _ciPenaltyScaffold && _forcePenalty && (_penaltyMode == "shadow" || _penaltyMode == "active") && sentimentEnabled)
+                    if (!_penaltyEmitted && _ciPenaltyScaffold && _forcePenalty && (_penaltyMode == "shadow" || _penaltyMode == "active"))
                     {
                         _penaltyEmitted = true;
                         var penSymbol = bar.InstrumentId.Value;
