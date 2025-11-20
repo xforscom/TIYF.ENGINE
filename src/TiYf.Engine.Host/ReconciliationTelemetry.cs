@@ -27,6 +27,7 @@ internal sealed class ReconciliationTelemetry
 
     public async Task EmitAsync(DateTime utcNow, CancellationToken ct)
     {
+        var start = DateTime.UtcNow;
         IReadOnlyCollection<(string Symbol, TradeSide Side, decimal EntryPrice, long Units, DateTime OpenTimestamp)> enginePositions;
         try
         {
@@ -55,6 +56,11 @@ internal sealed class ReconciliationTelemetry
         var records = ReconciliationRecordBuilder.Build(utcNow, enginePositions, brokerSnapshot);
         var mismatches = 0L;
         var aggregate = ReconciliationStatus.Match;
+        if ((brokerSnapshot?.Orders?.Count ?? 0) > 0 && enginePositions.Count == 0)
+        {
+            mismatches += brokerSnapshot!.Orders.Count;
+            aggregate = ReconciliationStatus.Mismatch;
+        }
 
         foreach (var record in records)
         {
@@ -67,7 +73,8 @@ internal sealed class ReconciliationTelemetry
             await _journalWriter.AppendAsync(record, ct).ConfigureAwait(false);
         }
 
-        _state.RecordReconciliationTelemetry(aggregate, mismatches, utcNow);
+        var duration = (DateTime.UtcNow - start).TotalSeconds;
+        _state.RecordReconciliationTelemetry(aggregate, mismatches, utcNow, duration);
     }
 
     private static ReconciliationStatus MaxStatus(ReconciliationStatus a, ReconciliationStatus b)

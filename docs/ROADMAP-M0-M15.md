@@ -101,14 +101,14 @@
 - **Tracking issue(s):** Blueprint v2.0 M7 entry
 
 ### M8 — Execution Hardening (Phase B: reconciliation, idempotency, slippage)
-**Status:** Done – merged earlier in 2025; telemetry-only but validated through reconciliation proofs.
+**Status:** In progress – demo-only implementation underway; reconciliation proof + session slippage preset added; no real-money change.
 
-**Summary:** Added reconciliation backlog runners, enforced restart-safe idempotency, and exposed slippage monitors consumed by Ops.
+**Summary:** Adding broker reconciliation telemetry on startup+interval, restart-safe idempotency persistence (24h TTL, bounded caches), and a session-based slippage preset. Observability-first; no auto-heal yet.
 
 **Evidence**
-- **Tag(s):** (rolled into `v1.6.0-m6-exec-a` release train; dedicated tag omitted)
-- **Key PR(s):** Execution hardening refresh (internal PR #109/110 lineage)
-- **Proof workflow(s):** `reconciliation-proof` jobs in CI – [run 19394242139](https://github.com/xforscom/TIYF.ENGINE/actions/runs/19394242139)
+- **Tag(s):** Pending (demo-only while in progress)
+- **Key PR(s):** (current) feat/m8b-execution-hardening
+- **Proof workflow(s):** `m8-execution-hardening-proof` (branch runs)
 - **Tracking issue(s):** Blueprint v2.0 M8 entry
 
 ### M9 — Production Feeds & Config SoT

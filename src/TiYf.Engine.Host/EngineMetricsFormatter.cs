@@ -138,6 +138,11 @@ public static class EngineMetricsFormatter
         AppendMetric(builder, "engine_promotion_shadow_trades_total", snapshot.PromotionShadowTradesTotal);
         AppendMetric(builder, "engine_promotion_shadow_win_ratio", (double)snapshot.PromotionShadowWinRatio);
         AppendMetric(builder, "engine_reconcile_mismatches_total", snapshot.ReconciliationMismatchesTotal);
+        AppendMetric(builder, "engine_reconcile_runs_total", snapshot.ReconciliationRunsTotal);
+        if (snapshot.ReconciliationLastDurationSeconds.HasValue)
+        {
+            AppendMetric(builder, "engine_reconcile_last_duration_seconds", snapshot.ReconciliationLastDurationSeconds.Value);
+        }
         if (snapshot.ReconciliationLastUnixSeconds.HasValue)
         {
             AppendMetric(builder, "engine_reconcile_last_ts", snapshot.ReconciliationLastUnixSeconds.Value);

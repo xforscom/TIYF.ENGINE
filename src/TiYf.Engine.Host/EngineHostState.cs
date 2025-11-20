@@ -60,6 +60,8 @@ public sealed class EngineHostState
     private double? _gvrsRaw;
     private double? _gvrsEwma;
     private string? _gvrsBucket;
+    private long _reconciliationRunsTotal;
+    private double? _reconciliationLastDurationSeconds;
     private long _reconciliationMismatchesTotal;
     private DateTime? _lastReconciliationUtc;
     private ReconciliationStatus _lastReconciliationStatus = ReconciliationStatus.Unknown;
@@ -732,6 +734,8 @@ public sealed class EngineHostState
             _promotionShadowMinTrades,
             _promotionShadowPromotionThreshold,
             _promotionShadowDemotionThreshold,
+            _reconciliationRunsTotal,
+            _reconciliationLastDurationSeconds,
             _reconciliationMismatchesTotal,
             _lastReconciliationUtc.HasValue ? new DateTimeOffset(_lastReconciliationUtc.Value).ToUnixTimeSeconds() : (double?)null,
             _lastReconciliationStatus.ToString().ToLowerInvariant(),
@@ -860,20 +864,24 @@ public sealed class EngineHostState
         {
             last_reconcile_utc = _lastReconciliationUtc,
             last_status = _lastReconciliationStatus.ToString().ToLowerInvariant(),
-            mismatches_total = _reconciliationMismatchesTotal
+            mismatches_total = _reconciliationMismatchesTotal,
+            runs_total = _reconciliationRunsTotal,
+            last_duration_seconds = _reconciliationLastDurationSeconds
         };
     }
 
-    public void RecordReconciliationTelemetry(ReconciliationStatus status, long mismatchesDelta, DateTime utc)
+    public void RecordReconciliationTelemetry(ReconciliationStatus status, long mismatchesDelta, DateTime utc, double? durationSeconds = null)
     {
         lock (_sync)
         {
+            _reconciliationRunsTotal++;
             _lastReconciliationUtc = NormalizeUtc(utc);
             _lastReconciliationStatus = status;
             if (mismatchesDelta > 0)
             {
                 _reconciliationMismatchesTotal += mismatchesDelta;
             }
+            _reconciliationLastDurationSeconds = durationSeconds;
         }
     }
 

@@ -1,7 +1,5 @@
 # M8 Execution Hardening – Phase B (Design)
 
-_Scope: documentation only; no code/config changes._
-
 ## Scope
 
 ### Reconciliation Loop
@@ -76,11 +74,10 @@ _Scope: documentation only; no code/config changes._
 ### Metrics
 - `engine_reconcile_runs_total`
 - `engine_reconcile_last_duration_seconds`
-- `engine_reconcile_stale_orders_total`
-- `engine_reconcile_orphan_orders_total`
-- `engine_reconcile_position_drift_pips`
+- `engine_reconcile_mismatches_total`
+- `engine_reconcile_last_ts`
 - `engine_idempotency_cache_entries_total`
-- `engine_slippage_preset_hits_total{symbol,session}`
+- `engine_slippage_model{model="session_pips|fixed_bps|zero"}`
 
 ### Alerts
 - `ALERT_RECONCILE_DIVERGENCE` – raised when stale/orphan counts > 0 or drift above threshold.

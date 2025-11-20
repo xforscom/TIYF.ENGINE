@@ -162,6 +162,33 @@ _Environment assumptions:_ OANDA practice account (`demo-oanda`), VPS `tiyf-vps-
 
 ## Scenario 9 – Adapter Feed Credentials / Secrets
 
+## Scenario 10 – Reconciliation Drift
+
+### How to Detect
+- `/health.reconciliation` block: `mismatches_total`, `runs_total`, `last_status`, `last_reconcile_utc`.
+- `/metrics`: `engine_reconcile_runs_total`, `engine_reconcile_mismatches_total`.
+- Reconcile journal under `journals/<adapter>/reconcile/`.
+
+### What to Do
+1. `curl -s http://127.0.0.1:8080/health | jq '.reconciliation'`.
+2. If mismatches > 0, inspect `reconcile.csv` in the latest journal run; confirm symbols and reasons.
+3. If mismatches are expected test fixtures (proof/demo), no action. If unexpected, pause trading via kill-switch and escalate.
+
+### When to Escalate
+- `last_status` = `mismatch` on real broker live runs.
+- Broker API unreachable during reconciliation.
+
+## Scenario 11 – Idempotency Persistence After Restart
+
+### How to Detect
+- `/health.idempotency_persistence`: `last_load_utc`, `loaded_keys`, `expired_dropped`.
+- `/metrics`: `engine_idempotency_persisted_loaded`, `engine_idempotency_persisted_expired_total`.
+
+### What to Do
+1. After restart, confirm `/health.idempotency_persistence.loaded_keys` > 0 for active demo runs.
+2. If persistence failed (loaded_keys=0 unexpectedly), check logs for `ALERT_IDEMPOTENCY_PERSISTENCE_FAILED`.
+3. Only wipe the persistence file as a last resort and with dev approval; doing so risks duplicate order sends on restart.
+
 ### How to Detect
 - `/health.secrets` block (from M9-C) showing missing env.
 - Logs: `SECRET_PROVENANCE missing` warnings.
