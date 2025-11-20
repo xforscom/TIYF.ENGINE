@@ -1,0 +1,15 @@
+{
+  "utc_now": "2025-03-01T00:00:00Z",
+  "engine_positions": [
+    { "symbol": "EURUSD", "side": "buy", "units": 50000, "entry_price": 1.1000, "open_utc": "2025-02-28T23:00:00Z" }
+  ],
+  "broker": {
+    "positions": [
+      { "symbol": "EURUSD", "side": "buy", "units": 40000, "avg_price": 1.0950 },
+      { "symbol": "GBPUSD", "side": "sell", "units": 10000, "avg_price": 1.2500 }
+    ],
+    "orders": [
+      { "broker_order_id": "B-1", "symbol": "EURUSD", "side": "buy", "units": 10000, "price": 1.1010, "status": "pending" }
+    ]
+  }
+}

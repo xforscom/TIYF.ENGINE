@@ -11,13 +11,13 @@ public enum ReconciliationStatus
     Mismatch = 2
 }
 
-internal sealed record ReconciliationPositionView(
+public sealed record ReconciliationPositionView(
     [property: JsonPropertyName("symbol")] string Symbol,
     [property: JsonPropertyName("side")] string Side,
     [property: JsonPropertyName("units")] long Units,
     [property: JsonPropertyName("avg_price")] decimal? AveragePrice);
 
-internal sealed record ReconciliationOrderView(
+public sealed record ReconciliationOrderView(
     [property: JsonPropertyName("broker_order_id")] string BrokerOrderId,
     [property: JsonPropertyName("symbol")] string Symbol,
     [property: JsonPropertyName("side")] string Side,
@@ -25,7 +25,7 @@ internal sealed record ReconciliationOrderView(
     [property: JsonPropertyName("price")] decimal? Price,
     [property: JsonPropertyName("status")] string Status);
 
-internal sealed record ReconciliationRecord(
+public sealed record ReconciliationRecord(
     DateTime UtcTimestamp,
     string Symbol,
     ReconciliationPositionView? EnginePosition,
@@ -35,7 +35,7 @@ internal sealed record ReconciliationRecord(
     ReconciliationStatus Status,
     string Reason);
 
-internal static class ReconciliationRecordBuilder
+public static class ReconciliationRecordBuilder
 {
     private sealed record AggregatedPosition(long SignedUnits, decimal Notional);
 

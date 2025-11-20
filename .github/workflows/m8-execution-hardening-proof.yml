@@ -1,0 +1,80 @@
+name: m8-execution-hardening-proof
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/m8-execution-hardening-proof.yml'
+      - 'tools/ReconcileProbe/**'
+      - 'proof/m8-reconcile-config.json'
+      - 'docs/M8-EXECUTION-HARDENING-B-DESIGN.md'
+      - 'src/TiYf.Engine.Core/**'
+      - 'src/TiYf.Engine.Sim/**'
+      - 'src/TiYf.Engine.Host/**'
+
+concurrency:
+  group: m8-execution-proof-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute safe ref name
+        id: vars
+        run: |
+          set -euo pipefail
+          safe_ref="${GITHUB_REF_NAME//\//-}"
+          echo "safe_ref=$safe_ref" >> "$GITHUB_OUTPUT"
+
+      - name: Configure .NET install dir
+        uses: ./.github/actions/configure-dotnet
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.416'
+          cache: false
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Run reconciliation proof
+        run: |
+          set -euo pipefail
+          out="proof-artifacts/m8-reconcile"
+          mkdir -p "$out"
+          dotnet run --project tools/ReconcileProbe/ReconcileProbe.csproj --configuration Release -- \
+            --config proof/m8-reconcile-config.json --output "$out"
+
+      - name: Verify proof artifacts
+        run: |
+          set -euo pipefail
+          out="proof-artifacts/m8-reconcile"
+          ls "$out"
+          grep -F "reconcile_summary" "$out/summary.txt"
+          grep -F "engine_reconcile_mismatches_total" "$out/metrics.txt"
+          python3 - <<'PY'
+          import json
+          data = json.load(open('proof-artifacts/m8-reconcile/health.json'))
+          if 'reconciliation' not in data:
+              raise SystemExit('missing reconciliation block in health')
+          PY
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m8-reconcile-proof-${{ steps.vars.outputs.safe_ref }}
+          path: proof-artifacts/m8-reconcile

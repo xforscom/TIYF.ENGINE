@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\TiYf.Engine.Host\TiYf.Engine.Host.csproj" />
+    <ProjectReference Include="..\..\src\TiYf.Engine.Sim\TiYf.Engine.Sim.csproj" />
+  </ItemGroup>
+</Project>

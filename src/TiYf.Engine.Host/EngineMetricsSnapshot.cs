@@ -66,6 +66,8 @@ public readonly record struct EngineMetricsSnapshot(
     int PromotionShadowMinTrades,
     decimal PromotionShadowPromotionThreshold,
     decimal PromotionShadowDemotionThreshold,
+    long ReconciliationRunsTotal,
+    double? ReconciliationLastDurationSeconds,
     long ReconciliationMismatchesTotal,
     double? ReconciliationLastUnixSeconds,
     string? ReconciliationLastStatus,

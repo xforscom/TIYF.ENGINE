@@ -4,8 +4,14 @@ namespace TiYf.Engine.Core.Slippage;
 
 public sealed record SlippageProfile(
     string Model = "zero",
-    FixedBpsSlippageProfile? FixedBps = null);
+    FixedBpsSlippageProfile? FixedBps = null,
+    SessionSlippageProfile? Session = null);
 
 public sealed record FixedBpsSlippageProfile(
     decimal DefaultBps = 0m,
     IReadOnlyDictionary<string, decimal>? Instruments = null);
+
+public sealed record SessionSlippageProfile(
+    decimal DefaultPips = 0m,
+    IReadOnlyDictionary<string, decimal>? SessionPips = null,
+    IReadOnlyDictionary<string, decimal>? InstrumentPips = null);
