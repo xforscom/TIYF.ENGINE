@@ -126,7 +126,22 @@ public sealed record OandaAdapterSettings(
         var useMock = ResolveBool(cfgNode, "useMock", useMockFallback);
         var maxUnits = ResolveLong(cfgNode, "maxOrderUnits", defaults.MaxOrderUnits);
         var brokerDailyLossCap = ResolveDecimal(cfgNode, "brokerDailyLossCapCcy", defaults.BrokerDailyLossCapCcy);
-        var brokerMaxUnits = ResolveLong(cfgNode, "brokerMaxUnits", defaults.BrokerMaxUnits ?? defaults.MaxOrderUnits);
+        long? brokerMaxUnits = defaults.BrokerMaxUnits;
+        if (cfgNode.TryGetProperty("brokerMaxUnits", out var brokerMaxNode))
+        {
+            if (brokerMaxNode.ValueKind == JsonValueKind.Number && brokerMaxNode.TryGetInt64(out var parsed))
+            {
+                brokerMaxUnits = parsed;
+            }
+            else if (brokerMaxNode.ValueKind == JsonValueKind.String && long.TryParse(brokerMaxNode.GetString(), out var parsedString))
+            {
+                brokerMaxUnits = parsedString;
+            }
+            else
+            {
+                brokerMaxUnits = null;
+            }
+        }
         IReadOnlyDictionary<string, long>? brokerSymbolCaps = defaults.BrokerSymbolUnitCaps;
         if (cfgNode.TryGetProperty("brokerSymbolUnitCaps", out var capNode) && capNode.ValueKind == JsonValueKind.Object)
         {

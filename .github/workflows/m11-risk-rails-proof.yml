@@ -5,6 +5,7 @@ on:
   pull_request:
     branches:
       - main
+    # yaml-lint disable rule:truthy
     paths:
       - '.github/workflows/m11-risk-rails-proof.yml'
       - 'tools/RiskRailsProbe/**'

@@ -119,9 +119,6 @@ public class RiskRailsBrokerTests
 
     private static void SetDailyLoss(RiskRailRuntime runtime, decimal realized, decimal unrealized = 0m)
     {
-        var realizedField = typeof(RiskRailRuntime).GetField("_dailyRealizedPnl", BindingFlags.Instance | BindingFlags.NonPublic);
-        var unrealizedField = typeof(RiskRailRuntime).GetField("_dailyUnrealizedPnl", BindingFlags.Instance | BindingFlags.NonPublic);
-        realizedField!.SetValue(runtime, realized);
-        unrealizedField!.SetValue(runtime, unrealized);
+        runtime.SetDailyPnlForTest(realized, unrealized);
     }
 }

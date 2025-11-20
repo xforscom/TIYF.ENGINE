@@ -337,18 +337,13 @@ internal sealed class RiskRailRuntime
     /// </summary>
     private void EvaluateTelemetryRails(string instrument, string timeframe, DateTime ts, long requestedUnits, List<RiskRailAlert> alerts)
     {
-        EvaluateBrokerDailyLossCap(instrument, timeframe, ts, alerts);
         EvaluatePositionCaps(instrument, timeframe, ts, requestedUnits, alerts);
         EvaluateCooldown(instrument, timeframe, ts, alerts);
     }
 
     private void EvaluateLiveRails(string instrument, string timeframe, DateTime ts, long requestedUnits, List<RiskRailAlert> alerts, ref bool allowed)
     {
-        EvaluateBrokerDailyLossCapLive(instrument, timeframe, ts, alerts, ref allowed);
-        if (allowed)
-        {
-            EvaluatePositionCapsLive(instrument, timeframe, ts, requestedUnits, alerts, ref allowed);
-        }
+        EvaluatePositionCapsLive(instrument, timeframe, ts, requestedUnits, alerts, ref allowed);
         if (allowed)
         {
             EvaluateCooldownLive(instrument, timeframe, ts, alerts, ref allowed);
@@ -430,6 +425,10 @@ internal sealed class RiskRailRuntime
         }
 
         alerts.Add(CreateAlert("ALERT_RISK_BROKER_CAP_SOFT", payload, throttled: true));
+        if (gate == "daily_loss")
+        {
+            _brokerDailyLossViolations++;
+        }
         _brokerCapBlocksTotal++;
         _brokerCapBlocksByGate[gate] = _brokerCapBlocksByGate.TryGetValue(gate, out var existing) ? existing + 1 : 1;
 
@@ -439,61 +438,6 @@ internal sealed class RiskRailRuntime
             _gateCallback?.Invoke(gate, false);
             allowed = false;
         }
-    }
-
-    /// <summary>
-    /// Emits a telemetry alert if the configured broker daily loss cap would be exceeded.
-    /// </summary>
-    private void EvaluateBrokerDailyLossCap(string instrument, string timeframe, DateTime ts, List<RiskRailAlert> alerts)
-    {
-        if (!_brokerDailyLossCapCcy.HasValue)
-        {
-            return;
-        }
-
-        if (_brokerDailyLossUsedCcy < _brokerDailyLossCapCcy.Value)
-        {
-            return;
-        }
-
-        var payload = new
-        {
-            instrument,
-            timeframe,
-            ts,
-            loss_used_ccy = _brokerDailyLossUsedCcy,
-            loss_cap_ccy = _brokerDailyLossCapCcy.Value,
-            config_hash = _configHash
-        };
-        alerts.Add(CreateAlert("ALERT_RISK_BROKER_DAILY_CAP_SOFT", payload, throttled: true));
-        _brokerDailyLossViolations++;
-    }
-
-    private void EvaluateBrokerDailyLossCapLive(string instrument, string timeframe, DateTime ts, List<RiskRailAlert> alerts, ref bool allowed)
-    {
-        if (!_brokerDailyLossCapCcy.HasValue || !allowed)
-        {
-            return;
-        }
-
-        if (_brokerDailyLossUsedCcy < _brokerDailyLossCapCcy.Value)
-        {
-            return;
-        }
-
-        var payload = new
-        {
-            instrument,
-            timeframe,
-            ts,
-            loss_used_ccy = _brokerDailyLossUsedCcy,
-            loss_cap_ccy = _brokerDailyLossCapCcy.Value,
-            config_hash = _configHash
-        };
-        alerts.Add(CreateAlert("ALERT_RISK_BROKER_DAILY_CAP_HARD", payload, throttled: false));
-        _gateCallback?.Invoke("broker_daily_loss_cap", false);
-        _brokerDailyLossViolations++;
-        allowed = false;
     }
 
     /// <summary>
@@ -807,6 +751,15 @@ internal sealed class RiskRailRuntime
     private bool IsCooldownActive()
     {
         return _cooldownActiveUntilUtc.HasValue && _clock() < _cooldownActiveUntilUtc.Value;
+    }
+
+    /// <summary>
+    /// Test-only helper to seed daily PnL for deterministic rail evaluation.
+    /// </summary>
+    public void SetDailyPnlForTest(decimal realized, decimal unrealized = 0m)
+    {
+        _dailyRealizedPnl = realized;
+        _dailyUnrealizedPnl = unrealized;
     }
 
     private void PublishTelemetry()
