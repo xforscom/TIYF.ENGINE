@@ -62,6 +62,18 @@
       "min_trades": 50,
       "promotion_threshold": 0.6,
       "demotion_threshold": 0.4
+    },
+    "risk_rails_mode": "live",
+    "broker_daily_loss_cap_ccy": 1000,
+    "max_position_units": 500000,
+    "symbol_unit_caps": {
+      "EURUSD": 200000,
+      "GBPUSD": 200000
+    },
+    "cooldown": {
+      "enabled": true,
+      "consecutive_losses": 2,
+      "minutes": 30
     }
   },
   "featureFlags": {

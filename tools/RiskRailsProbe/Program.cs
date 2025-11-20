@@ -29,11 +29,20 @@ var riskConfigHash = riskConfig.RiskConfigHash ?? ConfigHash.Compute(canonical);
 var scenario = Scenario.Parse(scenarioNode);
 
 RiskRailTelemetrySnapshot? telemetrySnapshot = null;
+var gateCounts = new Dictionary<string, (int blocks, int throttles)>(StringComparer.OrdinalIgnoreCase);
 var runtime = new RiskRailRuntime(
     riskConfig,
     riskConfigHash,
     Array.Empty<NewsEvent>(),
-    gateCallback: null,
+    gateCallback: (gate, throttled) =>
+    {
+        if (string.IsNullOrWhiteSpace(gate))
+        {
+            return;
+        }
+        var current = gateCounts.TryGetValue(gate, out var counts) ? counts : (0, 0);
+        gateCounts[gate] = throttled ? (current.Item1, current.Item2 + 1) : (current.Item1 + 1, current.Item2);
+    },
     scenario.StartingEquity,
     telemetryCallback: snapshot => telemetrySnapshot = snapshot,
     clock: () => scenario.DecisionUtc);
@@ -85,12 +94,25 @@ state.SetLoopStart(scenario.DecisionUtc);
 state.SetConfigSource(Path.GetFullPath(configPath), riskConfigHash);
 state.SetRiskConfigHash(riskConfigHash);
 state.UpdateRiskRailsTelemetry(telemetry);
+foreach (var kvp in gateCounts)
+{
+    for (var i = 0; i < kvp.Value.blocks; i++)
+    {
+        state.RegisterRiskGateEvent(kvp.Key, throttled: false);
+    }
+    for (var i = 0; i < kvp.Value.throttles; i++)
+    {
+        state.RegisterRiskGateEvent(kvp.Key, throttled: true);
+    }
+}
 var metrics = EngineMetricsFormatter.Format(state.CreateMetricsSnapshot());
 var health = JsonSerializer.Serialize(state.CreateHealthPayload(), new JsonSerializerOptions { WriteIndented = true });
+var events = string.Join(Environment.NewLine, outcome.Alerts.Select(a => a.EventType));
 
 await File.WriteAllTextAsync(Path.Combine(outputPath, "summary.txt"), summary);
 await File.WriteAllTextAsync(Path.Combine(outputPath, "metrics.txt"), metrics);
 await File.WriteAllTextAsync(Path.Combine(outputPath, "health.json"), health);
+await File.WriteAllTextAsync(Path.Combine(outputPath, "events.csv"), events);
 
 Console.WriteLine(summary);
 
@@ -141,7 +163,8 @@ static string BuildSummary(RiskRailOutcome outcome, RiskRailTelemetrySnapshot te
     var maxPosition = outcome.Alerts.Any(a => a.EventType == "ALERT_RISK_MAX_POSITION_SOFT") ? 1 : 0;
     var symbolCaps = outcome.Alerts.Count(a => a.EventType == "ALERT_RISK_SYMBOL_CAP_SOFT");
     var cooldownAlert = outcome.Alerts.Any(a => a.EventType == "ALERT_RISK_COOLDOWN_SOFT") ? 1 : 0;
-    return $"risk_rails_summary broker_cap_hit={brokerCap} max_position_hit={maxPosition} symbol_caps_hit={symbolCaps} cooldown_alert={cooldownAlert} cooldown_triggers={telemetry.CooldownTriggersTotal}";
+    var hardBlocks = outcome.Alerts.Count(a => a.EventType.EndsWith("_HARD", StringComparison.OrdinalIgnoreCase));
+    return $"risk_rails_summary allowed={outcome.Allowed} broker_cap_hit={brokerCap} max_position_hit={maxPosition} symbol_caps_hit={symbolCaps} cooldown_alert={cooldownAlert} hard_blocks={hardBlocks} cooldown_triggers={telemetry.CooldownTriggersTotal}";
 }
 
 internal sealed record Scenario(

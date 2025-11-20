@@ -134,7 +134,7 @@
 - **Tracking issue(s):** #113 “M10 – GVRS live gate”
 
 ### M11 — Risk Rails Phase A (Telemetry & Proof)
-**Status:** Done – telemetry-only risk rails (broker loss, units, symbol caps, cooldown) live with proof harness.
+**Status:** Done – telemetry-only risk rails (broker loss, units, symbol caps, cooldown) live with proof harness. Phase B (live gating) in progress (demo-only).
 
 **Summary:** Added `RiskRailTelemetrySnapshot`, host/metrics fields, and the `m11-risk-rails-proof` workflow (tools/RiskRailsProbe).
 
@@ -198,4 +198,3 @@
 - **Key PR(s):** N/A
 - **Proof workflow(s):** Final go/no-go suite (TBD)
 - **Tracking issue(s):** To be created when Ops schedules cutover
-

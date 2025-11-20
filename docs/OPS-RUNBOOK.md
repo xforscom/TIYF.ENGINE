@@ -89,7 +89,25 @@ _Environment assumptions:_ OANDA practice account (`demo-oanda`), VPS `tiyf-vps-
 - If kill-switch toggles itself (logs) or remains ON after restart without clear reason.
 - If kill-switch fails to block decisions (orders still sent) – stop engine and alert devs.
 
-## Scenario 5 – Demo Config Changes
+## Scenario 5 – Risk Rails Block Orders (Demo Live Mode)
+
+### How to Detect
+- `/metrics`: `engine_risk_blocks_total` and `engine_risk_blocks_total{gate="..."}`
+- `/health.risk_rails`: violation counters and cooldown block indicators.
+- Daily-monitor: `risk_blocks_total` (optional breakdown if appended).
+- Journal/events: `ALERT_RISK_*_HARD` entries.
+
+### What to Do
+1. `curl -s http://127.0.0.1:8080/metrics | rg 'engine_risk_blocks_total'`.
+2. Check `/health.risk_rails` for which gate triggered (broker_daily, max_position, symbol caps, cooldown).
+3. If blocks align with demo caps (expected), no action required; entries resume when rails clear.
+4. If blocks appear on non-demo configs (should not happen), stop engine and escalate.
+
+### When to Escalate
+- Blocks on real-money configs (not expected).
+- Blocks persisting due to misconfigured caps; hash mismatch in `/health.config.hash` vs intended config.
+
+## Scenario 6 – Demo Config Changes
 
 ### How to Detect
 - `/health.config.hash` and daily-monitor `risk_config_hash` mismatch expected value.
@@ -106,7 +124,7 @@ _Environment assumptions:_ OANDA practice account (`demo-oanda`), VPS `tiyf-vps-
 ### When to Escalate
 - Hash in `/health` never matches local config after restart → stop engine and alert devs.
 
-## Scenario 6 – Engine Restart Procedure
+## Scenario 7 – Engine Restart Procedure
 
 ### Steps
 1. `sudo systemctl status tiyf-engine-demo.service --no-pager`.
@@ -121,7 +139,7 @@ _Environment assumptions:_ OANDA practice account (`demo-oanda`), VPS `tiyf-vps-
 - Service fails to start twice.
 - `/health.connected` false or `stream_connected=0` after restart (ties back to Scenario 1).
 
-## Scenario 7 – Daily-Monitor Looks Wrong
+## Scenario 8 – Daily-Monitor Looks Wrong
 
 ### Symptoms
 - No new decisions (`decisions_total` not increasing).
@@ -142,7 +160,7 @@ _Environment assumptions:_ OANDA practice account (`demo-oanda`), VPS `tiyf-vps-
 - Discrepancies persist after manual workflow run.
 - `/health` shows data but daily-monitor consistently omits it (indicates workflow bug).
 
-## Scenario 8 – Adapter Feed Credentials / Secrets
+## Scenario 9 – Adapter Feed Credentials / Secrets
 
 ### How to Detect
 - `/health.secrets` block (from M9-C) showing missing env.

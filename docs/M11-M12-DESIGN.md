@@ -18,7 +18,7 @@ _Purpose: capture the next enforcement steps so the following orchestrator can i
 | Broker daily loss cap (`broker_daily_loss_cap_ccy`) | Telemetry-only counter | Block new entry orders once used > cap; emit `ALERT_RISK_BROKER_DAILY_CAP_HARD` |
 | Global max position units (`max_position_units`) | Telemetry only | Block entries that would exceed cap; alert `ALERT_RISK_MAX_POSITION_HARD` |
 | Per-symbol unit caps (`symbol_unit_caps`) | Telemetry only | Block entries per symbol beyond cap; alert `ALERT_RISK_SYMBOL_CAP_HARD` |
-| Cooldown guard (`cooldown_enabled`) | Telemetry only | When triggered, block entries until cooldown expires; alert `ALERT_RISK_COOLDOWN_ACTIVE` |
+| Cooldown guard (`cooldown_enabled`) | Telemetry only | When triggered, block entries until cooldown expires; alert `ALERT_RISK_COOLDOWN_HARD` |
 | Broker/DD rails from M4 | Already blocking | No change (still enforced upstream) |
 
 Telemetry-only rails that remain non-blocking: promotion counters, secret provenance, GVRS telemetry (shadow mode), and any optional observational metrics.
@@ -38,7 +38,7 @@ Telemetry-only rails that remain non-blocking: promotion counters, secret proven
   - `ALERT_RISK_BROKER_DAILY_CAP_HARD`  
   - `ALERT_RISK_MAX_POSITION_HARD`  
   - `ALERT_RISK_SYMBOL_CAP_HARD` (include `symbol` in payload)  
-  - `ALERT_RISK_COOLDOWN_ACTIVE`
+  - `ALERT_RISK_COOLDOWN_HARD`
 - Counters: extend `engine_risk_blocks_total{rail="..."}`
 - Daily-monitor: append `risk_blocks_total` (existing) and, when non-zero, a tail such as `risk_blocks_breakdown=broker:1,symbol:2,cooldown:0`.
 

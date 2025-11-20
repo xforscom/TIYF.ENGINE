@@ -14,6 +14,13 @@ internal sealed record RiskRailOutcome(bool Allowed, long Units, IReadOnlyList<R
     public static RiskRailOutcome Permitted(long units) => new(true, units, Array.Empty<RiskRailAlert>());
 }
 
+internal enum RiskRailsMode
+{
+    Disabled,
+    Telemetry,
+    Live
+}
+
 internal readonly record struct RiskPositionUnits(string Symbol, long Units);
 
 internal sealed class RiskRailRuntime
@@ -55,6 +62,7 @@ internal sealed class RiskRailRuntime
     private int _lastCompletedTradesCount;
     private bool _cooldownAlertPending;
     private bool _cooldownActiveAlerted;
+    private readonly RiskRailsMode _mode;
 
     public RiskRailRuntime(
         RiskConfig? config,
@@ -80,6 +88,7 @@ internal sealed class RiskRailRuntime
         _cooldownConfig = config?.Cooldown ?? RiskCooldownConfig.Disabled;
         _telemetryCallback = telemetryCallback;
         _clock = clock ?? (() => DateTime.UtcNow);
+        _mode = ResolveMode(config?.RiskRailsMode);
     }
 
     public void ReplaceNewsEvents(IReadOnlyList<NewsEvent> events)
@@ -127,6 +136,12 @@ internal sealed class RiskRailRuntime
         long requestedUnits,
         IReadOnlyCollection<RiskPositionUnits>? openPositions = null)
     {
+        if (_mode == RiskRailsMode.Disabled)
+        {
+            PublishTelemetry();
+            return RiskRailOutcome.Permitted(requestedUnits);
+        }
+
         UpdateSymbolUsageFromSnapshot(openPositions?.Select(p => (p.Symbol, p.Units)));
         UpdateBrokerDailyLossUsage();
         RefreshCooldownWindow();
@@ -260,7 +275,14 @@ internal sealed class RiskRailRuntime
             }
         }
 
-        EvaluateTelemetryRails(instrument, timeframe, ts, requestedUnits, alerts);
+        if (_mode == RiskRailsMode.Live)
+        {
+            EvaluateLiveRails(instrument, timeframe, ts, requestedUnits, alerts, ref allowed);
+        }
+        else
+        {
+            EvaluateTelemetryRails(instrument, timeframe, ts, requestedUnits, alerts);
+        }
         PublishTelemetry();
         return new RiskRailOutcome(allowed, allowed ? units : 0, alerts);
     }
@@ -309,6 +331,21 @@ internal sealed class RiskRailRuntime
         EvaluateCooldown(instrument, timeframe, ts, alerts);
     }
 
+    private void EvaluateLiveRails(string instrument, string timeframe, DateTime ts, long requestedUnits, List<RiskRailAlert> alerts, ref bool allowed)
+    {
+        EvaluateBrokerDailyLossCapLive(instrument, timeframe, ts, alerts, ref allowed);
+        if (allowed)
+        {
+            EvaluatePositionCapsLive(instrument, timeframe, ts, requestedUnits, alerts, ref allowed);
+        }
+        if (allowed)
+        {
+            EvaluateCooldownLive(instrument, timeframe, ts, alerts, ref allowed);
+        }
+        // Always emit telemetry so metrics/health remain populated.
+        EvaluateTelemetryRails(instrument, timeframe, ts, requestedUnits, alerts);
+    }
+
     /// <summary>
     /// Emits a telemetry alert if the configured broker daily loss cap would be exceeded.
     /// </summary>
@@ -335,6 +372,33 @@ internal sealed class RiskRailRuntime
         };
         alerts.Add(CreateAlert("ALERT_RISK_BROKER_DAILY_CAP_SOFT", payload, throttled: true));
         _brokerDailyLossViolations++;
+    }
+
+    private void EvaluateBrokerDailyLossCapLive(string instrument, string timeframe, DateTime ts, List<RiskRailAlert> alerts, ref bool allowed)
+    {
+        if (!_brokerDailyLossCapCcy.HasValue || !allowed)
+        {
+            return;
+        }
+
+        if (_brokerDailyLossUsedCcy < _brokerDailyLossCapCcy.Value)
+        {
+            return;
+        }
+
+        var payload = new
+        {
+            instrument,
+            timeframe,
+            ts,
+            loss_used_ccy = _brokerDailyLossUsedCcy,
+            loss_cap_ccy = _brokerDailyLossCapCcy.Value,
+            config_hash = _configHash
+        };
+        alerts.Add(CreateAlert("ALERT_RISK_BROKER_DAILY_CAP_HARD", payload, throttled: false));
+        _gateCallback?.Invoke("broker_daily_loss_cap", false);
+        _brokerDailyLossViolations++;
+        allowed = false;
     }
 
     /// <summary>
@@ -398,6 +462,69 @@ internal sealed class RiskRailRuntime
         }
     }
 
+    private void EvaluatePositionCapsLive(string instrument, string timeframe, DateTime ts, long requestedUnits, List<RiskRailAlert> alerts, ref bool allowed)
+    {
+        var unitsAbs = Math.Abs(requestedUnits);
+        if (unitsAbs <= 0 || !allowed)
+        {
+            return;
+        }
+
+        if (_maxPositionUnits.HasValue)
+        {
+            var projected = _maxPositionUnitsUsed + unitsAbs;
+            if (projected > _maxPositionUnits.Value)
+            {
+                var payload = new
+                {
+                    instrument,
+                    timeframe,
+                    ts,
+                    projected_units = projected,
+                    max_units = _maxPositionUnits.Value,
+                    config_hash = _configHash
+                };
+                alerts.Add(CreateAlert("ALERT_RISK_MAX_POSITION_HARD", payload, throttled: false));
+                _gateCallback?.Invoke("max_position_units", false);
+                _maxPositionViolations++;
+                allowed = false;
+            }
+        }
+
+        if (!allowed || _symbolUnitCaps is not { Count: > 0 })
+        {
+            return;
+        }
+
+        var symbolKey = instrument?.Trim();
+        if (string.IsNullOrWhiteSpace(symbolKey))
+        {
+            return;
+        }
+
+        if (_symbolUnitCaps.TryGetValue(symbolKey, out var cap) && cap > 0)
+        {
+            var current = _symbolUnitUsage.TryGetValue(symbolKey, out var usage) ? usage : 0;
+            var projected = current + unitsAbs;
+            if (projected > cap)
+            {
+                var payload = new
+                {
+                    instrument,
+                    timeframe,
+                    ts,
+                    projected_units = projected,
+                    cap_units = cap,
+                    config_hash = _configHash
+                };
+                alerts.Add(CreateAlert("ALERT_RISK_SYMBOL_CAP_HARD", payload, throttled: false));
+                _gateCallback?.Invoke($"symbol_cap:{symbolKey}", false);
+                _symbolUnitViolations[symbolKey] = _symbolUnitViolations.TryGetValue(symbolKey, out var existing) ? existing + 1 : 1;
+                allowed = false;
+            }
+        }
+    }
+
     /// <summary>
     /// Emits telemetry describing cooldown state when the guard is active.
     /// </summary>
@@ -432,6 +559,30 @@ internal sealed class RiskRailRuntime
             _cooldownAlertPending = false;
             _cooldownActiveAlerted = true;
         }
+    }
+
+    private void EvaluateCooldownLive(string instrument, string timeframe, DateTime ts, List<RiskRailAlert> alerts, ref bool allowed)
+    {
+        if (!_cooldownConfig.Enabled || !IsCooldownActive() || !allowed)
+        {
+            return;
+        }
+
+        var payload = new
+        {
+            instrument,
+            timeframe,
+            ts,
+            cooldown_active_until = _cooldownActiveUntilUtc,
+            cooldown_minutes = _cooldownConfig.CooldownMinutes,
+            consecutive_losses = _cooldownConfig.ConsecutiveLosses,
+            config_hash = _configHash
+        };
+        alerts.Add(CreateAlert("ALERT_RISK_COOLDOWN_HARD", payload, throttled: false));
+        _gateCallback?.Invoke("cooldown", false);
+        _cooldownAlertPending = false;
+        _cooldownActiveAlerted = true;
+        allowed = false;
     }
 
     private void UpdateSymbolUsageFromPositions(PositionTracker? positions)
@@ -631,5 +782,16 @@ internal sealed class RiskRailRuntime
             }
         }
         return total;
+    }
+
+    private static RiskRailsMode ResolveMode(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return RiskRailsMode.Telemetry;
+        return raw.Trim().ToLowerInvariant() switch
+        {
+            "off" or "disabled" => RiskRailsMode.Disabled,
+            "live" or "active" => RiskRailsMode.Live,
+            _ => RiskRailsMode.Telemetry
+        };
     }
 }

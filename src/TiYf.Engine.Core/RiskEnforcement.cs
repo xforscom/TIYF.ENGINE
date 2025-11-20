@@ -127,6 +127,7 @@ public sealed class RiskConfig
     public long? MaxPositionUnits { get; init; }
     public Dictionary<string, long>? SymbolUnitCaps { get; init; }
     public RiskCooldownConfig Cooldown { get; init; } = RiskCooldownConfig.Disabled;
+    public string RiskRailsMode { get; init; } = "telemetry";
     public string? RiskConfigHash { get; init; }
     public string PromotionConfigHash => Promotion.ConfigHash;
 }
