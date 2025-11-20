@@ -9,7 +9,7 @@ var outputPath = argsMap.TryGetValue("--output", out var outDir) ? outDir : "pro
 Directory.CreateDirectory(outputPath);
 
 ReconcileScenario scenario;
-await using (var doc = JsonDocument.Parse(File.ReadAllText(configPath)))
+using (var doc = JsonDocument.Parse(File.ReadAllText(configPath)))
 {
     scenario = ReconcileScenario.Parse(doc.RootElement);
 }
