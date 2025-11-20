@@ -69,5 +69,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: m8-reconcile-proof-${{ github.ref_name }}
+          name: m8-reconcile-proof-${{ steps.vars.outputs.safe_ref }}
           path: proof-artifacts/m8-reconcile
