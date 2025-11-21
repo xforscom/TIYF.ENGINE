@@ -24,8 +24,17 @@ static void Run(string configPath, string output)
     state.RegisterAlert("adapter");
     state.RegisterAlert("risk_rails");
     state.RecordReconciliationTelemetry(ReconciliationStatus.Match, 0, new DateTime(2025, 1, 1, 1, 0, 0, DateTimeKind.Utc));
-    state.SetPromotionConfig(new PromotionConfig("demo-promo-hash", PromotionConfig.DefaultShadowCandidates, 30, 50, 0.6m, 0.4m));
-    state.UpdatePromotionShadow(new PromotionShadowSnapshot(0, 0, 0, 0m, 30, 50, 0.6m, 0.4m, PromotionConfig.DefaultShadowCandidates));
+    var shadowCandidates = new[] { "shadow-demo" };
+    var promotionConfig = new PromotionConfig(
+        true,
+        shadowCandidates,
+        30,
+        50,
+        0.6m,
+        0.4m,
+        "demo-promo-hash");
+    state.SetPromotionConfig(promotionConfig);
+    state.UpdatePromotionShadow(new PromotionShadowSnapshot(0, 0, 0, 0m, 30, 50, 0.6m, 0.4m, shadowCandidates));
 
     var metrics = EngineMetricsFormatter.Format(state.CreateMetricsSnapshot());
     File.WriteAllText(Path.Combine(output, "metrics.txt"), metrics);
