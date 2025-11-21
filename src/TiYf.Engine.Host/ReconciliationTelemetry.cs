@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using TiYf.Engine.Sim;
 
@@ -10,19 +14,22 @@ internal sealed class ReconciliationTelemetry
     private readonly ReconciliationJournalWriter _journalWriter;
     private readonly EngineHostState _state;
     private readonly ILogger _logger;
+    private readonly Action<ReconciliationStatus, long, DateTime>? _alertCallback;
 
     public ReconciliationTelemetry(
         Func<IReadOnlyCollection<(string Symbol, TradeSide Side, decimal EntryPrice, long Units, DateTime OpenTimestamp)>> engineSnapshotProvider,
         Func<CancellationToken, Task<BrokerAccountSnapshot?>> brokerSnapshotProvider,
         ReconciliationJournalWriter journalWriter,
         EngineHostState state,
-        ILogger logger)
+        ILogger logger,
+        Action<ReconciliationStatus, long, DateTime>? alertCallback = null)
     {
         _engineSnapshotProvider = engineSnapshotProvider ?? throw new ArgumentNullException(nameof(engineSnapshotProvider));
         _brokerSnapshotProvider = brokerSnapshotProvider ?? (_ => Task.FromResult<BrokerAccountSnapshot?>(null));
         _journalWriter = journalWriter ?? throw new ArgumentNullException(nameof(journalWriter));
         _state = state ?? throw new ArgumentNullException(nameof(state));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _alertCallback = alertCallback;
     }
 
     public async Task EmitAsync(DateTime utcNow, CancellationToken ct)
@@ -75,6 +82,10 @@ internal sealed class ReconciliationTelemetry
 
         var duration = (DateTime.UtcNow - start).TotalSeconds;
         _state.RecordReconciliationTelemetry(aggregate, mismatches, utcNow, duration);
+        if (_alertCallback is not null && aggregate == ReconciliationStatus.Mismatch)
+        {
+            _alertCallback(aggregate, mismatches, utcNow);
+        }
     }
 
     private static ReconciliationStatus MaxStatus(ReconciliationStatus a, ReconciliationStatus b)

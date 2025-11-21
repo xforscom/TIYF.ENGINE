@@ -16,6 +16,10 @@ public static class EngineMetricsFormatter
         AppendMetric(builder, "engine_active_orders", snapshot.ActiveOrders);
         AppendMetric(builder, "engine_risk_events_total", snapshot.RiskEventsTotal);
         AppendMetric(builder, "engine_alerts_total", snapshot.AlertsTotal);
+        foreach (var kvp in snapshot.AlertsByCategory)
+        {
+            AppendMetric(builder, "engine_alerts_total", kvp.Value, "category", kvp.Key);
+        }
         AppendMetric(builder, "engine_order_rejects_total", snapshot.OrderRejectsTotal);
         AppendMetric(builder, "engine_stream_connected", snapshot.StreamConnected);
         AppendMetric(builder, "engine_stream_heartbeat_age_seconds", snapshot.StreamHeartbeatAgeSeconds);

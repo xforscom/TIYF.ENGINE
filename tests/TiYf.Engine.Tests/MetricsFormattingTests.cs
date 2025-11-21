@@ -22,6 +22,8 @@ public class MetricsFormattingTests
         state.UpdateLag(12.5);
         state.UpdatePendingOrders(1);
         state.SetMetrics(openPositions: 2, activeOrders: 1, riskEventsTotal: 3, alertsTotal: 4);
+        state.RegisterAlert("adapter");
+        state.RegisterAlert("risk_rails");
         state.RecordStreamHeartbeat(DateTime.UtcNow);
         state.UpdateStreamConnection(true);
         state.RecordLoopDecision("H1", decisionTime);
@@ -82,7 +84,8 @@ public class MetricsFormattingTests
         Assert.Contains("engine_heartbeat_age_seconds", metricsText);
         Assert.Contains("engine_bar_lag_ms", metricsText);
         Assert.Contains("engine_open_positions 2", metricsText);
-        Assert.Contains("engine_alerts_total 4", metricsText);
+        Assert.Contains("engine_alerts_total 6", metricsText);
+        Assert.Contains("engine_alerts_total{category=\"adapter\"} 1", metricsText);
         Assert.Contains("engine_stream_connected 1", metricsText);
         Assert.Contains("engine_stream_heartbeat_age_seconds", metricsText);
         Assert.Contains("engine_loop_uptime_seconds", metricsText);
