@@ -196,6 +196,7 @@ jobs:
           "DAILY_MONITOR_PROMOTION_PROBATION_DAYS=$promotionProbationDays" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_PROMOTION_MIN_TRADES=$promotionMinTrades" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DAILY_MONITOR_GVRS_GATE_BLOCKS=$gvrsGateBlocks" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DAILY_MONITOR_CONFIG_ID=$configId" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Upload health artifact
         if: always()
@@ -240,6 +241,7 @@ jobs:
           $promotionCandidates = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_PROMOTION_CANDIDATES)) { 'n/a' } else { $env:DAILY_MONITOR_PROMOTION_CANDIDATES }
           $promotionProbationDays = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_PROMOTION_PROBATION_DAYS)) { 'n/a' } else { $env:DAILY_MONITOR_PROMOTION_PROBATION_DAYS }
           $promotionMinTrades = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_PROMOTION_MIN_TRADES)) { 'n/a' } else { $env:DAILY_MONITOR_PROMOTION_MIN_TRADES }
+          $configId = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_CONFIG_ID)) { '' } else { $env:DAILY_MONITOR_CONFIG_ID }
           $gvrsGateBlocks = if ([string]::IsNullOrWhiteSpace($env:DAILY_MONITOR_GVRS_GATE_BLOCKS)) { 0 } else { [int64]$env:DAILY_MONITOR_GVRS_GATE_BLOCKS }
           $heartbeatFormatted = ('{0:0.0}' -f $heartbeatAge)
           $streamHeartbeatFormatted = ('{0:0.0}' -f $streamHeartbeatAge)
