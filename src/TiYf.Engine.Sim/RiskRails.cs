@@ -146,7 +146,7 @@ internal sealed class RiskRailRuntime
         long requestedUnits,
         IReadOnlyCollection<RiskPositionUnits>? openPositions = null)
     {
-        if (_mode == RiskRailsMode.Disabled || _mode == RiskRailsMode.Telemetry)
+        if (_mode == RiskRailsMode.Disabled)
         {
             PublishTelemetry();
             return RiskRailOutcome.Permitted(requestedUnits);
