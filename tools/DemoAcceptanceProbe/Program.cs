@@ -3,16 +3,16 @@ using TiYf.Engine.Host;
 using TiYf.Engine.Core;
 using TiYf.Engine.Sim;
 
-var (configPath, outputPath) = ParseArgs(args);
-Run(configPath, outputPath);
+var (configPath, outputPath, adapterId) = ParseArgs(args);
+Run(configPath, outputPath, adapterId);
 return;
 
-static void Run(string configPath, string output)
+static void Run(string configPath, string output, string adapterId)
 {
     Directory.CreateDirectory(output);
     var configId = ReadConfigId(configPath);
 
-    var state = new EngineHostState("oanda-demo", new[] { "m14-acceptance" });
+    var state = new EngineHostState(adapterId, new[] { "m14-acceptance" });
     state.MarkConnected(true);
     state.SetLoopStart(new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc));
     state.SetTimeframes(new[] { "H1", "H4" });
@@ -43,7 +43,7 @@ static void Run(string configPath, string output)
     var healthJson = JsonSerializer.Serialize(health, new JsonSerializerOptions { WriteIndented = true });
     File.WriteAllText(Path.Combine(output, "health.json"), healthJson);
 
-    File.WriteAllText(Path.Combine(output, "events.csv"), ""); // ensure no fatal alerts
+    File.WriteAllText(Path.Combine(output, "events.csv"), ""); // probe emits no events; workflow asserts absence of fatal alerts
 
     var summary = $"m14_demo_acceptance PASS reconcile_drift=0 fatal_alerts=0 risk_rails=1 gvrs_live=1 promotion_shadow=1 alert_sink=1 config_id={configId}";
     File.WriteAllText(Path.Combine(output, "summary.txt"), summary);
@@ -72,10 +72,11 @@ static string ReadConfigId(string path)
     return "unknown";
 }
 
-static (string Config, string Output) ParseArgs(string[] args)
+static (string Config, string Output, string Adapter) ParseArgs(string[] args)
 {
     string config = string.Empty;
     string output = Path.Combine("proof-artifacts", "m14-acceptance");
+    string adapter = "oanda-demo";
     for (var i = 0; i < args.Length; i++)
     {
         var arg = args[i];
@@ -89,6 +90,12 @@ static (string Config, string Output) ParseArgs(string[] args)
         {
             output = args[i + 1];
             i++;
+            continue;
+        }
+        if ((arg == "--adapter" || arg == "-a") && i + 1 < args.Length)
+        {
+            adapter = args[i + 1];
+            i++;
         }
     }
 
@@ -97,5 +104,5 @@ static (string Config, string Output) ParseArgs(string[] args)
         throw new ArgumentException("config is required (--config path)");
     }
 
-    return (config, output);
+    return (config, output, adapter);
 }
