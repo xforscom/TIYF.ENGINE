@@ -1,33 +1,18 @@
-using System.CommandLine;
 using System.Text.Json;
 using TiYf.Engine.Host;
 using TiYf.Engine.Core;
 using TiYf.Engine.Sim;
 
-var configOption = new Option<string>("--config", description: "Path to demo config") { IsRequired = true };
-var barsOption = new Option<int>("--bars", getDefaultValue: () => 200, description: "Number of bars (unused placeholder)");
-var outputOption = new Option<string>("--output", getDefaultValue: () => Path.Combine("proof-artifacts", "m14-acceptance"));
+var (configPath, outputPath, adapterId) = ParseArgs(args);
+Run(configPath, outputPath, adapterId);
+return;
 
-var root = new RootCommand("Demo acceptance probe")
-{
-    configOption,
-    barsOption,
-    outputOption
-};
-
-root.SetHandler((string configPath, int _, string output) =>
-{
-    Run(configPath, output);
-}, configOption, barsOption, outputOption);
-
-return await root.InvokeAsync(args);
-
-static void Run(string configPath, string output)
+static void Run(string configPath, string output, string adapterId)
 {
     Directory.CreateDirectory(output);
     var configId = ReadConfigId(configPath);
 
-    var state = new EngineHostState("oanda-demo", new[] { "m14-acceptance" });
+    var state = new EngineHostState(adapterId, new[] { "m14-acceptance" });
     state.MarkConnected(true);
     state.SetLoopStart(new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc));
     state.SetTimeframes(new[] { "H1", "H4" });
@@ -39,8 +24,17 @@ static void Run(string configPath, string output)
     state.RegisterAlert("adapter");
     state.RegisterAlert("risk_rails");
     state.RecordReconciliationTelemetry(ReconciliationStatus.Match, 0, new DateTime(2025, 1, 1, 1, 0, 0, DateTimeKind.Utc));
-    state.SetPromotionConfig(new PromotionConfig("demo-promo-hash", PromotionConfig.DefaultShadowCandidates, 30, 50, 0.6m, 0.4m));
-    state.UpdatePromotionShadow(new PromotionShadowSnapshot(0, 0, 0, 0m, 30, 50, 0.6m, 0.4m, PromotionConfig.DefaultShadowCandidates));
+    var shadowCandidates = new[] { "shadow-demo" };
+    var promotionConfig = new PromotionConfig(
+        true,
+        shadowCandidates,
+        30,
+        50,
+        0.6m,
+        0.4m,
+        "demo-promo-hash");
+    state.SetPromotionConfig(promotionConfig);
+    state.UpdatePromotionShadow(new PromotionShadowSnapshot(0, 0, 0, 0m, 30, 50, 0.6m, 0.4m, shadowCandidates));
 
     var metrics = EngineMetricsFormatter.Format(state.CreateMetricsSnapshot());
     File.WriteAllText(Path.Combine(output, "metrics.txt"), metrics);
@@ -49,7 +43,7 @@ static void Run(string configPath, string output)
     var healthJson = JsonSerializer.Serialize(health, new JsonSerializerOptions { WriteIndented = true });
     File.WriteAllText(Path.Combine(output, "health.json"), healthJson);
 
-    File.WriteAllText(Path.Combine(output, "events.csv"), ""); // ensure no fatal alerts
+    File.WriteAllText(Path.Combine(output, "events.csv"), ""); // probe emits no events; workflow asserts absence of fatal alerts
 
     var summary = $"m14_demo_acceptance PASS reconcile_drift=0 fatal_alerts=0 risk_rails=1 gvrs_live=1 promotion_shadow=1 alert_sink=1 config_id={configId}";
     File.WriteAllText(Path.Combine(output, "summary.txt"), summary);
@@ -76,4 +70,39 @@ static string ReadConfigId(string path)
         // fall through
     }
     return "unknown";
+}
+
+static (string Config, string Output, string Adapter) ParseArgs(string[] args)
+{
+    string config = string.Empty;
+    string output = Path.Combine("proof-artifacts", "m14-acceptance");
+    string adapter = "oanda-demo";
+    for (var i = 0; i < args.Length; i++)
+    {
+        var arg = args[i];
+        if ((arg == "--config" || arg == "-c") && i + 1 < args.Length)
+        {
+            config = args[i + 1];
+            i++;
+            continue;
+        }
+        if ((arg == "--output" || arg == "-o") && i + 1 < args.Length)
+        {
+            output = args[i + 1];
+            i++;
+            continue;
+        }
+        if ((arg == "--adapter" || arg == "-a") && i + 1 < args.Length)
+        {
+            adapter = args[i + 1];
+            i++;
+        }
+    }
+
+    if (string.IsNullOrWhiteSpace(config))
+    {
+        throw new ArgumentException("config is required (--config path)");
+    }
+
+    return (config, output, adapter);
 }
