@@ -113,6 +113,16 @@ public sealed class EngineHostState
     public double BarLagMilliseconds { get; private set; }
     public int PendingOrders { get; private set; }
     public string? LastLog { get; private set; }
+    public string ConfigId
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _configId;
+            }
+        }
+    }
 
     public IReadOnlyList<string> FeatureFlags
     {
@@ -459,10 +469,13 @@ public sealed class EngineHostState
         {
             _configPath = string.IsNullOrWhiteSpace(path) ? string.Empty : Path.GetFullPath(path);
             _configHash = hash ?? string.Empty;
-            if (!string.IsNullOrWhiteSpace(configId))
+            var resolvedId = !string.IsNullOrWhiteSpace(configId) ? configId : _configId;
+            if (string.IsNullOrWhiteSpace(resolvedId))
             {
-                _configId = configId;
+                var fileName = Path.GetFileNameWithoutExtension(_configPath);
+                resolvedId = string.IsNullOrWhiteSpace(fileName) ? "unknown" : fileName;
             }
+            _configId = resolvedId ?? string.Empty;
         }
     }
 
