@@ -72,6 +72,7 @@ internal sealed class RiskRailRuntime
     private bool _cooldownActiveAlerted;
     private readonly RiskRailsMode _mode;
     private readonly bool _blockingEnabled;
+    private readonly bool _emitTelemetryAlerts;
 
     public RiskRailRuntime(
         RiskConfig? config,
@@ -102,6 +103,7 @@ internal sealed class RiskRailRuntime
         _clock = clock ?? (() => DateTime.UtcNow);
         _mode = ResolveMode(config?.RiskRailsMode);
         _blockingEnabled = enableBlocking;
+        _emitTelemetryAlerts = enableBlocking;
     }
 
     public void ReplaceNewsEvents(IReadOnlyList<NewsEvent> events)
@@ -293,11 +295,14 @@ internal sealed class RiskRailRuntime
         {
             EvaluateLiveRails(instrument, timeframe, ts, requestedUnits, alerts, ref allowed);
         }
-        else
+        else if (_emitTelemetryAlerts)
         {
             EvaluateTelemetryRails(instrument, timeframe, ts, requestedUnits, alerts);
         }
-        EvaluateBrokerGuardrail(instrument, timeframe, ts, requestedUnits, alerts, ref allowed, liveRails);
+        if (_emitTelemetryAlerts)
+        {
+            EvaluateBrokerGuardrail(instrument, timeframe, ts, requestedUnits, alerts, ref allowed, liveRails);
+        }
         PublishTelemetry();
         return new RiskRailOutcome(allowed, allowed ? units : 0, alerts);
     }

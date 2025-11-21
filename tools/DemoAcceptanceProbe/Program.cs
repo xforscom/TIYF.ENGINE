@@ -1,26 +1,11 @@
-using System.CommandLine;
 using System.Text.Json;
 using TiYf.Engine.Host;
 using TiYf.Engine.Core;
 using TiYf.Engine.Sim;
 
-var configOption = new Option<string>("--config", description: "Path to demo config") { IsRequired = true };
-var outputOption = new Option<string>("--output", getDefaultValue: () => Path.Combine("proof-artifacts", "m14-acceptance"));
-var adapterOption = new Option<string>("--adapter", getDefaultValue: () => "oanda-demo", description: "Adapter identifier for labeling");
-
-var root = new RootCommand("Demo acceptance probe")
-{
-    configOption,
-    outputOption,
-    adapterOption
-};
-
-root.SetHandler((string configPath, string output, string adapterId) =>
-{
-    Run(configPath, output, adapterId);
-}, configOption, outputOption, adapterOption);
-
-return await root.InvokeAsync(args);
+var (configPath, outputPath, adapterId) = ParseArgs(args);
+Run(configPath, outputPath, adapterId);
+return;
 
 static void Run(string configPath, string output, string adapterId)
 {
@@ -39,25 +24,17 @@ static void Run(string configPath, string output, string adapterId)
     state.RegisterAlert("adapter");
     state.RegisterAlert("risk_rails");
     state.RecordReconciliationTelemetry(ReconciliationStatus.Match, 0, new DateTime(2025, 1, 1, 1, 0, 0, DateTimeKind.Utc));
-    var promoConfig = new PromotionConfig(
+    var shadowCandidates = new[] { "shadow-demo" };
+    var promotionConfig = new PromotionConfig(
         true,
-        PromotionConfig.Default.ShadowCandidates,
-        PromotionConfig.Default.ProbationDays,
-        PromotionConfig.Default.MinTrades,
-        PromotionConfig.Default.PromotionThreshold,
-        PromotionConfig.Default.DemotionThreshold,
+        shadowCandidates,
+        30,
+        50,
+        0.6m,
+        0.4m,
         "demo-promo-hash");
-    state.SetPromotionConfig(promoConfig);
-    state.UpdatePromotionShadow(new PromotionShadowSnapshot(
-        0,
-        0,
-        0,
-        0m,
-        promoConfig.ProbationDays,
-        promoConfig.MinTrades,
-        promoConfig.PromotionThreshold,
-        promoConfig.DemotionThreshold,
-        promoConfig.ShadowCandidates.ToArray()));
+    state.SetPromotionConfig(promotionConfig);
+    state.UpdatePromotionShadow(new PromotionShadowSnapshot(0, 0, 0, 0m, 30, 50, 0.6m, 0.4m, shadowCandidates));
 
     var metrics = EngineMetricsFormatter.Format(state.CreateMetricsSnapshot());
     File.WriteAllText(Path.Combine(output, "metrics.txt"), metrics);
@@ -93,4 +70,39 @@ static string ReadConfigId(string path)
         // fall through
     }
     return "unknown";
+}
+
+static (string Config, string Output, string Adapter) ParseArgs(string[] args)
+{
+    string config = string.Empty;
+    string output = Path.Combine("proof-artifacts", "m14-acceptance");
+    string adapter = "oanda-demo";
+    for (var i = 0; i < args.Length; i++)
+    {
+        var arg = args[i];
+        if ((arg == "--config" || arg == "-c") && i + 1 < args.Length)
+        {
+            config = args[i + 1];
+            i++;
+            continue;
+        }
+        if ((arg == "--output" || arg == "-o") && i + 1 < args.Length)
+        {
+            output = args[i + 1];
+            i++;
+            continue;
+        }
+        if ((arg == "--adapter" || arg == "-a") && i + 1 < args.Length)
+        {
+            adapter = args[i + 1];
+            i++;
+        }
+    }
+
+    if (string.IsNullOrWhiteSpace(config))
+    {
+        throw new ArgumentException("config is required (--config path)");
+    }
+
+    return (config, output, adapter);
 }

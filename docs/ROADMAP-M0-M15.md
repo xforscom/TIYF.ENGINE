@@ -178,15 +178,15 @@
 - **Tracking issue(s):** Blueprint future milestone
 
 ### M14 — Ops Readiness & Demo Acceptance
-**Status:** Not started.
+**Status:** In progress – demo acceptance probe and proof wired (observability-only).
 
-**Summary:** End-to-end demo acceptance tests, runbooks, and Ops dashboards required before real-money cutover.
+**Summary:** End-to-end demo acceptance probe (reconcile drift zero, no fatal alerts, GVRS/risk rails/promotion shadow active, alerts counters present, config_id surfaced) with proof workflow; no trading/risk behaviour changes.
 
 **Evidence**
-- **Tag(s):** N/A
-- **Key PR(s):** N/A
-- **Proof workflow(s):** Planned Ops acceptance proof
-- **Tracking issue(s):** Future Ops issue
+- **Tag(s):** pending (`v1.14.0-m14-demo-acceptance` on merge)
+- **Key PR(s):** feat/m14-demo-acceptance
+- **Proof workflow(s):** `m14-demo-acceptance-proof` (added this phase)
+- **Tracking issue(s):** To be created/updated post-merge
 
 ### M15 — Real-Money Cutover
 **Status:** Not started.
