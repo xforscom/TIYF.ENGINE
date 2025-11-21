@@ -215,8 +215,24 @@ _Environment assumptions:_ ALERT_SINK_TYPE may be `discord`, `file`, or `none`; 
 2. Update secrets via SOP (never commit secrets).
 3. Restart engine.
 
+## Scenario 13 – Demo Acceptance (M14)
+
+_Environment assumptions:_ Demo OANDA only; alert sink optional (env-driven); no real-money configs.
+
+### How to Detect
+- DemoAcceptanceProbe summary.txt shows `m14_demo_acceptance PASS`.
+- Proof artifacts (/metrics, /health) include config_id, risk rails, GVRS live bucket, alert counters, promotion shadow.
+- No `ALERT_FATAL` lines in events.csv.
+
+### What to Do
+1. If summary indicates drift or fatal alerts, stop the demo engine and inspect reconciliation journals and alert logs.
+2. Re-run the acceptance proof to confirm reproducibility.
+3. Check env alert sink settings (ALERT_SINK_TYPE/URL) if alerts_total is unexpectedly zero.
+
 ### When to Escalate
-- If secrets fail to load even though env conf is correct.
+- Any fatal alerts detected in acceptance proof.
+- Reconcile drift > 0 on demo runs.
+- Config_id mismatch between proof and deployed demo config.
 
 ## Scenario 12 – News Blackout Looks Wrong (Demo Only)
 

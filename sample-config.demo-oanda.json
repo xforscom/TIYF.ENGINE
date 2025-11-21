@@ -1,6 +1,7 @@
 {
   "schemaVersion": "1.3.0",
   "configId": "demo-oanda-v1",
+  "m14_acceptance": true,
   "run": {
     "runId": "RUN-DEMO-OANDA"
   },

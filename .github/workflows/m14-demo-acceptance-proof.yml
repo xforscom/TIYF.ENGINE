@@ -1,0 +1,50 @@
+name: m14-demo-acceptance-proof
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'tools/DemoAcceptanceProbe/**'
+      - 'sample-config.demo-oanda.json'
+      - '.github/workflows/m14-demo-acceptance-proof.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  proof:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Restore
+        run: dotnet restore TiYf.Engine.sln
+      - name: Build
+        run: dotnet build TiYf.Engine.sln -c Release --no-restore
+      - name: Run demo acceptance probe
+        run: dotnet run --project tools/DemoAcceptanceProbe/DemoAcceptanceProbe.csproj -c Release -- --config sample-config.demo-oanda.json --bars 200 --output proof-artifacts/m14-acceptance
+      - name: Assert summary
+        run: |
+          grep -q "m14_demo_acceptance PASS" proof-artifacts/m14-acceptance/summary.txt
+          grep -q "reconcile_drift=0" proof-artifacts/m14-acceptance/summary.txt
+          if grep -q "ALERT_FATAL" proof-artifacts/m14-acceptance/events.csv; then exit 1; fi
+      - name: Assert metrics
+        run: |
+          grep -q "engine_risk_blocks_total" proof-artifacts/m14-acceptance/metrics.txt
+          grep -q "engine_gvrs_bucket" proof-artifacts/m14-acceptance/metrics.txt
+          grep -q "engine_config_id" proof-artifacts/m14-acceptance/metrics.txt
+          grep -q "engine_alerts_total" proof-artifacts/m14-acceptance/metrics.txt
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: m14-demo-acceptance-${{ github.run_id }}
+          path: proof-artifacts/m14-acceptance
