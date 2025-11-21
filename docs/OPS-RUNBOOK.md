@@ -206,17 +206,94 @@ _Environment assumptions:_ ALERT_SINK_TYPE may be `discord`, `file`, or `none`; 
 2. If persistence failed (loaded_keys=0 unexpectedly), check logs for `ALERT_IDEMPOTENCY_PERSISTENCE_FAILED`.
 3. Only wipe the persistence file as a last resort and with dev approval; doing so risks duplicate order sends on restart.
 
+## Scenario 9 – Adapter Feed Credentials / Secrets
+
 ### How to Detect
-- `/health.secrets` block (from M9-C) showing missing env.
-- Logs: `SECRET_PROVENANCE missing` warnings.
+- `/health.secrets` contains provenance labels (`env`, `missing`).
+- Metrics: `engine_secret_provenance{integration="...",source="..."}`.
 
 ### What to Do
-1. Verify env vars in `/etc/systemd/system/tiyf-engine-demo.service.d/env.conf` (example).
-2. Update secrets via SOP (never commit secrets).
-3. Restart engine.
+1. Verify env vars are set (e.g., `echo $OANDA_PRACTICE_TOKEN`).
+2. If secrets missing, set env or restart after injecting via CI/Secrets.
+3. Do not hardcode secrets in configs.
 
 ### When to Escalate
-- If secrets fail to load even though env conf is correct.
+- Secrets unavailable on VPS and cannot be restored quickly.
+- Suspicion of leaked/rotated secrets without audit trail.
+
+## Scenario 10 – Alert sink failures or missing alerts (demo-only)
+
+_Environment assumptions:_ ALERT_SINK_TYPE may be `discord`, `file`, or `none`; secrets are env-only.
+
+**How to detect**
+1. /metrics shows `engine_alerts_total` increasing but no messages arrive at the sink.
+2. Host logs contain `alert_sink warn` or `alert_sink error`.
+3. In proof mode, artifacts/alerts.log is missing or empty.
+
+**What to do**
+1. Check env vars on host: `echo $ALERT_SINK_TYPE`, `echo $ALERT_DISCORD_WEBHOOK_URL` (presence only; do not log value).
+2. If using Discord: verify webhook URL is reachable (network/firewall), retry sending a curl POST with a dummy payload (without secrets).
+3. If using file sink: ensure ALERT_FILE_PATH directory is writable and not full.
+4. If the sink is optional for the current run, set ALERT_SINK_TYPE=none and restart to suppress noise.
+
+**When to escalate or stop**
+- If alerts are expected in demo and delivery cannot be restored within 15 minutes, stop the engine and notify devs.
+- Never paste tokens into logs or tickets.
+
+## Scenario 11 – Reconciliation Drift
+
+### How to Detect
+- `/health.reconciliation` block: `mismatches_total`, `runs_total`, `last_status`, `last_reconcile_utc`.
+- `/metrics`: `engine_reconcile_runs_total`, `engine_reconcile_mismatches_total`.
+- Reconcile journal under `journals/<adapter>/reconcile/`.
+
+### What to Do
+1. `curl -s http://127.0.0.1:8080/health | jq '.reconciliation'`.
+2. If mismatches > 0, inspect `reconcile.csv` in the latest journal run; confirm symbols and reasons.
+3. If mismatches are expected test fixtures (proof/demo), no action. If unexpected, pause trading via kill-switch and escalate.
+
+### When to Escalate
+- `last_status` = `mismatch` on real broker live runs.
+- Broker API unreachable during reconciliation.
+
+## Scenario 12 – News Blackout Looks Wrong (Demo Only)
+
+### How to Detect
+- `/health.news.blackout_active` stuck true/false or `events_fetched_total` not increasing.
+- `/metrics` missing `engine_news_events_fetched_total`, `engine_news_blackout_windows_total`, or `engine_news_source{type="file"}`.
+- Daily-monitor tail lacks news fields or shows stale `news.last_event_utc`.
+
+### What to Do
+1. Confirm config identity: `/health.config.id` matches the demo config id; news source type remains `file` unless intentionally testing HTTP.
+2. Inspect `/health.news` window_start/window_end and `last_event_utc`; compare to the expected fixture (proof/m9-news-events.json) if running the proof harness.
+3. If events_fetched_total is 0 while the stub file exists:
+   - SSH to VPS and `ls -l /opt/tiyf/news-stub/today.json`; ensure readable.
+   - Restart the engine only after the file is present (see Scenario 7).
+4. If blackout_active toggles unexpectedly, replace the fixture with the known-good proof file and restart.
+
+### When to Escalate
+- `/health.news` fails to load after restart.
+- News source flips to `http` without an explicit config change.
+- Blackout timestamps are garbage or news metrics disappear from `/metrics`.
+
+## Scenario 13 – Demo Acceptance (M14)
+
+_Environment assumptions:_ Demo OANDA only; alert sink optional (env-driven); no real-money configs.
+
+### How to Detect
+- DemoAcceptanceProbe summary.txt shows `m14_demo_acceptance PASS`.
+- Proof artifacts (/metrics, /health) include config_id, risk rails, GVRS live bucket, alert counters, promotion shadow.
+- No `ALERT_FATAL` lines in events.csv.
+
+### What to Do
+1. If summary indicates drift or fatal alerts, stop the demo engine and inspect reconciliation journals and alert logs.
+2. Re-run the acceptance proof to confirm reproducibility.
+3. Check env alert sink settings (ALERT_SINK_TYPE/URL) if alerts_total is unexpectedly zero.
+
+### When to Escalate
+- Any fatal alerts detected in acceptance proof.
+- Reconcile drift > 0 on demo runs.
+- Config_id mismatch between proof and deployed demo config.
 
 ## Scenario 12 – News Blackout Looks Wrong (Demo Only)
 

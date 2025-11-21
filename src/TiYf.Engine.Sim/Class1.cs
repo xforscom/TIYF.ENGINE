@@ -577,7 +577,8 @@ public sealed class EngineLoop
                 startingEquity,
                 telemetryCallback: riskRailsTelemetryCallback,
                 clock: UtcNow,
-                brokerCaps: brokerCaps)
+                brokerCaps: brokerCaps,
+                enableBlocking: string.Equals(_riskMode, "active", StringComparison.OrdinalIgnoreCase))
             : null;
         _promotionRuntime = riskConfig?.Promotion is { Enabled: true } promo
             ? new PromotionShadowRuntime(promo)
@@ -802,14 +803,14 @@ public sealed class EngineLoop
                             var limit = Math.Abs(maxRunDrawdown.Value);
                             drawdownBreach = runDrawdown > limit;
                         }
-                        if (exposureBreach)
+                        if (exposureBreach && _riskMode == "active")
                         {
                             var alertPayload = JsonSerializer.SerializeToElement(new { symbol = bar.InstrumentId.Value, ts = bar.EndUtc, limit = lim, value = netExposure, reason = "net_exposure_cap", config_hash = _riskConfigHash });
                             alertPayload = EnrichWithGvrs(alertPayload);
                             await _journal.AppendAsync(new JournalEvent(++_seq, bar.EndUtc, "ALERT_BLOCK_NET_EXPOSURE", _sourceAdapter, alertPayload), ct);
                             if (_riskMode == "active" && (_riskConfig?.BlockOnBreach ?? false)) _riskBlockCurrentBar = true;
                         }
-                        if (drawdownBreach && maxRunDrawdown.HasValue)
+                        if (drawdownBreach && maxRunDrawdown.HasValue && _riskMode == "active")
                         {
                             var limitValue = Math.Abs(maxRunDrawdown.Value);
                             var alertPayload = JsonSerializer.SerializeToElement(new { ts = bar.EndUtc, limit_ccy = limitValue, value_ccy = runDrawdown, reason = "drawdown_guard", config_hash = _riskConfigHash });
