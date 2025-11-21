@@ -234,9 +234,6 @@ _Environment assumptions:_ Demo OANDA only; alert sink optional (env-driven); no
 - Reconcile drift > 0 on demo runs.
 - Config_id mismatch between proof and deployed demo config.
 
-### When to Escalate
-- If secrets fail to load even though env conf is correct.
-
 ## Scenario 12 – News Blackout Looks Wrong (Demo Only)
 
 ### How to Detect
