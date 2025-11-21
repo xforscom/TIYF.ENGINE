@@ -350,7 +350,7 @@ internal sealed class EngineLoopService : BackgroundService
             idempotencyPersistence: _idempotencyPersistence,
             persistedIdempotencySnapshot: persistedIdempotency);
 
-        var newsProvider = string.IsNullOrWhiteSpace(riskConfig?.NewsProvider) ? "file" : riskConfig.NewsProvider.Trim();
+        var newsProvider = ResolveNewsProvider(riskConfig);
         await StartNewsFeedMonitorAsync(riskConfig?.NewsBlackout, newsProvider).ConfigureAwait(false);
 
         _logger.LogInformation("Streaming runtime initialized run_id={RunId} journal={Journal}", runId, journalWriter.RunDirectory);
@@ -1189,7 +1189,7 @@ internal sealed class EngineLoopService : BackgroundService
 
     private INewsFeed CreateNewsFeed(NewsBlackoutConfig config, string provider, out string resolvedSourceType)
     {
-        var requestedType = NewsSourceTypeHelper.Normalize(string.IsNullOrWhiteSpace(provider) ? config.SourceType : provider);
+        var requestedType = provider;
         if (string.Equals(requestedType, "http", StringComparison.OrdinalIgnoreCase) && config.Http is { } http && !string.IsNullOrWhiteSpace(http.BaseUri))
         {
             if (!Uri.TryCreate(http.BaseUri, UriKind.Absolute, out var baseUri))
@@ -1245,4 +1245,14 @@ internal sealed class EngineLoopService : BackgroundService
         return (value, "env");
     }
 
+    private static string ResolveNewsProvider(RiskConfig? riskConfig)
+    {
+        var explicitProvider = riskConfig?.NewsProvider;
+        var blackoutProvider = riskConfig?.NewsBlackout?.SourceType;
+        var chosen = !string.IsNullOrWhiteSpace(explicitProvider)
+            ? explicitProvider
+            : blackoutProvider;
+        var normalized = NewsSourceTypeHelper.Normalize(chosen);
+        return string.IsNullOrWhiteSpace(normalized) ? "file" : normalized;
+    }
 }

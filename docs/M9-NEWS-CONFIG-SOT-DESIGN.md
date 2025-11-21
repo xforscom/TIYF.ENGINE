@@ -17,7 +17,7 @@
 ## Secrets Hygiene
 - Credentials are env/secret-store only; JSON configs must not carry tokens.
 - OANDA adapter:
-  - `accessToken` must be `env:VAR`; plain values are ignored with provenance `config`.
+  - `accessToken` must be `env:VAR`; plain values are ignored with provenance `config_ignored`.
   - Secret provenance tracked via `SecretProvenanceTracker` and logged once at startup (`secret_provenance integration=… sources=env`).
 - Startup logs never include secret values; proofs grep for provider labels and ensure tokens do not appear in logs.
 

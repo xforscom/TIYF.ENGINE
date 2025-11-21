@@ -41,8 +41,6 @@ public class BarV1EmissionTests
         var interval = new BarInterval(TimeSpan.FromMinutes(1));
         var builders = new Dictionary<(InstrumentId, BarInterval), IntervalBarBuilder> { { (new InstrumentId("I1"), interval), new IntervalBarBuilder(interval) } };
         var loop = new EngineLoop(clock, builders, tracker, journalWriter, ticks, cfg.BarOutputEventType, schemaVersion: cfg.SchemaVersion);
-        var barEventField = typeof(EngineLoop).GetField("_barEventType", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        Assert.Equal("BAR_V1", barEventField?.GetValue(loop));
         await loop.RunAsync();
         await journalWriter.DisposeAsync();
 

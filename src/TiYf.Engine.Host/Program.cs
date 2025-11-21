@@ -21,7 +21,7 @@ var initialSecretSnapshot = secretTracker.CreateSnapshot();
 adapterContext.State.UpdateSecretProvenance(initialSecretSnapshot);
 foreach (var kvp in initialSecretSnapshot)
 {
-    var sources = string.Join(",", kvp.Value ?? Array.Empty<string>());
+    var sources = string.Join(",", kvp.Value);
     Console.WriteLine($"secret_provenance integration={kvp.Key} sources={sources}");
 }
 
