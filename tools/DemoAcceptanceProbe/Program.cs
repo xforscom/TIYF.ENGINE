@@ -1,26 +1,11 @@
-using System.CommandLine;
 using System.Text.Json;
 using TiYf.Engine.Host;
 using TiYf.Engine.Core;
 using TiYf.Engine.Sim;
 
-var configOption = new Option<string>("--config", description: "Path to demo config") { IsRequired = true };
-var barsOption = new Option<int>("--bars", getDefaultValue: () => 200, description: "Number of bars (unused placeholder)");
-var outputOption = new Option<string>("--output", getDefaultValue: () => Path.Combine("proof-artifacts", "m14-acceptance"));
-
-var root = new RootCommand("Demo acceptance probe")
-{
-    configOption,
-    barsOption,
-    outputOption
-};
-
-root.SetHandler((string configPath, int _, string output) =>
-{
-    Run(configPath, output);
-}, configOption, barsOption, outputOption);
-
-return await root.InvokeAsync(args);
+var (configPath, outputPath) = ParseArgs(args);
+Run(configPath, outputPath);
+return;
 
 static void Run(string configPath, string output)
 {
@@ -76,4 +61,32 @@ static string ReadConfigId(string path)
         // fall through
     }
     return "unknown";
+}
+
+static (string Config, string Output) ParseArgs(string[] args)
+{
+    string config = string.Empty;
+    string output = Path.Combine("proof-artifacts", "m14-acceptance");
+    for (var i = 0; i < args.Length; i++)
+    {
+        var arg = args[i];
+        if ((arg == "--config" || arg == "-c") && i + 1 < args.Length)
+        {
+            config = args[i + 1];
+            i++;
+            continue;
+        }
+        if ((arg == "--output" || arg == "-o") && i + 1 < args.Length)
+        {
+            output = args[i + 1];
+            i++;
+        }
+    }
+
+    if (string.IsNullOrWhiteSpace(config))
+    {
+        throw new ArgumentException("config is required (--config path)");
+    }
+
+    return (config, output);
 }
