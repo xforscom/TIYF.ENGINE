@@ -10,7 +10,6 @@ namespace TiYf.Engine.Tests
         {
             var line = BuildSummary("demo-oanda-v1");
             Assert.EndsWith("config_id=demo-oanda-v1", line);
-            Assert.Contains("config_id=demo-oanda-v1", line);
         }
 
         [Fact]
