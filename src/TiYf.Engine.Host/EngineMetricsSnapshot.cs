@@ -8,6 +8,7 @@ public readonly record struct EngineMetricsSnapshot(
     int ActiveOrders,
     long RiskEventsTotal,
     long AlertsTotal,
+    IReadOnlyDictionary<string, long> AlertsByCategory,
     long OrderRejectsTotal,
     int StreamConnected,
     double StreamHeartbeatAgeSeconds,

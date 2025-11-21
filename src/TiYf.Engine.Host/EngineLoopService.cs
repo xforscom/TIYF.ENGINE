@@ -16,6 +16,7 @@ using TiYf.Engine.Sidecar;
 using TiYf.Engine.Sim;
 using TiYf.Engine.Core.Slippage;
 using TiYf.Engine.Host.News;
+using TiYf.Engine.Host.Alerts;
 
 namespace TiYf.Engine.Host;
 
@@ -30,6 +31,7 @@ internal sealed class EngineLoopService : BackgroundService
     private readonly EngineHostOptions _hostOptions;
     private readonly IConnectableExecutionAdapter? _executionAdapter;
     private readonly SecretProvenanceTracker _secretTracker;
+    private readonly IAlertSink _alertSink;
     private FileIdempotencyPersistence? _idempotencyPersistence;
     private StartupReconciliationRunner? _startupReconciliationRunner;
     private NewsFeedRunner? _newsFeedRunner;
@@ -89,6 +91,7 @@ internal sealed class EngineLoopService : BackgroundService
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _hostOptions = hostOptions?.Value ?? throw new ArgumentNullException(nameof(hostOptions));
         _secretTracker = secretTracker ?? throw new ArgumentNullException(nameof(secretTracker));
+        _alertSink = AlertSinkFactory.Create(httpClientFactory, Path.GetFileNameWithoutExtension(configuration.ConfigPath));
         _configuredTimeframes = ParseTimeframes(_hostOptions.Timeframes);
         if (_configuredTimeframes.Count == 0)
         {
@@ -277,7 +280,14 @@ internal sealed class EngineLoopService : BackgroundService
             CreateBrokerSnapshotProvider(),
             _reconciliationJournal,
             _state,
-            _logger);
+            _logger,
+            (status, mismatches, utc) =>
+            {
+                if (status == ReconciliationStatus.Mismatch)
+                {
+                    EmitAlert("reconcile", "warn", $"reconcile mismatch count={mismatches}", utc.ToString("o"));
+                }
+            });
         _startupReconciliationRunner = new StartupReconciliationRunner(
             () => DateTime.UtcNow,
             (utc, token) => _reconciliationTelemetry.EmitAsync(utc, token),
@@ -315,7 +325,10 @@ internal sealed class EngineLoopService : BackgroundService
             riskConfigHash: riskConfigHash,
             newsEvents: newsEvents,
             timeframeLabels: _timeframeLabelByTicks,
-            riskGateCallback: (gate, throttled) => _state.RegisterRiskGateEvent(gate, throttled),
+            riskGateCallback: (gate, throttled) =>
+            {
+                _state.RegisterRiskGateEvent(gate, throttled);
+            },
             riskRailsTelemetryCallback: snapshot =>
             {
                 _state.UpdateRiskRailsTelemetry(snapshot);
@@ -393,6 +406,10 @@ internal sealed class EngineLoopService : BackgroundService
         _positionTracker = null;
         _idempotencyPersistence = null;
         _startupReconciliationRunner = null;
+        if (_alertSink is IAsyncDisposable disposableSink)
+        {
+            await disposableSink.DisposeAsync().ConfigureAwait(false);
+        }
     }
 
     public override async Task StopAsync(CancellationToken cancellationToken)
@@ -546,10 +563,8 @@ internal sealed class EngineLoopService : BackgroundService
 
         if (_consecutiveFailures >= _hostOptions.StreamAlertThreshold)
         {
-            Interlocked.Increment(ref _alerts);
-            _state.IncrementAlertCounter();
+            EmitAlert("adapter", "warn", $"stream disconnected consecutive={_consecutiveFailures}");
             _consecutiveFailures = 0;
-            UpdateHostMetrics();
         }
 
         return Task.CompletedTask;
@@ -578,9 +593,7 @@ internal sealed class EngineLoopService : BackgroundService
             {
                 _logger.LogWarning("Stream heartbeat stale (age={Age:F1}s)", snapshot.StreamHeartbeatAgeSeconds);
                 _state.UpdateStreamConnection(false);
-                Interlocked.Increment(ref _alerts);
-                _state.IncrementAlertCounter();
-                UpdateHostMetrics();
+                EmitAlert("adapter", "warn", $"stream heartbeat stale age={snapshot.StreamHeartbeatAgeSeconds:F1}s");
             }
 
             await TryEmitReconciliationAsync(ct).ConfigureAwait(false);
@@ -703,8 +716,8 @@ internal sealed class EngineLoopService : BackgroundService
     {
         if (eventType.StartsWith("ALERT_", StringComparison.Ordinal))
         {
-            Interlocked.Increment(ref _alerts);
-            _state.IncrementAlertCounter();
+            var category = eventType.Contains("RISK", StringComparison.OrdinalIgnoreCase) ? "risk_rails" : "system";
+            EmitAlert(category, "error", eventType);
             if (TryMapRiskGate(eventType, out var gate, out var throttled))
             {
                 _state.RegisterRiskGateEvent(gate, throttled);
@@ -977,6 +990,20 @@ internal sealed class EngineLoopService : BackgroundService
             _adapterSettings.BrokerDailyLossCapCcy,
             _adapterSettings.BrokerMaxUnits,
             _adapterSettings.BrokerSymbolUnitCaps);
+    }
+
+    private void EmitAlert(string category, string severity, string summary, string? details = null)
+    {
+        var alert = new AlertRecord(
+            string.IsNullOrWhiteSpace(category) ? "system" : category.Trim().ToLowerInvariant(),
+            string.IsNullOrWhiteSpace(severity) ? "warn" : severity.Trim().ToLowerInvariant(),
+            summary ?? string.Empty,
+            details,
+            DateTime.UtcNow);
+        _state.RegisterAlert(alert.Category);
+        _alertSink.Enqueue(alert);
+        Interlocked.Increment(ref _alerts);
+        UpdateHostMetrics();
     }
 
     private static DateTime AlignToMinute(DateTime utc)

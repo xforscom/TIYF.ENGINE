@@ -19,6 +19,7 @@ public sealed class EngineHostState
     private int _activeOrders;
     private long _riskEventsTotal;
     private long _alertsTotal;
+    private readonly Dictionary<string, long> _alertsByCategory = new(StringComparer.OrdinalIgnoreCase);
     private bool _streamConnected;
     private DateTime? _lastStreamHeartbeatUtc;
 
@@ -396,6 +397,21 @@ public sealed class EngineHostState
         }
     }
 
+    public void RegisterAlert(string category)
+    {
+        lock (_sync)
+        {
+            _alertsTotal++;
+            if (string.IsNullOrWhiteSpace(category))
+            {
+                return;
+            }
+
+            var key = category.Trim().ToLowerInvariant();
+            _alertsByCategory[key] = _alertsByCategory.TryGetValue(key, out var existing) ? existing + 1 : 1;
+        }
+    }
+
     public void RecordStreamHeartbeat(DateTime utcTimestamp)
     {
         utcTimestamp = NormalizeUtc(utcTimestamp);
@@ -414,14 +430,6 @@ public sealed class EngineHostState
             {
                 _lastStreamHeartbeatUtc = DateTime.UtcNow;
             }
-        }
-    }
-
-    public void IncrementAlertCounter()
-    {
-        lock (_sync)
-        {
-            _alertsTotal++;
         }
     }
 
@@ -616,6 +624,7 @@ public sealed class EngineHostState
                 active_orders = metrics.ActiveOrders,
                 risk_events_total = metrics.RiskEventsTotal,
                 alerts_total = metrics.AlertsTotal,
+                alerts_by_category = new Dictionary<string, long>(metrics.AlertsByCategory, StringComparer.OrdinalIgnoreCase),
                 stream_connected = metrics.StreamConnected,
                 stream_heartbeat_age_seconds = metrics.StreamHeartbeatAgeSeconds,
                 timeframes_active = _timeframesActive,
@@ -681,6 +690,7 @@ public sealed class EngineHostState
             _activeOrders,
             _riskEventsTotal,
             _alertsTotal,
+            new Dictionary<string, long>(_alertsByCategory, StringComparer.OrdinalIgnoreCase),
             _orderRejectsTotal,
             streamConnected,
             streamHeartbeatAge,

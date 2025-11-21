@@ -160,21 +160,26 @@ _Environment assumptions:_ OANDA practice account (`demo-oanda`), VPS `tiyf-vps-
 - Discrepancies persist after manual workflow run.
 - `/health` shows data but daily-monitor consistently omits it (indicates workflow bug).
 
-## Scenario 9 – Adapter Feed Credentials / Secrets
-### How to Detect
-- `/health.secrets` contains provenance labels (`env`, `missing`).
-- Metrics: `engine_secret_provenance{integration="...",source="..."}`.
+## Scenario 10 – Alert sink failures or missing alerts (demo-only)
 
-### What to Do
-1. Verify env vars are set (e.g., `echo $OANDA_PRACTICE_TOKEN`).
-2. If secrets missing, set env or restart after injecting via CI/Secrets.
-3. Do not hardcode secrets in configs.
+_Environment assumptions:_ ALERT_SINK_TYPE may be `discord`, `file`, or `none`; secrets are env-only.
 
-### When to Escalate
-- Secrets unavailable on VPS and cannot be restored quickly.
-- Suspicion of leaked/rotated secrets without audit trail.
+**How to detect**
+1. /metrics shows `engine_alerts_total` increasing but no messages arrive at the sink.
+2. Host logs contain `alert_sink warn` or `alert_sink error`.
+3. In proof mode, artifacts/alerts.log is missing or empty.
 
-## Scenario 10 – Reconciliation Drift
+**What to do**
+1. Check env vars on host: `echo $ALERT_SINK_TYPE`, `echo $ALERT_DISCORD_WEBHOOK_URL` (presence only; do not log value).
+2. If using Discord: verify webhook URL is reachable (network/firewall), retry sending a curl POST with a dummy payload (without secrets).
+3. If using file sink: ensure ALERT_FILE_PATH directory is writable and not full.
+4. If the sink is optional for the current run, set ALERT_SINK_TYPE=none and restart to suppress noise.
+
+**When to escalate or stop**
+- If alerts are expected in demo and delivery cannot be restored within 15 minutes, stop the engine and notify devs.
+- Never paste tokens into logs or tickets.
+
+## Scenario 11 – Reconciliation Drift
 
 ### How to Detect
 - `/health.reconciliation` block: `mismatches_total`, `runs_total`, `last_status`, `last_reconcile_utc`.
@@ -190,7 +195,7 @@ _Environment assumptions:_ OANDA practice account (`demo-oanda`), VPS `tiyf-vps-
 - `last_status` = `mismatch` on real broker live runs.
 - Broker API unreachable during reconciliation.
 
-## Scenario 11 – Idempotency Persistence After Restart
+## Scenario 12 – Idempotency Persistence After Restart
 
 ### How to Detect
 - `/health.idempotency_persistence`: `last_load_utc`, `loaded_keys`, `expired_dropped`.
@@ -236,3 +241,17 @@ _Environment assumptions:_ OANDA practice account (`demo-oanda`), VPS `tiyf-vps-
 ---
 
 _Remember: demo environment only. When in doubt, stop the engine, gather logs (`journalctl`, `/health`, daily-monitor run IDs), and alert the dev on-call._ 
+## Scenario 9 – Adapter Feed Credentials / Secrets
+
+### How to Detect
+- `/health.secrets` contains provenance labels (`env`, `missing`).
+- Metrics: `engine_secret_provenance{integration="...",source="..."}`.
+
+### What to Do
+1. Verify env vars are set (e.g., `echo $OANDA_PRACTICE_TOKEN`).
+2. If secrets missing, set env or restart after injecting via CI/Secrets.
+3. Do not hardcode secrets in configs.
+
+### When to Escalate
+- Secrets unavailable on VPS and cannot be restored quickly.
+- Suspicion of leaked/rotated secrets without audit trail.

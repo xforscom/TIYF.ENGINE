@@ -1,0 +1,49 @@
+name: m13-alerting-proof
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'tools/AlertProbe/**'
+      - 'src/TiYf.Engine.Host/**'
+      - 'docs/**'
+      - '.github/workflows/m13-alerting-proof.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  proof:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Restore
+        run: dotnet restore TiYf.Engine.sln
+      - name: Build
+        run: dotnet build TiYf.Engine.sln -c Release --no-restore
+      - name: Run alert probe
+        run: dotnet run --project tools/AlertProbe/AlertProbe.csproj -c Release -- --output proof-artifacts/m13-alerting
+      - name: Assert artifacts
+        run: |
+          test -f proof-artifacts/m13-alerting/summary.txt
+          test -f proof-artifacts/m13-alerting/alerts.log
+          grep -q "adapter=1" proof-artifacts/m13-alerting/summary.txt
+          grep -q "risk_rails=1" proof-artifacts/m13-alerting/summary.txt
+          grep -q "reconcile=1" proof-artifacts/m13-alerting/summary.txt
+          grep -q "engine_alerts_total 3" proof-artifacts/m13-alerting/metrics.txt
+          jq -e '.alerts_total == 3' proof-artifacts/m13-alerting/health.json
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: m13-alerting-proof-${{ github.run_id }}
+          path: proof-artifacts/m13-alerting
