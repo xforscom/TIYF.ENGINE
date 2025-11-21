@@ -71,6 +71,7 @@ internal sealed class RiskRailRuntime
     private bool _cooldownAlertPending;
     private bool _cooldownActiveAlerted;
     private readonly RiskRailsMode _mode;
+    private readonly bool _blockingEnabled;
 
     public RiskRailRuntime(
         RiskConfig? config,
@@ -80,7 +81,8 @@ internal sealed class RiskRailRuntime
         decimal startingEquity,
         Action<RiskRailTelemetrySnapshot>? telemetryCallback = null,
         Func<DateTime>? clock = null,
-        BrokerCaps? brokerCaps = null)
+        BrokerCaps? brokerCaps = null,
+        bool enableBlocking = true)
     {
         _config = config;
         _configHash = riskConfigHash ?? string.Empty;
@@ -99,6 +101,7 @@ internal sealed class RiskRailRuntime
         _telemetryCallback = telemetryCallback;
         _clock = clock ?? (() => DateTime.UtcNow);
         _mode = ResolveMode(config?.RiskRailsMode);
+        _blockingEnabled = enableBlocking;
     }
 
     public void ReplaceNewsEvents(IReadOnlyList<NewsEvent> events)
@@ -167,7 +170,7 @@ internal sealed class RiskRailRuntime
         var alerts = new List<RiskRailAlert>();
         var ts = DateTime.SpecifyKind(decisionUtc, DateTimeKind.Utc);
 
-        if (_config.SessionWindow is { } session && SessionWindowBlocks(ts, session))
+        if (_blockingEnabled && _config.SessionWindow is { } session && SessionWindowBlocks(ts, session))
         {
             var payload = new
             {
@@ -183,7 +186,7 @@ internal sealed class RiskRailRuntime
             allowed = false;
         }
 
-        if (allowed && _config.DailyCap is { } dailyCap)
+        if (_blockingEnabled && allowed && _config.DailyCap is { } dailyCap)
         {
             var pnl = DailyPnl;
             if (dailyCap.LossThreshold is { } loss && pnl <= loss)
@@ -242,7 +245,7 @@ internal sealed class RiskRailRuntime
             }
         }
 
-        if (allowed && _config.GlobalDrawdown is { } globalDd)
+        if (_blockingEnabled && allowed && _config.GlobalDrawdown is { } globalDd)
         {
             var drawdown = CurrentDrawdown;
             if (drawdown < globalDd.MaxDrawdown)
@@ -264,7 +267,7 @@ internal sealed class RiskRailRuntime
             }
         }
 
-        if (allowed && _config.NewsBlackout is { Enabled: true } blackout)
+        if (_blockingEnabled && allowed && _config.NewsBlackout is { Enabled: true } blackout)
         {
             var match = FindMatchingNewsEvent(instrument, ts, blackout.MinutesBefore, blackout.MinutesAfter);
             if (match is NewsEvent ev)
@@ -285,7 +288,8 @@ internal sealed class RiskRailRuntime
             }
         }
 
-        if (_mode == RiskRailsMode.Live)
+        var liveRails = _mode == RiskRailsMode.Live && _blockingEnabled;
+        if (liveRails)
         {
             EvaluateLiveRails(instrument, timeframe, ts, requestedUnits, alerts, ref allowed);
         }
@@ -293,7 +297,7 @@ internal sealed class RiskRailRuntime
         {
             EvaluateTelemetryRails(instrument, timeframe, ts, requestedUnits, alerts);
         }
-        EvaluateBrokerGuardrail(instrument, timeframe, ts, requestedUnits, alerts, ref allowed);
+        EvaluateBrokerGuardrail(instrument, timeframe, ts, requestedUnits, alerts, ref allowed, liveRails);
         PublishTelemetry();
         return new RiskRailOutcome(allowed, allowed ? units : 0, alerts);
     }
@@ -352,7 +356,7 @@ internal sealed class RiskRailRuntime
         EvaluateTelemetryRails(instrument, timeframe, ts, requestedUnits, alerts);
     }
 
-    private void EvaluateBrokerGuardrail(string instrument, string timeframe, DateTime ts, long requestedUnits, List<RiskRailAlert> alerts, ref bool allowed)
+    private void EvaluateBrokerGuardrail(string instrument, string timeframe, DateTime ts, long requestedUnits, List<RiskRailAlert> alerts, ref bool allowed, bool liveRails)
     {
         if (requestedUnits <= 0)
         {
@@ -436,7 +440,7 @@ internal sealed class RiskRailRuntime
         _brokerCapBlocksTotal++;
         _brokerCapBlocksByGate[gate] = _brokerCapBlocksByGate.TryGetValue(gate, out var existing) ? existing + 1 : 1;
 
-        if (_mode == RiskRailsMode.Live && allowed)
+        if (liveRails && allowed)
         {
             alerts.Add(CreateAlert("ALERT_RISK_BROKER_CAP_HARD", payload, throttled: false));
             _gateCallback?.Invoke(gate, false);

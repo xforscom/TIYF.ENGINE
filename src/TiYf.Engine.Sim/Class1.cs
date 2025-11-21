@@ -577,7 +577,8 @@ public sealed class EngineLoop
                 startingEquity,
                 telemetryCallback: riskRailsTelemetryCallback,
                 clock: UtcNow,
-                brokerCaps: brokerCaps)
+                brokerCaps: brokerCaps,
+                enableBlocking: string.Equals(_riskMode, "active", StringComparison.OrdinalIgnoreCase))
             : null;
         _promotionRuntime = riskConfig?.Promotion is { Enabled: true } promo
             ? new PromotionShadowRuntime(promo)

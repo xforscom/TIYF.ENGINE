@@ -5,29 +5,29 @@ using TiYf.Engine.Core;
 using TiYf.Engine.Sim;
 
 var configOption = new Option<string>("--config", description: "Path to demo config") { IsRequired = true };
-var barsOption = new Option<int>("--bars", getDefaultValue: () => 200, description: "Number of bars (unused placeholder)");
 var outputOption = new Option<string>("--output", getDefaultValue: () => Path.Combine("proof-artifacts", "m14-acceptance"));
+var adapterOption = new Option<string>("--adapter", getDefaultValue: () => "oanda-demo", description: "Adapter identifier for labeling");
 
 var root = new RootCommand("Demo acceptance probe")
 {
     configOption,
-    barsOption,
-    outputOption
+    outputOption,
+    adapterOption
 };
 
-root.SetHandler((string configPath, int _, string output) =>
+root.SetHandler((string configPath, string output, string adapterId) =>
 {
-    Run(configPath, output);
-}, configOption, barsOption, outputOption);
+    Run(configPath, output, adapterId);
+}, configOption, outputOption, adapterOption);
 
 return await root.InvokeAsync(args);
 
-static void Run(string configPath, string output)
+static void Run(string configPath, string output, string adapterId)
 {
     Directory.CreateDirectory(output);
     var configId = ReadConfigId(configPath);
 
-    var state = new EngineHostState("oanda-demo", new[] { "m14-acceptance" });
+    var state = new EngineHostState(adapterId, new[] { "m14-acceptance" });
     state.MarkConnected(true);
     state.SetLoopStart(new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc));
     state.SetTimeframes(new[] { "H1", "H4" });
@@ -66,7 +66,7 @@ static void Run(string configPath, string output)
     var healthJson = JsonSerializer.Serialize(health, new JsonSerializerOptions { WriteIndented = true });
     File.WriteAllText(Path.Combine(output, "health.json"), healthJson);
 
-    File.WriteAllText(Path.Combine(output, "events.csv"), ""); // ensure no fatal alerts
+    File.WriteAllText(Path.Combine(output, "events.csv"), ""); // probe emits no events; workflow asserts absence of fatal alerts
 
     var summary = $"m14_demo_acceptance PASS reconcile_drift=0 fatal_alerts=0 risk_rails=1 gvrs_live=1 promotion_shadow=1 alert_sink=1 config_id={configId}";
     File.WriteAllText(Path.Combine(output, "summary.txt"), summary);

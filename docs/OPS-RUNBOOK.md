@@ -206,15 +206,6 @@ _Environment assumptions:_ ALERT_SINK_TYPE may be `discord`, `file`, or `none`; 
 2. If persistence failed (loaded_keys=0 unexpectedly), check logs for `ALERT_IDEMPOTENCY_PERSISTENCE_FAILED`.
 3. Only wipe the persistence file as a last resort and with dev approval; doing so risks duplicate order sends on restart.
 
-### How to Detect
-- `/health.secrets` block (from M9-C) showing missing env.
-- Logs: `SECRET_PROVENANCE missing` warnings.
-
-### What to Do
-1. Verify env vars in `/etc/systemd/system/tiyf-engine-demo.service.d/env.conf` (example).
-2. Update secrets via SOP (never commit secrets).
-3. Restart engine.
-
 ## Scenario 12 – News Blackout Looks Wrong (Demo Only)
 
 ### How to Detect
@@ -238,17 +229,3 @@ _Environment assumptions:_ ALERT_SINK_TYPE may be `discord`, `file`, or `none`; 
 ---
 
 _Remember: demo environment only. When in doubt, stop the engine, gather logs (`journalctl`, `/health`, daily-monitor run IDs), and alert the dev on-call._ 
-## Scenario 9 – Adapter Feed Credentials / Secrets
-
-### How to Detect
-- `/health.secrets` contains provenance labels (`env`, `missing`).
-- Metrics: `engine_secret_provenance{integration="...",source="..."}`.
-
-### What to Do
-1. Verify env vars are set (e.g., `echo $OANDA_PRACTICE_TOKEN`).
-2. If secrets missing, set env or restart after injecting via CI/Secrets.
-3. Do not hardcode secrets in configs.
-
-### When to Escalate
-- Secrets unavailable on VPS and cannot be restored quickly.
-- Suspicion of leaked/rotated secrets without audit trail.
