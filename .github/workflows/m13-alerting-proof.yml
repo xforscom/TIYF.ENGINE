@@ -27,11 +27,11 @@ jobs:
         with:
           dotnet-version: 8.0.x
       - name: Restore
-        run: ~/.dotnet/dotnet restore TiYf.Engine.sln
+        run: dotnet restore TiYf.Engine.sln
       - name: Build
-        run: ~/.dotnet/dotnet build TiYf.Engine.sln -c Release --no-restore
+        run: dotnet build TiYf.Engine.sln -c Release --no-restore
       - name: Run alert probe
-        run: ~/.dotnet/dotnet run --project tools/AlertProbe/AlertProbe.csproj -c Release -- --output proof-artifacts/m13-alerting
+        run: dotnet run --project tools/AlertProbe/AlertProbe.csproj -c Release -- --output proof-artifacts/m13-alerting
       - name: Assert artifacts
         run: |
           test -f proof-artifacts/m13-alerting/summary.txt
