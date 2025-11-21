@@ -215,9 +215,6 @@ _Environment assumptions:_ ALERT_SINK_TYPE may be `discord`, `file`, or `none`; 
 2. Update secrets via SOP (never commit secrets).
 3. Restart engine.
 
-### When to Escalate
-- If secrets fail to load even though env conf is correct.
-
 ## Scenario 12 – News Blackout Looks Wrong (Demo Only)
 
 ### How to Detect
