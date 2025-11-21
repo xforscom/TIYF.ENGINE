@@ -54,5 +54,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: m9-news-proof-${{ github.ref_name }}
+          name: m9-news-proof
           path: proof-artifacts/m9-news-proof

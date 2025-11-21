@@ -88,6 +88,10 @@ public static class EngineMetricsFormatter
         {
             AppendMetric(builder, "engine_config_hash", 1, "hash", snapshot.ConfigHash);
         }
+        if (!string.IsNullOrWhiteSpace(snapshot.ConfigId))
+        {
+            AppendMetric(builder, "engine_config_id", 1, "config_id", snapshot.ConfigId);
+        }
         if (!string.IsNullOrWhiteSpace(snapshot.RiskConfigHash))
         {
             AppendMetric(builder, "engine_risk_config_hash", 1, "hash", snapshot.RiskConfigHash);

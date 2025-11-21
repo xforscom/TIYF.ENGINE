@@ -37,7 +37,7 @@ public class MetricsFormattingTests
         var lastNews = new DateTime(2025, 1, 1, 12, 0, 0, DateTimeKind.Utc);
         state.UpdateNewsTelemetry(lastNews, 3, true, lastNews.AddMinutes(-15), lastNews.AddMinutes(15), "file");
         state.RecordReconciliationTelemetry(ReconciliationStatus.Match, 0, DateTime.UtcNow);
-        state.SetConfigSource("/tmp/sample-config.json", "hash-demo");
+        state.SetConfigSource("/tmp/sample-config.json", "hash-demo", "demo-config-id");
         state.SetRiskConfigHash("riskhash");
         state.UpdateSecretProvenance(new Dictionary<string, IReadOnlyCollection<string>>
         {
@@ -108,6 +108,7 @@ public class MetricsFormattingTests
         Assert.Contains("engine_news_source{type=\"file\"} 1", metricsText);
         Assert.Contains("engine_news_last_event_ts", metricsText);
         Assert.Contains("engine_config_hash{hash=\"hash-demo\"} 1", metricsText);
+        Assert.Contains("engine_config_id{config_id=\"demo-config-id\"} 1", metricsText);
         Assert.Contains("engine_risk_config_hash{hash=\"riskhash\"} 1", metricsText);
         Assert.Contains("engine_risk_broker_daily_cap_ccy 2500", metricsText);
         Assert.Contains("engine_risk_broker_daily_loss_used_ccy 1250", metricsText);

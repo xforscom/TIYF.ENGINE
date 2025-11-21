@@ -54,6 +54,7 @@ public readonly record struct EngineMetricsSnapshot(
     bool GvrsGateEnabled,
     bool GvrsGateBlockingEnabled,
     bool GvrsGateWouldBlock,
+    string ConfigId,
     string ConfigHash,
     string RiskConfigHash,
     string PromotionConfigHash,

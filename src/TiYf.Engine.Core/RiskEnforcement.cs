@@ -121,6 +121,7 @@ public sealed class RiskConfig
     public DailyCapConfig? DailyCap { get; init; }
     public GlobalDrawdownConfig? GlobalDrawdown { get; init; }
     public NewsBlackoutConfig? NewsBlackout { get; init; }
+    public string NewsProvider { get; init; } = "file";
     public PromotionConfig Promotion { get; init; } = PromotionConfig.Default;
     public GlobalVolatilityGateConfig GlobalVolatilityGate { get; init; } = GlobalVolatilityGateConfig.Disabled;
     public decimal? BrokerDailyLossCapCcy { get; init; }

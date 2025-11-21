@@ -34,6 +34,7 @@ internal sealed class EngineLoopService : BackgroundService
     private StartupReconciliationRunner? _startupReconciliationRunner;
     private NewsFeedRunner? _newsFeedRunner;
     private bool _newsHttpAuthWarningLogged;
+    private bool _secretProvenanceLogged;
 
     private LiveTickSource? _tickSource;
     private EngineLoop? _engineLoop;
@@ -229,6 +230,20 @@ internal sealed class EngineLoopService : BackgroundService
         var slippageModel = SlippageModelFactory.Create(slippageProfile, slippageName);
         _state.SetSlippageModel(slippageName);
         _state.UpdateIdempotencyMetrics(0, 0, 0);
+        _state.SetConfigSource(_configuration.ConfigPath, _configuration.ConfigHash, config.ConfigId);
+        _logger.LogInformation("engine_config_sot config_id={ConfigId} risk_config_hash={RiskHash} promotion_config_hash={PromoHash}", config.ConfigId, riskConfigHash, riskConfig?.PromotionConfigHash ?? string.Empty);
+
+        var secretSnapshot = _secretTracker.CreateSnapshot();
+        _state.UpdateSecretProvenance(secretSnapshot);
+        if (!_secretProvenanceLogged && secretSnapshot.Count > 0)
+        {
+            foreach (var kvp in secretSnapshot)
+            {
+                var sources = string.Join(",", kvp.Value ?? Array.Empty<string>());
+                _logger.LogInformation("secret_provenance integration={Integration} sources={Sources}", kvp.Key, sources);
+            }
+            _secretProvenanceLogged = true;
+        }
 
         var journalWriter = new FileJournalWriter(
             journalRoot,
@@ -335,7 +350,8 @@ internal sealed class EngineLoopService : BackgroundService
             idempotencyPersistence: _idempotencyPersistence,
             persistedIdempotencySnapshot: persistedIdempotency);
 
-        await StartNewsFeedMonitorAsync(riskConfig?.NewsBlackout).ConfigureAwait(false);
+        var newsProvider = ResolveNewsProvider(riskConfig);
+        await StartNewsFeedMonitorAsync(riskConfig?.NewsBlackout, newsProvider).ConfigureAwait(false);
 
         _logger.LogInformation("Streaming runtime initialized run_id={RunId} journal={Journal}", runId, journalWriter.RunDirectory);
         _state.SetLastLog($"stream:run_id={runId}");
@@ -1122,7 +1138,7 @@ internal sealed class EngineLoopService : BackgroundService
         }
     }
 
-    private async Task StartNewsFeedMonitorAsync(NewsBlackoutConfig? config)
+    private async Task StartNewsFeedMonitorAsync(NewsBlackoutConfig? config, string provider)
     {
         if (_newsFeedRunner is not null)
         {
@@ -1135,7 +1151,7 @@ internal sealed class EngineLoopService : BackgroundService
             return;
         }
 
-        var feed = CreateNewsFeed(config, out var sourceType);
+        var feed = CreateNewsFeed(config, provider, out var sourceType);
         _newsFeedRunner = NewsFeedRunner.Start(
             feed,
             _state,
@@ -1171,9 +1187,9 @@ internal sealed class EngineLoopService : BackgroundService
         return Path.GetFullPath(Path.Combine(root, configuredPath));
     }
 
-    private INewsFeed CreateNewsFeed(NewsBlackoutConfig config, out string resolvedSourceType)
+    private INewsFeed CreateNewsFeed(NewsBlackoutConfig config, string provider, out string resolvedSourceType)
     {
-        var requestedType = NewsSourceTypeHelper.Normalize(config.SourceType);
+        var requestedType = provider;
         if (string.Equals(requestedType, "http", StringComparison.OrdinalIgnoreCase) && config.Http is { } http && !string.IsNullOrWhiteSpace(http.BaseUri))
         {
             if (!Uri.TryCreate(http.BaseUri, UriKind.Absolute, out var baseUri))
@@ -1229,4 +1245,14 @@ internal sealed class EngineLoopService : BackgroundService
         return (value, "env");
     }
 
+    private static string ResolveNewsProvider(RiskConfig? riskConfig)
+    {
+        var explicitProvider = riskConfig?.NewsProvider;
+        var blackoutProvider = riskConfig?.NewsBlackout?.SourceType;
+        var chosen = !string.IsNullOrWhiteSpace(explicitProvider)
+            ? explicitProvider
+            : blackoutProvider;
+        var normalized = NewsSourceTypeHelper.Normalize(chosen);
+        return string.IsNullOrWhiteSpace(normalized) ? "file" : normalized;
+    }
 }

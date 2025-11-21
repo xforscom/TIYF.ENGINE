@@ -72,6 +72,7 @@ public sealed class EngineHostState
     private DateTime? _newsBlackoutWindowEnd;
     private string _configPath = string.Empty;
     private string _configHash = string.Empty;
+    private string _configId = string.Empty;
     private readonly Dictionary<string, IReadOnlyCollection<string>> _secretProvenance = new(StringComparer.OrdinalIgnoreCase);
     private string _newsFeedSourceType = "file";
     private bool _gvrsGateBlockingEnabled;
@@ -444,12 +445,16 @@ public sealed class EngineHostState
         }
     }
 
-    public void SetConfigSource(string? path, string? hash)
+    public void SetConfigSource(string? path, string? hash, string? configId = null)
     {
         lock (_sync)
         {
             _configPath = string.IsNullOrWhiteSpace(path) ? string.Empty : Path.GetFullPath(path);
             _configHash = hash ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(configId))
+            {
+                _configId = configId;
+            }
         }
     }
 
@@ -619,7 +624,7 @@ public sealed class EngineHostState
                 decisions_total = metrics.DecisionsTotal,
                 loop_last_success_utc = _loopLastSuccessUtc,
                 loop_start_utc = _loopStartUtc,
-                config = new { path = _configPath, hash = _configHash },
+                config = new { path = _configPath, hash = _configHash, id = _configId },
                 risk_config_hash = _riskConfigHash,
                 promotion_config_hash = _promotionConfigHash,
                 risk_blocks_total = _riskBlocksTotal,
@@ -722,6 +727,7 @@ public sealed class EngineHostState
             _gvrsGateEnabled,
             _gvrsGateBlockingEnabled,
             gvrsGateWouldBlock,
+            _configId,
             _configHash,
             _riskConfigHash,
             _promotionConfigHash,

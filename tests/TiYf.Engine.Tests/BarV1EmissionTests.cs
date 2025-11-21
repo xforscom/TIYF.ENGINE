@@ -28,7 +28,7 @@ public class BarV1EmissionTests
         sb.AppendLine($"{aligned.AddMinutes(1):O},101.2,1");
         File.WriteAllText(tickFile, sb.ToString());
         var journalRoot = Path.Combine(root, "out");
-        var cfg = new EngineConfig("1.1.0", "RUN", "inst.csv", "ticks.csv", journalRoot, "BAR_V1", "sequence", Instruments: new[] { "I1" }, Intervals: new[] { "1m" });
+        var cfg = new EngineConfig("1.1.0", "RUN", "barv1-test", "inst.csv", "ticks.csv", journalRoot, "BAR_V1", "sequence", Instruments: new[] { "I1" }, Intervals: new[] { "1m" });
 
         // Build runtime pieces manually (avoid needing external config file)
         var (config, configHash, _) = (cfg, ConfigHash.Compute(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(cfg)), (System.Text.Json.JsonDocument?)null);

@@ -28,7 +28,7 @@ public class RiskProbeEndToEndTests
         sb.AppendLine($"{aligned.AddMinutes(1):O},101.2,1");
         File.WriteAllText(tickFile, sb.ToString());
         var journalRoot = Path.Combine(root, "out");
-        var cfg = new EngineConfig(Schema.Version, "RUN", "inst.csv", "ticks.csv", journalRoot, "BAR_V1", "sequence", Instruments: new[] { "I1" }, Intervals: new[] { "1m" });
+        var cfg = new EngineConfig(Schema.Version, "RUN", "riskprobe-test", "inst.csv", "ticks.csv", journalRoot, "BAR_V1", "sequence", Instruments: new[] { "I1" }, Intervals: new[] { "1m" });
         var ticks = new CsvTickSource(tickFile, new InstrumentId("I1"));
         var clock = new DeterministicSequenceClock(ticks.Select(t => t.UtcTimestamp));
         var tracker = new InMemoryBarKeyTracker();
