@@ -65,6 +65,7 @@ public sealed class DiscordAlertSink : IAlertSink, IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
+            Console.WriteLine("alert_sink info: pump cancelled");
         }
     }
 

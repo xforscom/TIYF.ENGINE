@@ -160,11 +160,6 @@ _Environment assumptions:_ OANDA practice account (`demo-oanda`), VPS `tiyf-vps-
 - Discrepancies persist after manual workflow run.
 - `/health` shows data but daily-monitor consistently omits it (indicates workflow bug).
 
-## Scenario 9 – Adapter Feed Credentials / Secrets
-### How to Detect
-- `/health.secrets` contains provenance labels (`env`, `missing`).
-- Metrics: `engine_secret_provenance{integration="...",source="..."}`.
-
 ## Scenario 10 – Alert sink failures or missing alerts (demo-only)
 
 _Environment assumptions:_ ALERT_SINK_TYPE may be `discord`, `file`, or `none`; secrets are env-only.
@@ -184,16 +179,7 @@ _Environment assumptions:_ ALERT_SINK_TYPE may be `discord`, `file`, or `none`; 
 - If alerts are expected in demo and delivery cannot be restored within 15 minutes, stop the engine and notify devs.
 - Never paste tokens into logs or tickets.
 
-### What to Do
-1. Verify env vars are set (e.g., `echo $OANDA_PRACTICE_TOKEN`).
-2. If secrets missing, set env or restart after injecting via CI/Secrets.
-3. Do not hardcode secrets in configs.
-
-### When to Escalate
-- Secrets unavailable on VPS and cannot be restored quickly.
-- Suspicion of leaked/rotated secrets without audit trail.
-
-## Scenario 10 – Reconciliation Drift
+## Scenario 11 – Reconciliation Drift
 
 ### How to Detect
 - `/health.reconciliation` block: `mismatches_total`, `runs_total`, `last_status`, `last_reconcile_utc`.
@@ -209,7 +195,7 @@ _Environment assumptions:_ ALERT_SINK_TYPE may be `discord`, `file`, or `none`; 
 - `last_status` = `mismatch` on real broker live runs.
 - Broker API unreachable during reconciliation.
 
-## Scenario 11 – Idempotency Persistence After Restart
+## Scenario 12 – Idempotency Persistence After Restart
 
 ### How to Detect
 - `/health.idempotency_persistence`: `last_load_utc`, `loaded_keys`, `expired_dropped`.
@@ -255,3 +241,17 @@ _Environment assumptions:_ ALERT_SINK_TYPE may be `discord`, `file`, or `none`; 
 ---
 
 _Remember: demo environment only. When in doubt, stop the engine, gather logs (`journalctl`, `/health`, daily-monitor run IDs), and alert the dev on-call._ 
+## Scenario 9 – Adapter Feed Credentials / Secrets
+
+### How to Detect
+- `/health.secrets` contains provenance labels (`env`, `missing`).
+- Metrics: `engine_secret_provenance{integration="...",source="..."}`.
+
+### What to Do
+1. Verify env vars are set (e.g., `echo $OANDA_PRACTICE_TOKEN`).
+2. If secrets missing, set env or restart after injecting via CI/Secrets.
+3. Do not hardcode secrets in configs.
+
+### When to Escalate
+- Secrets unavailable on VPS and cannot be restored quickly.
+- Suspicion of leaked/rotated secrets without audit trail.

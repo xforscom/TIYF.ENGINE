@@ -43,6 +43,7 @@ jobs:
           jq -e '.alerts_total == 3' proof-artifacts/m13-alerting/health.json
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: m13-alerting-proof-${{ github.run_id }}
           path: proof-artifacts/m13-alerting
