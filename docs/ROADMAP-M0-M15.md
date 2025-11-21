@@ -178,15 +178,15 @@
 - **Tracking issue(s):** Blueprint future milestone
 
 ### M14 — Ops Readiness & Demo Acceptance
-**Status:** In progress – demo acceptance probe and proof wired (observability-only).
+**Status:** In progress – demo acceptance probe/proof wired (observability-only); runtime acceptance window active (demo-only).
 
-**Summary:** End-to-end demo acceptance probe (reconcile drift zero, no fatal alerts, GVRS/risk rails/promotion shadow active, alerts counters present, config_id surfaced) with proof workflow; no trading/risk behaviour changes.
+**Summary:** End-to-end demo acceptance probe (reconcile drift zero, no fatal alerts, GVRS/risk rails/promotion shadow active, alerts counters present, config_id surfaced) with proof workflow; demo runtime locked to `config_id=demo-oanda-v1`; Discord alert sink enabled for demo only; no trading/risk behaviour changes.
 
 **Evidence**
-- **Tag(s):** pending (`v1.14.0-m14-demo-acceptance` on merge)
-- **Key PR(s):** feat/m14-demo-acceptance
-- **Proof workflow(s):** `m14-demo-acceptance-proof` (added this phase)
-- **Tracking issue(s):** To be created/updated post-merge
+- **Tag(s):** v1.14.1-m14-acceptance-fix
+- **Key PR(s):** #130 (initial), #132 (telemetry parity/merge cleanup)
+- **Proof workflow(s):** `m14-demo-acceptance-proof`
+- **Tracking issue(s):** M14 tracking; acceptance window 2025-11-21 → 2025-12-05 (demo-oanda-v1)
 
 ### M15 — Real-Money Cutover
 **Status:** Not started.

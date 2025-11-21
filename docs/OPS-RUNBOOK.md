@@ -178,6 +178,7 @@ _Environment assumptions:_ ALERT_SINK_TYPE may be `discord`, `file`, or `none`; 
 **When to escalate or stop**
 - If alerts are expected in demo and delivery cannot be restored within 15 minutes, stop the engine and notify devs.
 - Never paste tokens into logs or tickets.
+**Demo runtime note:** For the acceptance window, demo uses the `DEMO_ALERT_WEBHOOK` secret via env (`ALERT_SINK_TYPE=discord`, `ALERT_DISCORD_WEBHOOK_URL` set). To silence alerts quickly in an incident, set `ALERT_SINK_TYPE=none` and restart.
 
 ## Scenario 11 – Reconciliation Drift
 
