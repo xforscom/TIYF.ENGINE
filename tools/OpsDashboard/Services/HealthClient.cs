@@ -48,14 +48,17 @@ public sealed class HealthClient
     }
 }
 
-public sealed class HealthResult
+public sealed class HealthResult : IDisposable
 {
+    private readonly JsonDocument? _document;
+
     private HealthResult(bool success, JsonDocument? document, string? raw, string? error)
     {
         Success = success;
-        Document = document;
+        _document = document;
         Raw = raw;
         Error = error;
+        Document = document;
     }
 
     public bool Success { get; }
@@ -71,4 +74,9 @@ public sealed class HealthResult
 
     public static HealthResult MissingBaseUrl =>
         new(false, null, null, "DASHBOARD_ENGINE_BASE_URL not configured");
+
+    public void Dispose()
+    {
+        _document?.Dispose();
+    }
 }

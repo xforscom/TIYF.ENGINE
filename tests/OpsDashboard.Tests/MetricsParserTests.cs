@@ -22,11 +22,11 @@ public class MetricsParserTests
         var parser = new MetricsParser();
         var parsed = parser.Parse(raw);
 
-        Assert.True(parsed.ContainsKey("engine_config_id"));
-        Assert.True(parsed.ContainsKey("engine_risk_blocks_total"));
-        Assert.True(parsed.ContainsKey("engine_alerts_total"));
-        Assert.Equal("demo-oanda-v1", parsed["engine_config_id"].Single().Labels["config_id"]);
-        Assert.Equal("1", parsed["engine_config_id"].Single().Value);
-        Assert.Equal("3", parsed["engine_alerts_total"].Single().Value);
+        Assert.True(parsed.TryGetValue("engine_config_id", out var configSamples));
+        Assert.True(parsed.TryGetValue("engine_risk_blocks_total", out _));
+        Assert.True(parsed.TryGetValue("engine_alerts_total", out var alertSamples));
+        Assert.Equal("demo-oanda-v1", configSamples.Single().Labels["config_id"]);
+        Assert.Equal("1", configSamples.Single().Value);
+        Assert.Equal("3", alertSamples.Single().Value);
     }
 }

@@ -1,10 +1,8 @@
-using System.Net.Http.Json;
-using System.Text.Json;
 using OpsDashboard.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Configuration.AddEnvironmentVariables();
+builder.Configuration.AddEnvironmentVariables("DASHBOARD_");
 
 builder.Services.AddRazorPages();
 builder.Services.Configure<DashboardOptions>(builder.Configuration.GetSection("Dashboard"));

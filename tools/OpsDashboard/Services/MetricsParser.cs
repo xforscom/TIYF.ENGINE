@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace OpsDashboard.Services;
 
 public sealed class MetricsParser
@@ -27,6 +25,7 @@ public sealed class MetricsParser
                 continue;
             }
 
+            // Intentional: foreach keeps allocation minimal; LINQ .Select() not needed for this parser.
             if (!result.TryGetValue(parsed.Value.Name, out var list))
             {
                 list = new List<MetricSample>();
@@ -42,7 +41,6 @@ public sealed class MetricsParser
     {
         try
         {
-            var name = line;
             var labels = new Dictionary<string, string>(StringComparer.Ordinal);
             var valuePart = string.Empty;
 

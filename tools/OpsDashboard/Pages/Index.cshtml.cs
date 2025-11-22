@@ -32,7 +32,7 @@ public sealed class IndexModel : PageModel
     {
         if (string.IsNullOrWhiteSpace(_options.EngineBaseUrl))
         {
-            Warning = "DASHBOARD_ENGINE_BASE_URL is not configured. Set it to point at the engine.";
+            Warning = "DASHBOARD_EngineBaseUrl is not configured. Set it to point at the engine.";
             return;
         }
 
