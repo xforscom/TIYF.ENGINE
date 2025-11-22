@@ -35,7 +35,7 @@
 - **Relation to rails/promotion:** GVRS gate runs before risk rails; promotion remains shadow‑only and unaffected by GVRS blocks.
 
 ## 4) Risk & controls
-- **Modes:** `risk_rails_mode` supports disabled/telemetry/shadow/live. Live blocks entries; shadow/telemetry emit SOFT alerts only; disabled bypasses rails.  
+- **Modes:** `risk_rails_mode` supports disabled/telemetry/live (any other value maps to telemetry via `RiskRails.ResolveMode`). Live blocks entries; telemetry emits SOFT alerts only; disabled bypasses rails.  
 - **Gates:** Daily loss cap (account ccy), global max units, per‑symbol unit caps, cooldown. Broker guardrail (M11-B) duplicates broker caps and blocks in live mode.  
 - **Alerts:** SOFT for telemetry, HARD for live blocks (`ALERT_RISK_*_HARD`, broker caps `ALERT_RISK_BROKER_CAP_HARD`).  
 - **Config:** Risk config in sample configs (`sample-config.demo-oanda.json`) with live mode and broker caps; proof fixtures under `proof/`.  
