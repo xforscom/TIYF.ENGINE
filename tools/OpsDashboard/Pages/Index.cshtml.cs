@@ -27,8 +27,15 @@ public sealed class IndexModel : PageModel
     public string? HealthError { get; private set; }
     public string? MetricsRaw { get; private set; }
     public string? MetricsError { get; private set; }
+    public HealthSnapshot? HealthSnapshot { get; private set; }
+    public DateTime LastUpdatedUtc { get; private set; }
+    public int RefreshSeconds { get; private set; }
+    public IReadOnlyDictionary<string, List<MetricSample>> ParsedMetrics { get; private set; } =
+        new Dictionary<string, List<MetricSample>>(StringComparer.Ordinal);
+    public string SummaryStatus { get; private set; } = "Unknown";
+    public string SummaryBadgeClass { get; private set; } = "secondary";
 
-    public async Task OnGetAsync()
+    public async Task OnGetAsync(int? refresh = null)
     {
         if (string.IsNullOrWhiteSpace(_options.EngineBaseUrl))
         {
@@ -36,10 +43,15 @@ public sealed class IndexModel : PageModel
             return;
         }
 
+        RefreshSeconds = refresh.GetValueOrDefault(30);
+        LastUpdatedUtc = DateTime.UtcNow;
+
         var health = await _healthClient.GetHealthAsync(HttpContext.RequestAborted).ConfigureAwait(false);
         if (health.Success && health.Raw is not null && health.Document is not null)
         {
             HealthJson = JsonSerializer.Serialize(health.Document, new JsonSerializerOptions { WriteIndented = true });
+            HealthSnapshot = HealthSnapshot.FromJson(health.Document);
+            (SummaryStatus, SummaryBadgeClass) = HealthSnapshot.EvaluateStatus();
         }
         else
         {
@@ -50,6 +62,7 @@ public sealed class IndexModel : PageModel
         if (metrics.Success)
         {
             MetricsRaw = metrics.Text;
+            ParsedMetrics = new MetricsParser().Parse(metrics.Text);
         }
         else
         {

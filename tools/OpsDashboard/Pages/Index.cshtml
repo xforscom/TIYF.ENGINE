@@ -15,33 +15,121 @@
 {
     <div class="alert alert-warning">@Model.Warning</div>
 }
+else
+{
+    <div class="d-flex align-items-center gap-3 mb-3">
+        <span class="badge bg-@Model.SummaryBadgeClass">@Model.SummaryStatus</span>
+        <span class="text-muted">Last updated: @Model.LastUpdatedUtc.ToString("u")</span>
+        <form method="get" class="d-inline-flex align-items-center gap-2">
+            <label class="form-label m-0" for="refresh">Auto-refresh (s)</label>
+            <input type="number" min="0" class="form-control form-control-sm" style="width:90px" id="refresh" name="refresh" value="@Model.RefreshSeconds" />
+            <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+        </form>
+        <form method="get" class="d-inline">
+            <button type="submit" class="btn btn-outline-secondary btn-sm">Refresh now</button>
+        </form>
+    </div>
+    @if (Model.RefreshSeconds > 0)
+    {
+        <meta http-equiv="refresh" content="@Model.RefreshSeconds" />
+    }
+}
 
-<form method="get">
-    <button type="submit" class="btn btn-primary">Refresh</button>
-</form>
+@if (Model.HealthSnapshot is not null)
+{
+    <div class="row g-3">
+        <div class="col-md-6">
+            <div class="card shadow-sm">
+                <div class="card-header">Engine Status</div>
+                <div class="card-body">
+                    <dl class="row">
+                        <dt class="col-5">Adapter</dt><dd class="col-7">@Model.HealthSnapshot.Adapter</dd>
+                        <dt class="col-5">Connected</dt><dd class="col-7">@Model.HealthSnapshot.Connected</dd>
+                        <dt class="col-5">Heartbeat age (s)</dt><dd class="col-7">@Model.HealthSnapshot.HeartbeatAgeSeconds?.ToString("0.0") ?? "n/a"</dd>
+                        <dt class="col-5">Stream connected</dt><dd class="col-7">@Model.HealthSnapshot.StreamConnected</dd>
+                        <dt class="col-5">Stream heartbeat age (s)</dt><dd class="col-7">@Model.HealthSnapshot.StreamHeartbeatAgeSeconds?.ToString("0.0") ?? "n/a"</dd>
+                        <dt class="col-5">Bar lag (ms)</dt><dd class="col-7">@Model.HealthSnapshot.BarLagMs?.ToString("0") ?? "n/a"</dd>
+                        <dt class="col-5">Open/Active</dt><dd class="col-7">@Model.HealthSnapshot.OpenPositions / @Model.HealthSnapshot.ActiveOrders</dd>
+                        <dt class="col-5">GVRS bucket</dt><dd class="col-7">@Model.HealthSnapshot.GvrsBucket ?? "unknown"</dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card shadow-sm">
+                <div class="card-header">Config & Hashes</div>
+                <div class="card-body">
+                    <dl class="row">
+                        <dt class="col-5">config_id</dt><dd class="col-7">@Model.HealthSnapshot.ConfigId</dd>
+                        <dt class="col-5">Config path</dt><dd class="col-7">@Model.HealthSnapshot.ConfigPath</dd>
+                        <dt class="col-5">Config hash</dt><dd class="col-7"><small>@Model.HealthSnapshot.ConfigHash</small></dd>
+                        <dt class="col-5">Risk hash</dt><dd class="col-7"><small>@Model.HealthSnapshot.RiskConfigHash</small></dd>
+                        <dt class="col-5">Promotion hash</dt><dd class="col-7"><small>@Model.HealthSnapshot.PromotionConfigHash</small></dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+    </div>
 
-<h2>/health</h2>
+    <div class="row g-3 mt-1">
+        <div class="col-md-6">
+            <div class="card shadow-sm">
+                <div class="card-header">Risk & GVRS</div>
+                <div class="card-body">
+                    <dl class="row">
+                        <dt class="col-5">Risk blocks</dt><dd class="col-7">@Model.HealthSnapshot.RiskBlocksTotal</dd>
+                        <dt class="col-5">Risk throttles</dt><dd class="col-7">@Model.HealthSnapshot.RiskThrottlesTotal</dd>
+                        <dt class="col-5">Broker caps</dt><dd class="col-7">@Model.HealthSnapshot.BrokerCapBlocksTotal</dd>
+                        <dt class="col-5">GVRS gate blocks</dt><dd class="col-7">@Model.HealthSnapshot.GvrsGateBlocksTotal</dd>
+                        <dt class="col-5">Alerts total</dt><dd class="col-7">@Model.HealthSnapshot.AlertsTotal</dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card shadow-sm">
+                <div class="card-header">Promotion & Reconcile</div>
+                <div class="card-body">
+                    <dl class="row">
+                        <dt class="col-5">Promotion candidates</dt><dd class="col-7">@Model.HealthSnapshot.PromotionCandidates</dd>
+                        <dt class="col-5">Probation/min trades</dt><dd class="col-7">@Model.HealthSnapshot.PromotionProbationDays / @Model.HealthSnapshot.PromotionMinTrades</dd>
+                        <dt class="col-5">Reconcile status</dt><dd class="col-7">@Model.HealthSnapshot.ReconcileStatus ?? "n/a"</dd>
+                        <dt class="col-5">Reconcile mismatches</dt><dd class="col-7">@Model.HealthSnapshot.ReconcileMismatchesTotal</dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<h2 class="mt-4">/health (raw)</h2>
 @if (Model.HealthError is not null)
 {
     <div class="alert alert-danger">Error: @Model.HealthError</div>
 }
 else if (Model.HealthJson is not null)
 {
-    <pre>@Model.HealthJson</pre>
+    <details open>
+        <summary>Show/Hide</summary>
+        <pre>@Model.HealthJson</pre>
+    </details>
 }
 else
 {
     <p>No data.</p>
 }
 
-<h2>/metrics</h2>
+<h2>/metrics (raw)</h2>
 @if (Model.MetricsError is not null)
 {
     <div class="alert alert-danger">Error: @Model.MetricsError</div>
 }
 else if (Model.MetricsRaw is not null)
 {
-    <pre>@Model.MetricsRaw</pre>
+    <details open>
+        <summary>Show/Hide</summary>
+        <pre>@Model.MetricsRaw</pre>
+    </details>
 }
 else
 {
