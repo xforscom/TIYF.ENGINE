@@ -28,6 +28,7 @@ public sealed class HealthSnapshot
     public int? PromotionCandidates { get; init; }
     public int? PromotionProbationDays { get; init; }
     public int? PromotionMinTrades { get; init; }
+    public long? DecisionsTotal { get; init; }
     public string? ReconcileStatus { get; init; }
     public long? ReconcileMismatchesTotal { get; init; }
 
@@ -68,6 +69,7 @@ public sealed class HealthSnapshot
             PromotionCandidates = promotion.ValueKind == JsonValueKind.Object && promotion.TryGetProperty("candidates", out var pc) ? pc.GetArrayLength() : (int?)null,
             PromotionProbationDays = promotion.ValueKind == JsonValueKind.Object && promotion.TryGetProperty("probation_days", out var ppd) ? ppd.GetInt32() : (int?)null,
             PromotionMinTrades = promotion.ValueKind == JsonValueKind.Object && promotion.TryGetProperty("min_trades", out var pmt) ? pmt.GetInt32() : (int?)null,
+            DecisionsTotal = root.TryGetProperty("decisions_total", out var dt) ? dt.GetInt64() : (long?)null,
             ReconcileStatus = recon.ValueKind == JsonValueKind.Object && recon.TryGetProperty("last_status", out var rs) ? rs.GetString() : null,
             ReconcileMismatchesTotal = recon.ValueKind == JsonValueKind.Object && recon.TryGetProperty("mismatches_total", out var rmt) ? rmt.GetInt64() : (long?)null
         };
@@ -78,6 +80,11 @@ public sealed class HealthSnapshot
         if (!Connected || StreamConnected != 1)
         {
             return ("Down", "danger");
+        }
+        // If stream is connected but no decisions yet (e.g., market closed), treat as healthy.
+        if (DecisionsTotal is null or 0)
+        {
+            return ("Healthy", "success");
         }
         var heartbeatOk = HeartbeatAgeSeconds is null || HeartbeatAgeSeconds < 10;
         var barLagOk = BarLagMs is null || BarLagMs < 300000; // 5 minutes
