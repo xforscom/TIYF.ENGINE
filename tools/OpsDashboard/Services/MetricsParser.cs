@@ -41,6 +41,7 @@ public sealed class MetricsParser
     {
         try
         {
+            var name = string.Empty;
             var labels = new Dictionary<string, string>(StringComparer.Ordinal);
             var valuePart = string.Empty;
 
