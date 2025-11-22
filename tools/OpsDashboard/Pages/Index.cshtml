@@ -1,0 +1,49 @@
+@page
+@model OpsDashboard.Pages.IndexModel
+@{
+    ViewData["Title"] = "Ops Dashboard";
+}
+
+<h1>TIYF Engine – Ops Dashboard</h1>
+
+<p>
+    Engine base URL:
+    <strong>@Model.EngineBaseUrlDisplay</strong>
+</p>
+
+@if (!string.IsNullOrEmpty(Model.Warning))
+{
+    <div class="alert alert-warning">@Model.Warning</div>
+}
+
+<form method="get">
+    <button type="submit" class="btn btn-primary">Refresh</button>
+</form>
+
+<h2>/health</h2>
+@if (Model.HealthError is not null)
+{
+    <div class="alert alert-danger">Error: @Model.HealthError</div>
+}
+else if (Model.HealthJson is not null)
+{
+    <pre>@Model.HealthJson</pre>
+}
+else
+{
+    <p>No data.</p>
+}
+
+<h2>/metrics</h2>
+@if (Model.MetricsError is not null)
+{
+    <div class="alert alert-danger">Error: @Model.MetricsError</div>
+}
+else if (Model.MetricsRaw is not null)
+{
+    <pre>@Model.MetricsRaw</pre>
+}
+else
+{
+    <p>No data.</p>
+}
