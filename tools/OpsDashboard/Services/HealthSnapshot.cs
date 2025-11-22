@@ -81,11 +81,6 @@ public sealed class HealthSnapshot
         {
             return ("Down", "danger");
         }
-        // If stream is connected but no decisions yet (e.g., market closed), treat as healthy.
-        if (DecisionsTotal is null or 0)
-        {
-            return ("Healthy", "success");
-        }
         var heartbeatOk = HeartbeatAgeSeconds is null || HeartbeatAgeSeconds < 10;
         var barLagOk = BarLagMs is null || BarLagMs < 300000; // 5 minutes
         if (heartbeatOk && barLagOk)
