@@ -39,7 +39,7 @@ public sealed class HealthClient
             }
 
             var parsed = JsonDocument.Parse(json);
-            return HealthResult.Success(parsed, json);
+            return HealthResult.SuccessResult(parsed, json);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
@@ -63,7 +63,7 @@ public sealed class HealthResult
     public string? Raw { get; }
     public string? Error { get; }
 
-    public static HealthResult Success(JsonDocument document, string raw) =>
+    public static HealthResult SuccessResult(JsonDocument document, string raw) =>
         new(true, document, raw, null);
 
     public static HealthResult FromError(string message) =>

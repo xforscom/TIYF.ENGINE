@@ -34,7 +34,7 @@ public sealed class MetricsClient
             var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             return string.IsNullOrWhiteSpace(text)
                 ? MetricsResult.FromError("Empty /metrics payload")
-                : MetricsResult.Success(text);
+                : MetricsResult.SuccessResult(text);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
@@ -56,7 +56,7 @@ public sealed class MetricsResult
     public string? Text { get; }
     public string? Error { get; }
 
-    public static MetricsResult Success(string text) => new(true, text, null);
+    public static MetricsResult SuccessResult(string text) => new(true, text, null);
 
     public static MetricsResult FromError(string message) => new(false, null, message);
 
